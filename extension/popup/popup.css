@@ -1,0 +1,248 @@
+/* ==========================================================
+   법고개 (Bupgogae) — Popup Stylesheet
+   Dark theme, premium toggle switches, compact layout
+   ========================================================== */
+
+/* --- Reset & Base --- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 320px;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+/* --- Header --- */
+.popup-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px 12px;
+  background: linear-gradient(135deg, #16213e, #1a1a2e);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.popup-logo {
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.popup-title-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.popup-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f0f0f0;
+  letter-spacing: -0.3px;
+}
+
+.popup-subtitle {
+  font-size: 11px;
+  color: #8888aa;
+  margin-top: 1px;
+}
+
+/* --- Site Info --- */
+.popup-site-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.popup-site-label {
+  font-size: 11px;
+  color: #7777aa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.popup-site-host {
+  font-size: 12px;
+  font-weight: 600;
+  color: #a0a0cc;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Controls --- */
+.popup-controls {
+  padding: 6px 18px 2px;
+}
+
+.popup-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  transition: opacity 0.2s ease;
+}
+
+.popup-toggle-row.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.popup-toggle-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.popup-toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.popup-toggle-desc {
+  font-size: 11px;
+  color: #7777aa;
+}
+
+.popup-divider {
+  border: none;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 0;
+}
+
+/* --- Toggle Switch --- */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  margin-left: 12px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #3a3a50;
+  border-radius: 24px;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 3px;
+  bottom: 3px;
+  background: #888;
+  border-radius: 50%;
+  transition: transform 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Checked state — green glow */
+.toggle-switch input:checked + .toggle-slider {
+  background: #22c55e;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.3);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Focus ring */
+.toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid #5588ff;
+  outline-offset: 2px;
+}
+
+/* --- Footer --- */
+.popup-footer {
+  padding: 10px 18px 14px;
+  text-align: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.popup-status {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: color 0.2s ease;
+}
+
+.popup-status.active {
+  color: #22c55e;
+}
+
+.popup-status.inactive {
+  color: #ef4444;
+}
+
+.popup-db-date {
+  display: block;
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  color: #666688;
+  letter-spacing: 0.2px;
+}
+
+.popup-db-count {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  color: #666688;
+  letter-spacing: 0.2px;
+}
+
+.popup-contact {
+  display: block;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  color: #555577;
+}
+
+.popup-contact a {
+  color: #7777bb;
+  text-decoration: none;
+}
+
+.popup-contact a:hover {
+  color: #9999dd;
+  text-decoration: underline;
+}
+
+/* --- Unsupported site row --- */
+.popup-toggle-row.unsupported .popup-toggle-label {
+  color: #666;
+}
+
+.popup-toggle-row.unsupported .popup-toggle-desc {
+  color: #555;
+}

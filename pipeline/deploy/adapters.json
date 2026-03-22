@@ -1,0 +1,52 @@
+{
+  "version": "2026-03-22",
+  "adapters": {
+    "gemini": {
+      "responseSelectors": [
+        "message-content",
+        ".model-response-text",
+        ".response-container",
+        ".markdown-main-panel",
+        "[data-message-author-role=\"model\"]"
+      ]
+    },
+    "chatgpt": {
+      "responseSelectors": [
+        "div[data-message-author-role=\"assistant\"] .markdown",
+        "div[data-message-author-role=\"assistant\"]",
+        ".markdown.prose"
+      ],
+      "streamingIndicator": ".result-streaming"
+    },
+    "claude": {
+      "responseSelectors": [
+        "[data-testid=\"chat-message-content\"]",
+        ".font-claude-message",
+        "[data-testid=\"conversation-turn\"] .prose",
+        "div.prose"
+      ]
+    },
+    "copilot": {
+      "responseSelectors": [
+        "[class*=\"group/assistant\"]",
+        "[class*=\"prose\"]",
+        "[class*=\"whitespace-pre-wrap\"]",
+        "[class*=\"space-y-\"] > div.relative"
+      ]
+    },
+    "perplexity": {
+      "responseSelectors": [
+        ".prose",
+        ".prose:last-of-type"
+      ]
+    },
+    "grok": {
+      "responseSelectors": [
+        ".markdown",
+        ".prose",
+        "[class*=\"message\"] [class*=\"content\"]",
+        "[class*=\"response\"]"
+      ]
+    }
+  }
+}

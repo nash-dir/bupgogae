@@ -1,0 +1,58 @@
+# ===== Docker (NAS 인프라 경로 포함) =====
+docker-compose*.yml
+Dockerfile*
+
+# ===== 개발 환경 =====
+venv/
+__pycache__/
+.env
+.env.*
+.DS_Store
+Thumbs.db
+*.pyc
+
+# ===== Node =====
+node_modules/
+package-lock.json
+
+# ===== 스크랩/실험 (전체 제외) =====
+scrap/
+
+# ===== 레거시 코드 =====
+legacy/
+
+# ===== Backfill 출력 =====
+backfill/
+caseDB_*
+
+# ===== 내부 문서/리포트 =====
+report/
+
+# ===== 테스트 스냅샷 =====
+test/
+
+# ===== 민감 파일 =====
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ===== 큰 바이너리/DB =====
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+extension/data/db.json
+
+# ===== 빌드 산출물 =====
+dist/
+build/
+*.zip
+*.tar
+*.vsix
+
+# ===== 임시 파일 =====
+*.csv
+*.log
+*.tmp

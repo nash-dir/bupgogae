@@ -1,0 +1,69 @@
+{
+  "manifest_version": 3,
+  "name": "법고개 (Bupgogae)",
+  "version": "0.4.0",
+  "description": "LLM 환각 판례를 실시간으로 탐지합니다",
+  "permissions": ["alarms", "storage", "unlimitedStorage", "tabs"],
+  "host_permissions": [
+    "https://gemini.google.com/*",
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://copilot.microsoft.com/*",
+    "https://www.perplexity.ai/*",
+    "https://perplexity.ai/*",
+    "https://grok.com/*",
+    "https://api.bup.live/*"
+  ],
+  "background": { "service_worker": "background/db-sync.js" },
+  "content_scripts": [{
+    "matches": [
+      "https://gemini.google.com/*",
+      "https://chatgpt.com/*",
+      "https://claude.ai/*",
+      "https://copilot.microsoft.com/*",
+      "https://www.perplexity.ai/*",
+      "https://perplexity.ai/*",
+      "https://grok.com/*"
+    ],
+    "js": [
+      "content/adapters/base-adapter.js",
+      "content/adapters/gemini-adapter.js",
+      "content/adapters/chatgpt-adapter.js",
+      "content/adapters/claude-adapter.js",
+      "content/adapters/copilot-adapter.js",
+      "content/adapters/perplexity-adapter.js",
+      "content/adapters/grok-adapter.js",
+      "content/adapters/registry.js",
+      "content/case-regex.js",
+      "content/precedent-badge.js",
+      "content/bupgogae-content.js"
+    ],
+    "run_at": "document_idle"
+  }],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "법고개 (Bupgogae)"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [{
+    "resources": ["data/bupgogae_meta.json", "data/db.json"],
+    "matches": [
+      "https://gemini.google.com/*",
+      "https://chatgpt.com/*",
+      "https://claude.ai/*",
+      "https://copilot.microsoft.com/*",
+      "https://www.perplexity.ai/*",
+      "https://perplexity.ai/*",
+      "https://grok.com/*"
+    ]
+  }]
+}

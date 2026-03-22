@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>법고개 (Bupgogae)</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- 헤더 -->
+  <header class="popup-header">
+    <img src="../icons/icon48.png" alt="법고개" class="popup-logo" width="28" height="28">
+    <div class="popup-title-group">
+      <h1 class="popup-title">법고개</h1>
+      <span class="popup-subtitle">LLM 환각 판례 탐지기</span>
+    </div>
+  </header>
+
+  <!-- 현재 사이트 정보 -->
+  <div class="popup-site-info">
+    <span class="popup-site-label">현재 사이트</span>
+    <span class="popup-site-host" id="currentHost">—</span>
+  </div>
+
+  <!-- 토글 컨트롤 -->
+  <div class="popup-controls">
+    <!-- 사이트별 토글 -->
+    <div class="popup-toggle-row" id="siteToggleRow">
+      <div class="popup-toggle-info">
+        <span class="popup-toggle-label">이 사이트에서 적용</span>
+        <span class="popup-toggle-desc" id="siteToggleDesc">현재 사이트에서 판례 검증 활성</span>
+      </div>
+      <label class="toggle-switch" for="siteToggle">
+        <input type="checkbox" id="siteToggle" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <hr class="popup-divider">
+
+    <!-- 전체 토글 -->
+    <div class="popup-toggle-row">
+      <div class="popup-toggle-info">
+        <span class="popup-toggle-label">모든 사이트에서 적용</span>
+        <span class="popup-toggle-desc" id="globalToggleDesc">모든 사이트에서 판례 검증 활성</span>
+      </div>
+      <label class="toggle-switch" for="globalToggle">
+        <input type="checkbox" id="globalToggle" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <!-- 푸터 상태 -->
+  <footer class="popup-footer">
+    <span class="popup-status" id="statusText">활성 상태</span>
+    <span class="popup-db-date" id="dbDate">DB 일자 : —</span>
+    <span class="popup-db-count" id="dbCount">판례 수 : —</span>
+    <span class="popup-contact">개발자 연락처: <a href="mailto:nashdir.dev@gmail.com" id="contactLink">nashdir.dev@gmail.com</a></span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

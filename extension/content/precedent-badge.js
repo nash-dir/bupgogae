@@ -341,7 +341,8 @@ const TOOLTIP_BUILDERS = {
    */
   green(caseName, fullCitation, serialNumber) {
     const frag = document.createDocumentFragment();
-    frag.appendChild(_el('span', 'bgae-tooltip-title', '공개 판례 DB에서 확인됨'));
+    frag.appendChild(_el('span', 'bgae-tooltip-title', '공개 DB에 존재하는 사건번호입니다.'));
+    frag.appendChild(_el('span', 'bgae-tooltip-body', '인용 내용의 정확성은 보장되지 않으니, 원문 확인이 반드시 필요합니다.'));
     if (fullCitation) {
       frag.appendChild(_el('span', 'bgae-tooltip-citation', fullCitation));
     }
@@ -349,7 +350,7 @@ const TOOLTIP_BUILDERS = {
       frag.appendChild(_el('span', 'bgae-tooltip-body', `사건명: ${caseName}`));
     }
     // 클릭 가능한 링크 — serial 기반 판례 상세 페이지 (API key 불필요)
-    const link = _el('a', 'bgae-tooltip-link', '법제처 원문 조회');
+    const link = _el('a', 'bgae-tooltip-link', '법제처 사이트 원문 조회');
     link.href = `https://www.law.go.kr/precInfoP.do?precSeq=${serialNumber}`;
     link.target = '_blank';
     link.rel = 'noopener';

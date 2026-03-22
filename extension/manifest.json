@@ -55,7 +55,7 @@
     "128": "icons/icon128.png"
   },
   "web_accessible_resources": [{
-    "resources": ["data/bupgogae_meta.json", "data/db.json"],
+    "resources": ["data/bupgogae_meta.json", "data/db.json", "data/adapters.json"],
     "matches": [
       "https://gemini.google.com/*",
       "https://chatgpt.com/*",

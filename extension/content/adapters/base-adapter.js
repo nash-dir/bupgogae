@@ -4,8 +4,9 @@
  * 각 LLM 채팅 서비스(Gemini, ChatGPT, Claude, Copilot 등)의
  * DOM 구조 차이를 추상화하는 어댑터 패턴의 기본 인터페이스.
  *
- * 사이트별 구현체는 이 클래스를 상속하여 getResponseSelectors()만 오버라이드.
- * 공통 로직(findResponseContainers, isProcessed 등)은 여기서 제공.
+ * 사이트별 구현체는 이 클래스를 상속하여 siteId/displayName만 정의.
+ * 셀렉터는 adapters.json(Single Source of Truth)에서 로드.
+ * 공통 로직(findResponseContainers, isStreaming 등)은 여기서 제공.
  */
 
 class SiteAdapter {
@@ -15,6 +16,19 @@ class SiteAdapter {
    * @type {Object|null}
    */
   _remoteConfig = null;
+
+  /**
+   * 번들 JSON에서 로드된 셀렉터.
+   * initAdapters() 시 extension/data/adapters.json에서 주입됨.
+   * @type {string[]|null}
+   */
+  _bundledSelectors = null;
+
+  /**
+   * 번들 JSON에서 로드된 streamingIndicator.
+   * @type {string|null}
+   */
+  _bundledStreamingIndicator = null;
 
   /**
    * 사이트 식별자 (예: 'gemini', 'chatgpt', 'claude', 'copilot').
@@ -47,24 +61,38 @@ class SiteAdapter {
   }
 
   /**
-   * 해당 사이트의 AI 응답 컨테이너 CSS 셀렉터 목록.
-   * 우선순위 순서대로 반환. 첫 번째 매칭 셀렉터를 사용.
-   * ※ 자식 클래스에서 이 메서드를 오버라이드 (하드코딩 셀렉터).
-   * @returns {string[]}
+   * 번들 JSON의 셀렉터를 어댑터에 주입.
+   * @param {Object} siteConfig - { responseSelectors: [...], streamingIndicator?: "..." }
    */
-  getResponseSelectors() {
-    throw new Error('[SiteAdapter] getResponseSelectors() not implemented');
+  setBundledConfig(siteConfig) {
+    if (siteConfig && Array.isArray(siteConfig.responseSelectors)) {
+      this._bundledSelectors = siteConfig.responseSelectors;
+    }
+    if (siteConfig && siteConfig.streamingIndicator) {
+      this._bundledStreamingIndicator = siteConfig.streamingIndicator;
+    }
   }
 
   /**
-   * 셀렉터 해석 래퍼 — Remote Config 우선, 하드코딩 Fallback.
+   * 해당 사이트의 AI 응답 컨테이너 CSS 셀렉터 목록 (하드코딩 폴백).
+   * adapters.json 통합 후, 자식 클래스에서 오버라이드할 필요 없음.
+   * 번들 JSON이 로드되지 못한 극단적 폴백 상황에서만 사용됨.
+   * @returns {string[]}
+   */
+  getResponseSelectors() {
+    return [];
+  }
+
+  /**
+   * 셀렉터 해석 래퍼 — 3단 우선순위 체인.
    *
-   * 우선순위 체인:
-   *   1. Remote Config (chrome.storage.local에서 로드된 원격 셀렉터)
-   *   2. 하드코딩 셀렉터 (자식 클래스의 getResponseSelectors())
+   * 우선순위:
+   *   1. Remote Config (chrome.storage.local, 원격 갱신)
+   *   2. 번들 JSON   (extension/data/adapters.json, 설치 시 포함)
+   *   3. 하드코딩     (자식 getResponseSelectors(), 극단적 폴백)
    *
-   * 이 메서드를 도입함으로써, 6개 자식 어댑터 클래스의
-   * getResponseSelectors()를 일절 수정하지 않아도 됨.
+   * adapters.json이 Single Source of Truth.
+   * Remote Config는 긴급 핫픽스용, 하드코딩은 최후 방어선.
    *
    * @returns {string[]}
    */
@@ -76,7 +104,12 @@ class SiteAdapter {
       return this._remoteConfig.responseSelectors;
     }
 
-    // 2순위: 하드코딩 셀렉터 (Fallback — Batteries included)
+    // 2순위: 번들 JSON (adapters.json)
+    if (this._bundledSelectors && this._bundledSelectors.length > 0) {
+      return this._bundledSelectors;
+    }
+
+    // 3순위: 하드코딩 셀렉터 (극단적 폴백)
     return this.getResponseSelectors();
   }
 
@@ -103,11 +136,25 @@ class SiteAdapter {
   /**
    * 컨테이너가 현재 스트리밍(응답 생성 중) 상태인지 판별.
    * 스트리밍 중에는 partial text → 완료 후 재스캔이 효율적일 수 있음.
-   * 기본: false (스트리밍 감지 비대응).
+   *
+   * 기본: adapters.json의 streamingIndicator 셀렉터를 사용.
+   * 자식 클래스에서 복잡한 로직이 필요하면 오버라이드 가능.
+   *
    * @param {Element} container
    * @returns {boolean}
    */
   isStreaming(container) {
+    // Remote Config → 번들 JSON 순으로 streamingIndicator 확인
+    const indicator =
+      (this._remoteConfig && this._remoteConfig.streamingIndicator) ||
+      this._bundledStreamingIndicator;
+
+    if (indicator) {
+      return !!(
+        container.classList.contains(indicator.replace(/^\./,'')) ||
+        container.closest(indicator)
+      );
+    }
     return false;
   }
 

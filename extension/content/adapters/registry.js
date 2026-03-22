@@ -36,6 +36,41 @@ const ADAPTER_MAP = {
 let _cachedRemoteConfig = null;
 
 /**
+ * 캐시된 번들 Config (세션 중 재사용).
+ * @type {Object|null}
+ */
+let _cachedBundledConfig = null;
+
+/**
+ * extension/data/adapters.json에서 번들 설정을 로드.
+ * 확장 프로그램에 동봉된 셀렉터 정의 파일 — Single Source of Truth.
+ *
+ * @returns {Promise<Object|null>} 번들 Config 객체 또는 null
+ */
+async function loadBundledConfig() {
+  if (_cachedBundledConfig) return _cachedBundledConfig;
+
+  try {
+    const url = chrome.runtime.getURL('data/adapters.json');
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const config = await response.json();
+
+    if (config && config.adapters) {
+      console.log(`[bupgogae] 번들 adapters.json 로드 완료 (ver=${config.version || '?'})`);
+      _cachedBundledConfig = config;
+      return config;
+    }
+
+    console.warn('[bupgogae] 번들 adapters.json: adapters 필드 없음');
+    return null;
+  } catch (err) {
+    console.warn('[bupgogae] 번들 adapters.json 로드 실패:', err.message);
+    return null;
+  }
+}
+
+/**
  * chrome.storage.local에서 원격 어댑터 설정을 비동기 로드.
  * Service Worker(db-sync.js)가 저장한 bupgogae_remote_adapters 키를 읽음.
  *
@@ -52,7 +87,7 @@ async function loadRemoteConfig() {
       return config;
     }
 
-    console.log('[bupgogae] Remote Config 없음 — 하드코딩 셀렉터 사용');
+    console.log('[bupgogae] Remote Config 없음 — 번들/하드코딩 셀렉터 사용');
     return null;
   } catch (err) {
     console.warn('[bupgogae] Remote Config 로드 실패:', err.message);
@@ -62,25 +97,31 @@ async function loadRemoteConfig() {
 
 /**
  * 현재 호스트명에 맞는 어댑터 인스턴스를 반환.
- * remoteConfig가 제공되면 어댑터에 주입 (resolveResponseSelectors()에서 활용).
+ * remoteConfig와 bundledConfig를 어댑터에 주입.
  *
  * @param {Object|null} [remoteConfig] - 원격 설정 객체 (없으면 캐시 사용)
+ * @param {Object|null} [bundledConfig] - 번들 설정 객체 (없으면 캐시 사용)
  * @returns {SiteAdapter|null} 미지원 사이트이면 null
  */
-function getAdapter(remoteConfig) {
+function getAdapter(remoteConfig, bundledConfig) {
   const hostname = location.hostname;
-  const config = remoteConfig || _cachedRemoteConfig;
+  const remote = remoteConfig || _cachedRemoteConfig;
+  const bundled = bundledConfig || _cachedBundledConfig;
 
   /**
-   * 어댑터 인스턴스 생성 + Remote Config 주입 헬퍼.
+   * 어댑터 인스턴스 생성 + Config 주입 헬퍼.
    * @param {Function} AdapterClass
    * @returns {SiteAdapter}
    */
   function createAndConfigure(AdapterClass) {
     const instance = new AdapterClass();
-    // Remote Config 주입 (setRemoteConfig는 base-adapter.js에서 제공)
-    if (config && typeof instance.setRemoteConfig === 'function') {
-      instance.setRemoteConfig(config);
+    // 번들 Config 주입 (2순위)
+    if (bundled && bundled.adapters && bundled.adapters[instance.siteId]) {
+      instance.setBundledConfig(bundled.adapters[instance.siteId]);
+    }
+    // Remote Config 주입 (1순위, setBundledConfig 후 호출)
+    if (remote && typeof instance.setRemoteConfig === 'function') {
+      instance.setRemoteConfig(remote);
     }
     return instance;
   }
@@ -111,14 +152,18 @@ function getAdapter(remoteConfig) {
 }
 
 /**
- * 비동기 어댑터 초기화 — Remote Config 로드 후 어댑터 반환.
+ * 비동기 어댑터 초기화 — 번들 JSON + Remote Config 로드 후 어댑터 반환.
  * Content Script 초기화(init())에서 사용하는 권장 진입점.
  *
  * @returns {Promise<SiteAdapter|null>}
  */
 async function initAdapters() {
-  const config = await loadRemoteConfig();
-  return getAdapter(config);
+  // 번들 JSON과 Remote Config를 병렬 로드
+  const [bundledConfig, remoteConfig] = await Promise.all([
+    loadBundledConfig(),
+    loadRemoteConfig(),
+  ]);
+  return getAdapter(remoteConfig, bundledConfig);
 }
 
 /**

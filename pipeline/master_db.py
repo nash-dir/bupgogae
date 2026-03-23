@@ -21,12 +21,14 @@ NAS에 유지되는 master.db를 관리한다.
 
 import json
 import os
+import re
 import sqlite3
 from collections import defaultdict
 from datetime import datetime
 
 from compress import (  # noqa: E402
-    compress_case_number, compress_case_name, compress_date, get_court_code,
+    compress_case_number, compress_tax_case_number,
+    compress_case_name, compress_date, get_court_code,
 )
 from api import clean_case_number  # noqa: E402
 
@@ -48,6 +50,28 @@ class MasterDB:
     CREATE INDEX IF NOT EXISTS idx_cases_inserted ON cases(inserted_at);
     """
 
+    KIPRIS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS kipris_cases (
+        serial        TEXT PRIMARY KEY,
+        case_name     TEXT,
+        case_number   TEXT,
+        decision_date TEXT,
+        trial_type    TEXT,
+        inserted_at   TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_kipris_date ON kipris_cases(decision_date);
+
+    CREATE TABLE IF NOT EXISTS kipris_backfill_log (
+        chunk_start    TEXT,
+        chunk_end      TEXT,
+        total_cnt      INTEGER DEFAULT 0,
+        pages_fetched  INTEGER DEFAULT 0,
+        is_completed   INTEGER DEFAULT 0,
+        updated_at     TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (chunk_start, chunk_end)
+    );
+    """
+
     def __init__(self, db_path: str):
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
@@ -55,6 +79,7 @@ class MasterDB:
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("PRAGMA synchronous=NORMAL;")
         self.conn.executescript(self.SCHEMA)
+        self.conn.executescript(self.KIPRIS_SCHEMA)
         self.conn.commit()
 
         # 블랙리스트 로드 (잘못된 레이블 serial)
@@ -186,7 +211,9 @@ class MasterDB:
                 skipped += 1
                 continue
 
-            serial = int(row["serial"]) if row["serial"] else 0
+            # serial: 숫자만이면 int, D/T prefix면 string 유지
+            raw_serial = row["serial"] or "0"
+            serial = int(raw_serial) if raw_serial.isdigit() else raw_serial
             court_code = get_court_code(row["court"])
             date_int = compress_date(row["date"])
             name_raw = compress_case_name(row["case_name"] or "")
@@ -205,10 +232,159 @@ class MasterDB:
         rows = self.get_all_cases()
         return self.compress_rows(rows)
 
+    def export_core(self) -> tuple[dict, int]:
+        """판례 + 헌재 레코드 → 압축 dict (조세심판 제외)."""
+        self.conn.row_factory = sqlite3.Row
+        cur = self.conn.execute(
+            "SELECT * FROM cases WHERE serial NOT LIKE 'T%' ORDER BY date"
+        )
+        rows = cur.fetchall()
+        self.conn.row_factory = None
+        return self.compress_rows(rows)
+
+    def export_tax(self) -> tuple[dict, int]:
+        """조세심판 레코드만 → 압축 dict (TX prefix 보장)."""
+        self.conn.row_factory = sqlite3.Row
+        cur = self.conn.execute(
+            "SELECT * FROM cases WHERE serial LIKE 'T%' ORDER BY date"
+        )
+        rows = cur.fetchall()
+        self.conn.row_factory = None
+        return self.compress_rows_tax(rows)
+
+    @staticmethod
+    def compress_rows_tax(rows) -> tuple[dict, int]:
+        """조세심판 전용 압축 — TX prefix + 한글 부호 보장."""
+        compressed = defaultdict(list)
+        skipped = 0
+
+        for row in rows:
+            key = compress_tax_case_number(row["case_number_clean"])
+            if not key:
+                skipped += 1
+                continue
+
+            raw_serial = row["serial"] or "0"
+            serial = int(raw_serial) if raw_serial.isdigit() else raw_serial
+            court_code = get_court_code(row["court"])
+            date_int = compress_date(row["date"])
+            name_raw = compress_case_name(row["case_name"] or "")
+
+            compressed[key].append([serial, court_code, date_int, name_raw])
+
+        return dict(compressed), skipped
+
     def export_new(self, since_iso: str) -> tuple[dict, int]:
         """이번 실행에서 추가된 레코드만 → 압축 dict."""
         rows = self.get_new_since(since_iso)
         return self.compress_rows(rows)
+
+    # ════════════════════════════════════════════════
+    # KIPRIS 특허심판원
+    # ════════════════════════════════════════════════
+
+    def upsert_kipris(self, items: list[dict]) -> tuple[int, int]:
+        """KIPRIS 심판 아이템 UPSERT. (inserted, updated) 반환."""
+        cur = self.conn.cursor()
+        inserted = 0
+        updated = 0
+
+        for item in items:
+            serial = item.get("serial", "")
+            if not serial:
+                continue
+
+            existing = cur.execute(
+                "SELECT serial FROM kipris_cases WHERE serial = ?",
+                (serial,),
+            ).fetchone()
+
+            if existing:
+                cur.execute("""
+                    UPDATE kipris_cases SET
+                        case_name = ?, case_number = ?,
+                        decision_date = ?, trial_type = ?
+                    WHERE serial = ?
+                """, (
+                    item.get("case_name", ""),
+                    item.get("case_number", ""),
+                    item.get("decision_date", ""),
+                    item.get("trial_type", ""),
+                    serial,
+                ))
+                updated += 1
+            else:
+                cur.execute("""
+                    INSERT INTO kipris_cases
+                        (serial, case_name, case_number,
+                         decision_date, trial_type)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    serial,
+                    item.get("case_name", ""),
+                    item.get("case_number", ""),
+                    item.get("decision_date", ""),
+                    item.get("trial_type", ""),
+                ))
+                inserted += 1
+
+        self.conn.commit()
+        return inserted, updated
+
+    def kipris_count(self) -> int:
+        """KIPRIS 특허심판 전체 레코드 수."""
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM kipris_cases"
+        ).fetchone()[0]
+
+    def export_kipris(self) -> tuple[dict, int]:
+        """KIPRIS 특허심판 레코드 → 압축 dict.
+
+        키 형식: KP{연도2자리}{심판종류}{일련번호}
+        예: "2023당1234" → "KP23당1234"
+        """
+        cur = self.conn.execute(
+            "SELECT serial, case_name, case_number, decision_date, trial_type "
+            "FROM kipris_cases ORDER BY decision_date"
+        )
+        compressed = {}
+        skipped = 0
+
+        for serial, case_name, case_number, decision_date, trial_type in cur:
+            if not case_number:
+                skipped += 1
+                continue
+
+            # 심판번호 → KP + 2자리연도 + 나머지 (프론트엔드 compressCaseKey와 일치)
+            # 예: "2023당1234" → "KP23당1234"
+            _m = re.match(r'^(\d{2,4})(.+)$', case_number)
+            if _m:
+                year_2d = _m.group(1)[-2:]
+                key = f"KP{year_2d}{_m.group(2)}"
+            else:
+                key = f"KP{case_number}"
+
+            # 날짜 → 6자리 정수 (YYMMDD)
+            date_int = 0
+            if decision_date:
+                clean_d = decision_date.replace("-", "").replace(".", "").replace("/", "")
+                if len(clean_d) >= 8:
+                    try:
+                        y = int(clean_d[:4]) % 100
+                        m = int(clean_d[4:6])
+                        d = int(clean_d[6:8])
+                        date_int = y * 10000 + m * 100 + d
+                    except ValueError:
+                        pass
+
+            entry = [serial, trial_type or "", date_int, case_name or ""]
+
+            if key not in compressed:
+                compressed[key] = [entry]
+            else:
+                compressed[key].append(entry)
+
+        return compressed, skipped
 
     # ════════════════════════════════════════════════
     # 유틸
@@ -254,6 +430,23 @@ if __name__ == "__main__":
         compressed, skipped = db.export_all()
         print(f"Compressed keys: {len(compressed)}, Skipped: {skipped}")
         print(json.dumps(compressed, ensure_ascii=False, indent=2))
+
+        # KIPRIS 테이블 테스트
+        test_kipris = [
+            {"serial": "2023당1234", "case_name": "거절결정취소",
+             "case_number": "2023당1234", "decision_date": "20230915",
+             "trial_type": "거절결정"},
+            {"serial": "2022원5678", "case_name": "무효심판",
+             "case_number": "2022원5678", "decision_date": "20220310",
+             "trial_type": "무효"},
+        ]
+        k_ins, k_upd = db.upsert_kipris(test_kipris)
+        print(f"KIPRIS Inserted: {k_ins}, Updated: {k_upd}")
+        print(f"KIPRIS Count: {db.kipris_count()}")
+
+        k_data, k_skip = db.export_kipris()
+        print(f"KIPRIS Compressed keys: {len(k_data)}, Skipped: {k_skip}")
+        print(json.dumps(k_data, ensure_ascii=False, indent=2))
 
         db.close()
         os.remove(test_db)

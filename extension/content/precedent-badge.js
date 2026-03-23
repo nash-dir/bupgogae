@@ -268,12 +268,16 @@ function decodeCourtName(courtCode, courtCodeMap) {
 }
 
 /**
- * 사건부호로 판결/결정 유형 판별.
+ * 사건부호로 판결/결정/심결 유형 판별.
  * 결정 사건부호: 마,모,후,브,스,즈,초,초기,비,인,그,르,슈,즈,카,타,파,하 등
- * @param {string} caseCode - 한글 사건부호 (예: "다", "마", "후")
- * @returns {string} "판결" 또는 "결정"
+ * @param {string} caseCode - 한글 사건부호 (예: "다", "마", "후", "당")
+ * @param {string} [caseType] - 'court' | 'constitutional' | 'tax' | 'patent'
+ * @returns {string} "판결", "결정", 또는 "심결"
  */
-function getDecisionType(caseCode) {
+function getDecisionType(caseCode, caseType) {
+  // 특허심판원: 모두 "심결"
+  if (caseType === 'patent') return '심결';
+
   // 결정 유형 사건부호 (1글자 + 2글자)
   const decisionCodes = new Set([
     '마', '모', '후', '브', '스', '즈', '쿠', '터', '토',
@@ -281,6 +285,8 @@ function getDecisionType(caseCode) {
     '초기', '보기', '카기',
     // 재심 결정
     '재마', '재모', '재후',
+    // 헌법재판소 (모두 결정)
+    '헌가', '헌나', '헌다', '헌라', '헌마', '헌바', '헌사', '헌아',
   ]);
 
   if (!caseCode) return '판결';
@@ -292,20 +298,24 @@ function getDecisionType(caseCode) {
  * full citation 포맷 생성.
  * "대법원 2015. 1. 15. 선고 2015다6302 판결"
  * "대법원 1976. 4. 28.자 75모81 결정"
+ * "특허심판원 2023. 9. 15. 2023당1234 심결"
  *
  * @param {string} courtName
  * @param {string} dateStr - formatDecisionDate 결과
  * @param {string} caseNumber - 원본 사건번호 (예: "2015다6302")
- * @param {string} caseCode - 한글 사건부호 (예: "다", "마")
+ * @param {string} caseCode - 한글 사건부호 (예: "다", "마", "당")
+ * @param {string} [caseType] - 'court' | 'constitutional' | 'tax' | 'patent'
  * @returns {string}
  */
-function buildFullCitation(courtName, dateStr, caseNumber, caseCode) {
-  const type = getDecisionType(caseCode);
-  const connector = type === '결정' ? '자' : '선고';
+function buildFullCitation(courtName, dateStr, caseNumber, caseCode, caseType) {
+  const type = getDecisionType(caseCode, caseType);
+  // 심결(특허심판)은 '선고'/'자' 대신 날짜만 표시
+  const connector = type === '심결' ? '' : (type === '결정' ? '자' : '선고');
 
   let parts = [];
   if (courtName) parts.push(courtName);
-  if (dateStr) parts.push(`${dateStr} ${connector}`);
+  if (dateStr && connector) parts.push(`${dateStr} ${connector}`);
+  else if (dateStr) parts.push(dateStr);
   parts.push(caseNumber);
   parts.push(type);
 
@@ -336,10 +346,11 @@ const TOOLTIP_BUILDERS = {
    * Green 툴팁 DOM 조립.
    * @param {string} caseName
    * @param {string} fullCitation
-   * @param {number} serialNumber
+   * @param {number|string} serialNumber
+   * @param {string} [caseType] - 'court' | 'constitutional' | 'tax' | 'patent'
    * @returns {DocumentFragment}
    */
-  green(caseName, fullCitation, serialNumber) {
+  green(caseName, fullCitation, serialNumber, caseType) {
     const frag = document.createDocumentFragment();
     frag.appendChild(_el('span', 'bgae-tooltip-title', '공개 DB에 존재하는 사건번호입니다.'));
     frag.appendChild(_el('span', 'bgae-tooltip-body', '인용 내용의 정확성은 보장되지 않으니, 원문 확인이 반드시 필요합니다.'));
@@ -349,9 +360,22 @@ const TOOLTIP_BUILDERS = {
     if (caseName) {
       frag.appendChild(_el('span', 'bgae-tooltip-body', `사건명: ${caseName}`));
     }
-    // 클릭 가능한 링크 — serial 기반 판례 상세 페이지 (API key 불필요)
-    const link = _el('a', 'bgae-tooltip-link', '법제처 사이트 원문 조회');
-    link.href = `https://www.law.go.kr/precInfoP.do?precSeq=${serialNumber}`;
+    // 클릭 가능한 링크 — serial 기반 상세 페이지 (API key 불필요)
+    // D prefix: 헌재결정례, T prefix: 조세심판원, 특허: KIPRIS, 숫자만: 판례
+    const sn = String(serialNumber);
+    const isPatent = caseType === 'patent';
+    const link = _el('a', 'bgae-tooltip-link',
+      isPatent ? 'KIPRIS 특허심판 조회' : '법제처 사이트 원문 조회');
+    if (isPatent) {
+      // KIPRIS Plus 심판정보 검색 (개별 심결 직링크 미제공)
+      link.href = `https://www.kipris.or.kr/`;
+    } else if (sn.startsWith('D')) {
+      link.href = `https://www.law.go.kr/detcInfoP.do?mode=1&detcSeq=${sn.slice(1)}`;
+    } else if (sn.startsWith('T')) {
+      link.href = `https://www.law.go.kr/DRF/lawService.do?target=ttSpecialDecc&ID=${sn.slice(1)}&type=HTML`;
+    } else {
+      link.href = `https://www.law.go.kr/precInfoP.do?precSeq=${sn}`;
+    }
     link.target = '_blank';
     link.rel = 'noopener';
     frag.appendChild(link);
@@ -502,13 +526,16 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   // 툴팁 내용 (DOM API로 조립 — innerHTML 미사용)
   switch (level) {
     case 'green': {
-      const courtName = decodeCourtName(options.courtCode, options.courtCodeMap);
+      // 특허심판원은 courtCode가 없으므로 caseType으로 기관명 결정
+      const courtName = options.caseType === 'patent'
+        ? '특허심판원'
+        : decodeCourtName(options.courtCode, options.courtCodeMap);
       const dateStr = formatDecisionDate(options.dateInt);
       const fullCitation = buildFullCitation(
-        courtName, dateStr, precedentString, options.caseCode
+        courtName, dateStr, precedentString, options.caseCode, options.caseType
       );
       tooltip.appendChild(TOOLTIP_BUILDERS.green(
-        options.caseName || '', fullCitation, options.serialNumber
+        options.caseName || '', fullCitation, options.serialNumber, options.caseType
       ));
       break;
     }

@@ -19,6 +19,8 @@
 // 상수
 // ============================================================
 const DB_URL = 'https://api.bup.live/bupgogae/db.json.gz';
+const DB_TAX_URL = 'https://api.bup.live/bupgogae/db_tax.json.gz';  // DLC: 조세심판
+const DB_PATENT_URL = 'https://api.bup.live/bupgogae/db_patent.json.gz';  // DLC: 특허심판
 const ADAPTERS_URL = 'https://api.bup.live/bupgogae/adapters.json'; // 원격 어댑터 셀렉터 설정
 const BUNDLED_DB_URL = 'data/db.json'; // 로컬 디버깅용 폴백
 const DB_NAME = 'bupgogae';
@@ -209,6 +211,12 @@ async function syncDatabase() {
     await updateMetadata(db, version, data.total || count);
     await chrome.storage.local.set({ bupgogae_etag: etag });
 
+    // ── Step 5: court_code_map 저장 (DB 페이로드에 포함된 경우) ──
+    if (data.court_code_map) {
+      await chrome.storage.local.set({ bupgogae_court_map: data.court_code_map });
+      console.log(`[bupgogae] court_code_map 저장: ${Object.keys(data.court_code_map).length}개 법원`);
+    }
+
     console.log(`[bupgogae] ✅ 동기화 완료: ${count}건 교체, ver=${version}`);
 
   } catch (err) {
@@ -219,6 +227,10 @@ async function syncDatabase() {
 
   // ── 어댑터 원격 설정 동기화 (DB 동기화와 독립적으로 실행) ──
   await fetchAdaptersConfig();
+
+  // ── DLC 동기화 (조세심판 + 특허심판) ──
+  await syncTaxDLCIfEnabled();
+  await syncPatentDLCIfEnabled();
 }
 
 // ============================================================
@@ -592,6 +604,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ enabled: true, error: err.message }));
     return true;
   }
+
+  // ── DLC 다운로드 요청 (Popup에서 토글 ON 시) ──
+  if (message.type === 'DOWNLOAD_DLC') {
+    if (message.dlc === 'tax') {
+      console.log('[bupgogae] DLC 다운로드 요청: 조세심판');
+      syncTaxDLC()
+        .then(() => sendResponse({ success: true }))
+        .catch(err => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+    if (message.dlc === 'patent') {
+      console.log('[bupgogae] DLC 다운로드 요청: 특허심판');
+      syncPatentDLC()
+        .then(() => sendResponse({ success: true }))
+        .catch(err => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+    sendResponse({ success: false, error: 'Unknown DLC' });
+    return true;
+  }
+
+  // ── DLC DB 삭제 (Popup에서 삭제 버튼 클릭 시) ──
+  if (message.type === 'DELETE_DLC_DB') {
+    deleteDlcData()
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
 /**
@@ -626,23 +666,34 @@ async function getSyncStatus() {
  */
 async function getMetadata() {
   // 먼저 로컬 캐시 확인
-  const cached = await chrome.storage.local.get('bupgogae_meta');
+  const cached = await chrome.storage.local.get(['bupgogae_meta', 'bupgogae_court_map']);
+
+  // 정적 번들 메타 로드
+  let meta;
   if (cached.bupgogae_meta) {
-    return cached.bupgogae_meta;
+    meta = cached.bupgogae_meta;
+  } else {
+    try {
+      const url = chrome.runtime.getURL('data/bupgogae_meta.json');
+      const res = await fetch(url);
+      meta = await res.json();
+      await chrome.storage.local.set({ bupgogae_meta: meta });
+      console.log('[bupgogae] ✅ 번들 메타데이터 로드 완료');
+    } catch (bundledErr) {
+      console.error('[bupgogae] 번들 메타 로드 실패:', bundledErr);
+      meta = { case_code_map: {}, court_code_map: {} };
+    }
   }
 
-  try {
-    // 캐시 없으면 로컬 번들에서 로드 (정적 JSON 방식에서는 이것이 제일 빠르고 확실함)
-    const url = chrome.runtime.getURL('data/bupgogae_meta.json');
-    const res = await fetch(url);
-    const meta = await res.json();
-    await chrome.storage.local.set({ bupgogae_meta: meta });
-    console.log('[bupgogae] ✅ 번들 메타데이터 로드 완료');
-    return meta;
-  } catch (bundledErr) {
-    console.error('[bupgogae] 번들 메타 로드 실패:', bundledErr);
-    return { case_code_map: {}, court_code_map: {} };
+  // 동적 court_code_map 이 있으면 merge (우선)
+  if (cached.bupgogae_court_map) {
+    meta = {
+      ...meta,
+      court_code_map: { ...meta.court_code_map, ...cached.bupgogae_court_map },
+    };
   }
+
+  return meta;
 }
 
 
@@ -755,3 +806,143 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
   });
 });
+
+
+// ============================================================
+// 8. DLC 동기화 (조세심판원)
+// ============================================================
+
+/**
+ * 조세심판 DLC 설정이 켜져있으면 동기화.
+ */
+async function syncTaxDLCIfEnabled() {
+  const { bupgogae_dlc_tax } = await chrome.storage.local.get('bupgogae_dlc_tax');
+  if (bupgogae_dlc_tax === true) {
+    await syncTaxDLC();
+  }
+}
+
+/**
+ * 조세심판 DLC DB를 R2에서 fetch하여 IndexedDB에 추가 (merge).
+ * Core DB와 같은 cases 스토어를 사용하되, TX prefix 키로 구분.
+ */
+async function syncTaxDLC() {
+  console.log('[bupgogae] 조세 DLC 동기화 시작...');
+
+  try {
+    const { bupgogae_tax_etag: cachedETag = null } =
+      await chrome.storage.local.get('bupgogae_tax_etag');
+
+    const { data, etag, notModified } = await fetchDB(DB_TAX_URL, cachedETag);
+
+    if (notModified) {
+      console.log('[bupgogae] 조세 DLC 변경 없음 (304)');
+      return;
+    }
+
+    if (!data || !data.cases) {
+      console.warn('[bupgogae] 조세 DLC 유효하지 않음');
+      return;
+    }
+
+    // Core DB와 같은 스토어에 merge (TX prefix 키라 충돌 없음)
+    const db = await getCachedDB();
+    const count = await dbBulkInsert(db, STORE_CASES, data.cases);
+
+    await chrome.storage.local.set({ bupgogae_tax_etag: etag });
+    console.log(`[bupgogae] ✅ 조세 DLC 동기화 완료: ${count}건 merge`);
+
+  } catch (err) {
+    console.error('[bupgogae] ❌ 조세 DLC 동기화 실패:', err);
+  }
+}
+
+// ============================================================
+// 9. DLC 동기화 (특허심판원)
+// ============================================================
+
+/**
+ * 특허심판 DLC 설정이 켜져있으면 동기화.
+ */
+async function syncPatentDLCIfEnabled() {
+  const { bupgogae_dlc_patent } = await chrome.storage.local.get('bupgogae_dlc_patent');
+  if (bupgogae_dlc_patent === true) {
+    await syncPatentDLC();
+  }
+}
+
+/**
+ * 특허심판 DLC DB를 R2에서 fetch하여 IndexedDB에 추가 (merge).
+ * Core DB와 같은 cases 스토어를 사용하되, KP prefix 키로 구분.
+ */
+async function syncPatentDLC() {
+  console.log('[bupgogae] 특허심판 DLC 동기화 시작...');
+
+  try {
+    const { bupgogae_patent_etag: cachedETag = null } =
+      await chrome.storage.local.get('bupgogae_patent_etag');
+
+    const { data, etag, notModified } = await fetchDB(DB_PATENT_URL, cachedETag);
+
+    if (notModified) {
+      console.log('[bupgogae] 특허심판 DLC 변경 없음 (304)');
+      return;
+    }
+
+    if (!data || !data.cases) {
+      console.warn('[bupgogae] 특허심판 DLC 유효하지 않음');
+      return;
+    }
+
+    // Core DB와 같은 스토어에 merge (KP prefix 키라 충돌 없음)
+    const db = await getCachedDB();
+    const count = await dbBulkInsert(db, STORE_CASES, data.cases);
+
+    await chrome.storage.local.set({ bupgogae_patent_etag: etag });
+    console.log(`[bupgogae] ✅ 특허심판 DLC 동기화 완료: ${count}건 merge`);
+
+  } catch (err) {
+    console.error('[bupgogae] ❌ 특허심판 DLC 동기화 실패:', err);
+  }
+}
+
+/**
+ * DLC 데이터 삭제: TX + KP prefix 키를 cases 스토어에서 제거.
+ */
+async function deleteDlcData() {
+  console.log('[bupgogae] DLC DB 삭제 시작...');
+
+  try {
+    const db = await getCachedDB();
+    const tx = db.transaction(STORE_CASES, 'readwrite');
+    const store = tx.objectStore(STORE_CASES);
+    const req = store.openCursor();
+    let deleted = 0;
+
+    await new Promise((resolve, reject) => {
+      req.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+        // TX prefix = 조세심판, KP prefix = 특허심판
+        if (typeof cursor.key === 'string' &&
+            (cursor.key.startsWith('TX') || cursor.key.startsWith('KP'))) {
+          cursor.delete();
+          deleted++;
+        }
+        cursor.continue();
+      };
+      req.onerror = () => reject(new Error('cursor failed'));
+    });
+
+    // ETag도 초기화
+    await chrome.storage.local.remove(['bupgogae_tax_etag', 'bupgogae_patent_etag']);
+
+    console.log(`[bupgogae] ✅ DLC 삭제 완료: ${deleted}건 제거`);
+  } catch (err) {
+    console.error('[bupgogae] DLC 삭제 실패:', err);
+  }
+}
+

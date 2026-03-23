@@ -34,19 +34,20 @@ def get_r2_client():
     )
 
 
-def upload_db_to_r2(gz_path: str, dry: bool = False):
+def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None):
     """db.json.gz를 R2에 업로드."""
     if not os.path.exists(gz_path):
         print(f"❌ 파일 없음: {gz_path}")
         sys.exit(1)
 
+    key = r2_key or R2_KEY
     size_mb = os.path.getsize(gz_path) / (1024 * 1024)
     bucket = os.environ["R2_BUCKET"]
 
     print(f"\n{'─'*50}")
     print(f"  📤 R2 Upload")
     print(f"     파일: {gz_path} ({size_mb:.2f} MB)")
-    print(f"     버킷: {bucket}/{R2_KEY}")
+    print(f"     버킷: {bucket}/{key}")
     print(f"{'─'*50}")
 
     if dry:
@@ -56,7 +57,7 @@ def upload_db_to_r2(gz_path: str, dry: bool = False):
     client = get_r2_client()
 
     client.upload_file(
-        gz_path, bucket, R2_KEY,
+        gz_path, bucket, key,
         ExtraArgs={
             "ContentType": "application/json",
             "ContentEncoding": "gzip",
@@ -64,7 +65,7 @@ def upload_db_to_r2(gz_path: str, dry: bool = False):
         },
     )
 
-    print(f"  ✅ 업로드 완료: {R2_KEY}")
+    print(f"  ✅ 업로드 완료: {key}")
 
 
 if __name__ == "__main__":

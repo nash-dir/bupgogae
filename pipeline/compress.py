@@ -146,6 +146,15 @@ CASE_CODE_MAP = {
     "재드단": "JDed", "기": "Gi",       "고약": "GoY",
     "재르": "JRe",    "정스": "JSu",    "수흐": "SuH",
     "터": "Teo",      "커": "Keo",
+    # === 헌법재판소 사건부호 (8종) ===
+    "헌가": "HG",      # 위헌법률심판 (법원 위헌제청)
+    "헌나": "HN",      # 탄핵심판
+    "헌다": "HD",      # 정당해산심판
+    "헌라": "HR",      # 권한쟁의심판
+    "헌마": "HM",      # 권리구제 헌법소원 (68조1항)
+    "헌바": "HB",      # 위헌심사형 헌법소원 (68조2항)
+    "헌사": "HS",      # 각종 신청 (국선대리인, 가처분, 기피 등)
+    "헌아": "HA",      # 각종 특별사건 (재심)
 }
 
 # 역방향 매핑 (디코딩용, 메타에 포함)
@@ -234,12 +243,24 @@ def compress_case_number(case_number: str) -> str | None:
     사건번호 → 압축 키 변환.
     "2015다12345" → "15Da12345"
     "92가단28561" → "92Gad28561"
+    "조심 2025중2548" → "TX25중2548"
     """
     if not case_number:
         return None
 
     # 공백, 콤마 제거 (병합 사건)
-    clean = case_number.strip().replace(" ", "")
+    clean = case_number.strip()
+
+    # 조세심판원: "조심 YYYY[지역코드]NNNN"
+    tax_match = re.match(r'^조심\s*(\d{2,4})([가-힣])(\d+)$', clean)
+    if tax_match:
+        year_2d = tax_match.group(1)[-2:]
+        code = tax_match.group(2)
+        serial = tax_match.group(3)
+        return f"TX{year_2d}{code}{serial}"
+
+    # 법원 판례/헌재: "YYYY[부호]NNNN"
+    clean = clean.replace(" ", "")
 
     # 패턴: [연도 2~4자리][한글 사건부호 1~4자리][숫자 일련번호]
     m = re.match(r'^(\d{2,4})([가-힣]{1,4})(\d+)$', clean)
@@ -260,6 +281,36 @@ def compress_case_number(case_number: str) -> str | None:
         code_en = code_kr
 
     return f"{year_2d}{code_en}{serial}"
+
+
+def compress_tax_case_number(case_number: str) -> str | None:
+    """조세심판 사건번호 → TX 키 변환 (조심 prefix 유무 무관).
+
+    법제처 API의 '청구번호' 필드는 '조심' 접두사가 없는 경우가 대부분이므로,
+    접두사 유무와 관계없이 TX 키를 생성한다.
+
+    "조심 2025중2548" → "TX25중2548"  (기존 로직)
+    "90서1671"        → "TX90서1671"  (raw 청구번호)
+    """
+    if not case_number:
+        return None
+
+    clean = case_number.strip()
+
+    # 조심 prefix가 있으면 기존 로직 사용
+    if clean.startswith("조심"):
+        return compress_case_number(clean)
+
+    # Raw 형식: "90서1671" → "TX90서1671" (한글 부호 유지)
+    clean = clean.replace(" ", "")
+    m = re.match(r'^(\d{2,4})([가-힣]{1,4})(\d+)$', clean)
+    if not m:
+        return None
+
+    year_2d = m.group(1)[-2:]
+    code_kr = m.group(2)
+    serial = m.group(3)
+    return f"TX{year_2d}{code_kr}{serial}"
 
 
 def compress_date(date_str: str) -> int:

@@ -17,6 +17,7 @@ package-lock.json
 
 # ===== 스크랩/실험 (전체 제외) =====
 scrap/
+tmp/
 
 # ===== 레거시 코드 =====
 legacy/
@@ -56,3 +57,4 @@ build/
 *.csv
 *.log
 *.tmp
+*.txt

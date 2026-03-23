@@ -51,6 +51,69 @@
     </div>
   </div>
 
+  <!-- 확장기능 (DLC) -->
+  <div class="popup-dlc-section">
+    <button class="popup-dlc-header" id="dlcToggleBtn" type="button">
+      <span class="popup-dlc-icon">🧩</span>
+      <span class="popup-dlc-title">확장기능</span>
+      <span class="popup-dlc-arrow" id="dlcArrow">▾</span>
+    </button>
+    <div class="popup-dlc-body" id="dlcBody">
+      <!-- 법원 토글 (기본 ON, core DB) -->
+      <div class="popup-toggle-row popup-dlc-row">
+        <div class="popup-toggle-info">
+          <span class="popup-toggle-label">법원</span>
+          <span class="popup-toggle-desc" id="courtFilterDesc">법원 판례 검증 활성</span>
+        </div>
+        <label class="toggle-switch" for="courtFilterToggle">
+          <input type="checkbox" id="courtFilterToggle" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- 헌법재판소 토글 (기본 ON, core DB) -->
+      <div class="popup-toggle-row popup-dlc-row">
+        <div class="popup-toggle-info">
+          <span class="popup-toggle-label">헌법재판소</span>
+          <span class="popup-toggle-desc" id="constitutionalFilterDesc">헌재 결정 검증 활성</span>
+        </div>
+        <label class="toggle-switch" for="constitutionalFilterToggle">
+          <input type="checkbox" id="constitutionalFilterToggle" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- 조세심판원 토글 (기본 OFF, DLC) -->
+      <div class="popup-toggle-row popup-dlc-row">
+        <div class="popup-toggle-info">
+          <span class="popup-toggle-label">조세심판원</span>
+          <span class="popup-toggle-desc" id="taxDlcDesc">조세심판 사건 검증 비활성</span>
+        </div>
+        <label class="toggle-switch" for="taxDlcToggle">
+          <input type="checkbox" id="taxDlcToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- 특허심판원 토글 (기본 OFF, DLC) -->
+      <div class="popup-toggle-row popup-dlc-row">
+        <div class="popup-toggle-info">
+          <span class="popup-toggle-label">특허심판원</span>
+          <span class="popup-toggle-desc" id="patentDlcDesc">특허심판 사건 검증 비활성</span>
+        </div>
+        <label class="toggle-switch" for="patentDlcToggle">
+          <input type="checkbox" id="patentDlcToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- DB 삭제 버튼 -->
+      <button class="popup-dlc-delete-btn" id="dlcDeleteBtn" type="button">
+        확장기능 DB 삭제
+      </button>
+    </div>
+  </div>
+
   <!-- 푸터 상태 -->
   <footer class="popup-footer">
     <span class="popup-status" id="statusText">활성 상태</span>

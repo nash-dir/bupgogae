@@ -9,7 +9,7 @@
 * **🚦 3단계 실시간 판례 검증 시스템**
   * 🟢 **실존 판례**: 공개 판례 DB와 교차 검증된 안전한 판례 (판례일련번호 기반 원문 직접 링크)
   * 🟠 **의심 판례**: 사건번호 형식은 맞으나 DB에서 확인되지 않는 판례 (사법정보공개포털 검증 유도)
-  * 🔴 **형식 오류**: 미래 연도, 존재하지 않는 사건부호, 대한민국 사법부 설립(1945년) 이전 등 명백한 AI 환각 지적
+  * 🔴 **형식 오류**: 미래 연도, 대한민국 사법부 설립(1945년) 이전 등 명백한 AI 환각 지적
 * **🌐 멀티 LLM 플랫폼 지원 (어댑터 패턴 적용)**
   * ChatGPT (`chatgpt.com`)
   * Claude (`claude.ai`)
@@ -137,7 +137,7 @@ The extension implements a **Site Adapter Pattern** — a variant of the Strateg
 MutationObserver (debounce 500ms)
     → adapter.findResponseContainers()     [adapter-specific]
     → collectTextNodes(container)           [shared, filters editables]
-    → extractCaseNumbers(text)              [shared, regex pass 1+2]
+    → extractCaseNumbers(text)              [shared, whitelist regex]
     → validateCaseNumber(parsed)            [shared, Red filter cascade]
     → compressCaseKey(parsed)               [shared, Hangul→ASCII]
     → chrome.runtime.sendMessage(LOOKUP_BATCH)  [shared, IPC to SW]
@@ -251,20 +251,33 @@ Challenges making regex design non-trivial:
 * **No delimiters** — `2015다6302` has no spaces or punctuation separating components
 * **Variable-length codes** — codes range from 1 to 4 Hangul characters (`다` vs `준재가단`)
 * **Legacy 2-digit years** — `99다카34567` must be disambiguated
-* **Hangul Unicode range** — regex uses `[가-힣]` (full Hangul block) for robustness, then validates against the known code set
+* **Non-court codes** — other government agencies (노동위원회, 검찰청, 중재원 etc.) use different case codes that must not be confused with court codes. A whitelist regex (built from `case_code_map`) solves this at the extraction stage.
 
-### Regex Detection: Two-Pass Strategy
+### Regex Detection: Whitelist Strategy
+
+Instead of a broad regex that captures all Hangul combinations and filters afterward, the extension builds a **dynamic whitelist regex** from the `case_code_map` at initialization:
 
 ```
-Pass 1: Broad capture          Pass 2: Structural validation
-  /(?:(?:19|20)\d{2}|\d{2})     /^((?:19|20)\d{2}|\d{2})
-   [가-힣]{1,4}\d{1,7}/g         ([가-힣]{1,4})(\d{1,7})$/
-        ↓                              ↓
-   Candidate strings             Grouped decomposition
-   (high recall)                 (year, code, serial)
+Static (fallback):   /[가-힣]{1,4}/        ← matches ANY Hangul (high false positives)
+
+Dynamic (primary):   /(가합|가단|다|나|마|카|...)/ ← matches ONLY registered codes
+                     Built from case_code_map keys, sorted longest-first
 ```
 
-**Pass 1** sweeps the entire response text with a global regex, extracting all substrings that structurally resemble a case number. **Pass 2** decomposes each candidate into named groups for downstream validation. This two-pass design avoids complex lookaheads while maintaining near-zero false negatives.
+At `initMeta()`, the extension sorts all ~159 case codes by length (descending) to ensure greedy matching (`가합` before `가`), then builds a single `RegExp`:
+
+```javascript
+// Built dynamically from case_code_map keys
+_courtCaseRegex = new RegExp(
+  `((?:19|20)\\d{2}|\\d{2})(${sortedCodesPattern})(\\d{1,7})`, 'g'
+);
+```
+
+This **whitelist approach** eliminates false positives from non-court case codes (e.g., `부해` from labor commissions, `형제` from prosecutors) at the extraction stage, rather than requiring a downstream Red filter.
+
+Separate fixed regexes handle non-court case numbers:
+- **조세심판원**: `/조심\s*(\d{2,4})([가-힣])(\d{1,5})/g` — requires `조심` prefix
+- **특허심판원**: `/(\d{4})(당|원|취|정|무)\s*(\d{1,6})/g` — specific trial type codes only
 
 ---
 
@@ -276,7 +289,7 @@ Analyzing user conversations with AI chatbots is inherently privacy-sensitive. A
 
 ### Solution
 
-The extension implements a **Zero-Server Architecture** where **all text analysis, pattern matching, and case law verification occurs entirely within the user's browser**. The complete 140,000+ entry case law database is stored locally in IndexedDB. No conversation data ever leaves the device.
+The extension implements a **Zero-Server Architecture** where **all text analysis, pattern matching, and case law verification occurs entirely within the user's browser**. The complete case law database is stored locally in IndexedDB, with optional DLC packs for additional jurisdictions. No conversation data ever leaves the device.
 
 ### Data Flow: 100% Local Processing
 
@@ -287,17 +300,16 @@ User's Browser (all processing local — no network calls)
 │  LLM Response Text                                               │
 │       │                                                          │
 │       ▼                                                          │
-│  [Regex Pass 1] Global sweep: /(?:(?:19|20)\d{2}|\d{2})         │
-│                                [가-힣]{1,4}\d{1,7}/g            │
-│       │ candidate strings                                        │
+│  [Whitelist Regex] case_code_map 기반 동적 정규식                   │
+│    + 조세심판(조심 prefix) + 특허심판(당/원/취/정/무)              │
+│       │ { year, code, serial, type }                              │
 │       ▼                                                          │
-│  [Regex Pass 2] Decompose: /^(year)(code)(serial)$/              │
-│       │ { year, code, serial }                                   │
-│       ▼                                                          │
-│  [Red Filter Cascade] L1→L2→L3→L4                                │
+│  [Red Filter Cascade] L1→L2→L3                                   │
 │       │ pass? ──── fail → 🔴 Red badge (instant, zero latency)  │
 │       ▼                                                          │
 │  [Key Compression] "2015다6302" → "15Da6302"                     │
+│                    "조심 2025중1234" → "TX25중1234"                │
+│                    "2023당1234" → "KP23당1234"                    │
 │       │ ASCII key                                                │
 │       ▼                                                          │
 │  [LOOKUP_BATCH IPC] Content Script → Service Worker              │
@@ -310,7 +322,7 @@ User's Browser (all processing local — no network calls)
 │  [Badge Render] Inline highlight + tooltip with metadata         │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
-     ▲ The ONLY network call: periodic db.json.gz download
+     ▲ The ONLY network calls: periodic db.json.gz + DLC downloads
      │ (public case law data only — no user data ever transmitted)
 ```
 
@@ -328,7 +340,9 @@ Original:    2015다6302     →  Compressed:  15Da6302
                       Serial (as-is)
 ```
 
-The `case_code_map` maps ~159 Hangul case codes to short romanized abbreviations (~40% reduction in average key length across 140K+ entries).
+The `case_code_map` maps ~159 Hangul case codes to short romanized abbreviations (~40% reduction in average key length). DLC data uses prefix-based keys:
+- **TX** prefix: 조세심판원 (Tax Tribunal)
+- **KP** prefix: 특허심판원 (Patent Trial)
 
 ### Positional Array Encoding
 
@@ -377,7 +391,8 @@ The **only** network communication is a periodic download of a static, pre-built
    └──────────────────────────┘            └──────────────────────────┘
 ```
 
-* **Full-DB deploy** — one `db.json.gz` file (~3 MB gzip) contains the entire 140K+ entry database
+* **Full-DB deploy** — one `db.json.gz` file (~3 MB gzip) contains the entire case law database
+* **DLC packs** — `db_tax.json.gz` (조세심판원) and `db_patent.json.gz` (특허심판원) are optional downloads managed via popup toggles
 * **ETag caching** — R2 returns `304 Not Modified` if unchanged; bandwidth cost is near-zero on most polls
 * **Bundled DB** — the full database ships with the extension for instant offline access on first install
 * **Batch lookup** — content scripts send all detected case numbers in a single `LOOKUP_BATCH` message, resolved in one IndexedDB readonly transaction
@@ -445,6 +460,8 @@ extension/
 
 pipeline/
 ├── api.py                      # 법제처 API client
+├── kipris_api.py               # KIPRIS Plus API client (특허심판원)
+├── kipris_runner.py            # KIPRIS Slow Grazing backfill runner
 ├── compress.py                 # SQLite → compressed JSON converter
 ├── master_db.py                # SQLite master DB with blacklist
 ├── nas_runner.py               # NAS daily orchestrator (date-modulus)

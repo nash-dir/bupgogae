@@ -40,6 +40,12 @@ let _debounceTimer = null;
 let _isProcessing = false;
 let _adapter = null; // 현재 사이트 어댑터
 let _adapterFetchRequested = false; // Auto-Fetch 쓰로틀링 플래그 (세션당 1회)
+let _categoryFilters = {         // 카테고리별 필터 (기본값)
+  court: true,
+  constitutional: true,
+  tax: false,
+  patent: false,
+};
 
 /**
  * Content Script 진입점.
@@ -87,6 +93,25 @@ async function init() {
   } else {
     console.error('[bupgogae] case-regex.js 로드 실패');
     return;
+  }
+
+  // 카테고리 필터 로드
+  try {
+    const filterData = await chrome.storage.local.get([
+      'bupgogae_filter_court',
+      'bupgogae_filter_constitutional',
+      'bupgogae_dlc_tax',
+      'bupgogae_dlc_patent',
+    ]);
+    _categoryFilters = {
+      court: filterData.bupgogae_filter_court !== false,         // 기본 ON
+      constitutional: filterData.bupgogae_filter_constitutional !== false, // 기본 ON
+      tax: filterData.bupgogae_dlc_tax === true,                 // 기본 OFF
+      patent: filterData.bupgogae_dlc_patent === true,           // 기본 OFF
+    };
+    console.log('[bupgogae] 카테고리 필터:', _categoryFilters);
+  } catch (err) {
+    console.warn('[bupgogae] 필터 로드 실패, 기본값 사용');
   }
 
   // precedent-badge.js 확인
@@ -272,13 +297,18 @@ async function processContainer(container) {
 
   if (allCases.length === 0) return;
 
-  console.log(`[bupgogae] ${allCases.length}개 사건번호 감지`);
+  // 카테고리 필터 적용: 비활성 타입은 스킵
+  const filteredCases = allCases.filter(({ parsed }) => _categoryFilters[parsed.type] !== false);
+
+  if (filteredCases.length === 0) return;
+
+  console.log(`[bupgogae] ${filteredCases.length}개 사건번호 감지 (${allCases.length}개 중 필터 통과)`);
 
   // ── Stage 1: Red 필터 ──
   const redCases = [];
   const lookupCases = [];
 
-  for (const { textNode, parsed } of allCases) {
+  for (const { textNode, parsed } of filteredCases) {
     const validation = window.bupgogaeCaseRegex.validateCaseNumber(parsed);
 
     if (!validation.valid) {
@@ -327,20 +357,34 @@ async function processContainer(container) {
     if (result && result.found) {
       // Green
       const data = result.data;
-      // data 구조: [[serialNumber, courtCode, dateInt, caseNameTokenized], ...]
+      // 법원/헌재 data 구조: [[serialNumber, courtCode, dateInt, caseNameTokenized], ...]
+      // 특허심판 data 구조: [[serial, trialType, dateInt, caseName], ...]
       let caseName = '';
       let serialNumber = null;
       let courtCode = null;
       let dateInt = null;
+      let trialType = null;
 
       if (data && data.length > 0 && data[0].length >= 1) {
         serialNumber = data[0][0];
-        if (data[0].length >= 2) courtCode = data[0][1];
-        if (data[0].length >= 3 && typeof data[0][2] === 'number') dateInt = data[0][2];
-        // tokenized name: index 3 (or 2 if date is missing)
-        const nameIdx = (typeof data[0][2] === 'string') ? 2 : 3;
-        if (data[0].length > nameIdx && typeof data[0][nameIdx] === 'string') {
-          caseName = data[0][nameIdx] || '';
+
+        // parsed.type에 따라 data[0][1] 해석이 다름
+        const entryType = entries[0]?.parsed?.type;
+
+        if (entryType === 'patent') {
+          // 특허심판: [1]=trialType(문자열), [2]=dateInt, [3]=caseName
+          trialType = data[0][1] || '';
+          if (data[0].length >= 3 && typeof data[0][2] === 'number') dateInt = data[0][2];
+          if (data[0].length >= 4 && typeof data[0][3] === 'string') caseName = data[0][3] || '';
+        } else {
+          // 법원/헌재/조세: [1]=courtCode(정수), [2]=dateInt, [3]=caseName
+          if (data[0].length >= 2) courtCode = data[0][1];
+          if (data[0].length >= 3 && typeof data[0][2] === 'number') dateInt = data[0][2];
+          // tokenized name: index 3 (or 2 if date is missing)
+          const nameIdx = (typeof data[0][2] === 'string') ? 2 : 3;
+          if (data[0].length > nameIdx && typeof data[0][nameIdx] === 'string') {
+            caseName = data[0][nameIdx] || '';
+          }
         }
       }
 
@@ -348,6 +392,8 @@ async function processContainer(container) {
         renderBadge(textNode, parsed.raw, 'green', {
           caseName, serialNumber, courtCode, dateInt,
           caseCode: parsed.code,
+          caseType: parsed.type,
+          trialType,
           courtCodeMap,
         });
       }

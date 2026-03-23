@@ -424,10 +424,10 @@ def _write_gzipped_json(payload: dict, output_path: str) -> float:
     return gz_mb
 
 
-def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float]:
+def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float, int]:
     """master.db → Core(db.json.gz) + DLC(db_tax.json.gz) + DLC(db_patent.json.gz) 분리 덤프.
 
-    Returns: (core_gz_mb, tax_gz_mb, patent_gz_mb)
+    Returns: (core_gz_mb, tax_gz_mb, patent_gz_mb, tax_skipped)
     """
     version = datetime.now().strftime("%Y%m%d")
 
@@ -466,9 +466,9 @@ def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float]:
         "cases": patent_data,
     }, os.path.join(data_dir, "db_patent.json"))
 
-    print(f"  └ Core: {len(core_data):,}건, DLC(Tax): {len(tax_data):,}건, "
+    print(f"  └ Core: {len(core_data):,}건, DLC(Tax): {len(tax_data):,}건 (⛔{tax_skip} skip), "
           f"DLC(Patent): {len(patent_data):,}건, 법원: {len(court_map)}개")
-    return core_mb, tax_mb, patent_mb
+    return core_mb, tax_mb, patent_mb, tax_skip
 
 
 # ════════════════════════════════════════════════════════════
@@ -609,7 +609,7 @@ def main():
 
     # 풀 DB 덤프 (Core + DLC 분리)
     print(f"\n📦 DB 덤프 (Core + DLC)")
-    core_mb, tax_mb, patent_mb = export_split_db(db, data_dir)
+    core_mb, tax_mb, patent_mb, tax_skipped = export_split_db(db, data_dir)
     db.close()
 
     # R2 업로드
@@ -620,7 +620,8 @@ def main():
     if missing_r2:
         print(f"\n⚠️ R2 변수 누락 ({', '.join(missing_r2)}) — 업로드 스킵")
     else:
-        from upload_r2 import upload_db_to_r2  # noqa: E402
+        from upload_r2 import upload_db_to_r2, ensure_cors  # noqa: E402
+        ensure_cors()
         upload_db_to_r2(os.path.join(data_dir, "db.json.gz"))
         upload_db_to_r2(os.path.join(data_dir, "db_tax.json.gz"),
                         r2_key="bupgogae/db_tax.json.gz")
@@ -657,6 +658,7 @@ def main():
         detc_ins=detc_ins,
         tax_total=len(tax_cases),
         tax_ins=tax_ins,
+        tax_skipped=tax_skipped,
     )
 
 
@@ -700,12 +702,12 @@ def send_telegram_report(**kwargs):
         f"{status} *법고개 NAS Runner*\n"
         f"`{today}` | {minutes}분 {seconds}초\n"
         f"\n"
-        f"📊 *판례*: {scan_count:,}일\n"
+        f"📊 *판례*: {scan_count:,}건\n"
         f"  T1: {summary.get('tier1', 0)} | "
         f"T2: {summary.get('tier2', 0)} | "
         f"T3: {summary.get('tier3', 0)}\n"
         f"📜 *헌재*: {detc_total:,}건 (+{detc_ins_cnt} 신규)\n"
-        f"💰 *조세심판*: {tax_total:,}건 (+{tax_ins_cnt} 신규)\n"
+        f"💰 *조세심판*: {tax_total:,}건 (+{tax_ins_cnt} 신규, ⛔{kwargs.get('tax_skipped', 0)} TX스킵)\n"
         f"\n"
         f"🗄 *Master DB*: {db_total:,}건 (Δ {db_delta:+,})\n"
         f"  +{total_ins} 신규 | ={total_upd} 갱신 | ⛔{total_skip} 스킵 | ❌{errors} 에러\n"

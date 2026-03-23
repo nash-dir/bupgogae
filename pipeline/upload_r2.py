@@ -68,6 +68,27 @@ def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None):
     print(f"  ✅ 업로드 완료: {key}")
 
 
+def ensure_cors():
+    """R2 버킷 CORS 규칙 설정 (멱등)."""
+    client = get_r2_client()
+    bucket = os.environ["R2_BUCKET"]
+    try:
+        client.put_bucket_cors(
+            Bucket=bucket,
+            CORSConfiguration={
+                "CORSRules": [{
+                    "AllowedOrigins": ["*"],
+                    "AllowedMethods": ["GET", "HEAD"],
+                    "AllowedHeaders": ["*"],
+                    "MaxAgeSeconds": 3600,
+                }]
+            },
+        )
+        print("  ✅ CORS 설정 완료")
+    except Exception as e:
+        print(f"  ⚠️ CORS 설정 실패 (무시): {e}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="R2 DB Uploader")
     parser.add_argument("file", help="db.json.gz 경로")

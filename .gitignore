@@ -25,6 +25,7 @@ legacy/
 # ===== Backfill 출력 =====
 backfill/
 caseDB_*
+pipeline/output/
 
 # ===== 내부 문서/리포트 =====
 report/

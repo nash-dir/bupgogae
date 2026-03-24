@@ -110,6 +110,38 @@ function dbClear(db, storeName) {
 }
 
 /**
+ * Core 데이터만 삭제 (DLC 키 TX*, KP*는 보존).
+ * syncDatabase에서 dbClear 대신 사용하여 DLC 데이터 소실 방지.
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @returns {Promise<number>} 삭제된 레코드 수
+ */
+function dbClearCoreOnly(db, storeName) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    const req = store.openCursor();
+    let deleted = 0;
+
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor) return; // cursor 소진 — tx.oncomplete 대기
+      // DLC 키(TX, KP prefix)는 보존
+      if (typeof cursor.key === 'string' &&
+          !cursor.key.startsWith('TX') &&
+          !cursor.key.startsWith('KP')) {
+        cursor.delete();
+        deleted++;
+      }
+      cursor.continue();
+    };
+
+    tx.oncomplete = () => resolve(deleted);
+    tx.onerror = () => reject(new Error(`dbClearCoreOnly failed: ${tx.error}`));
+  });
+}
+
+/**
  * 대량 데이터 삽입 (Bulk Insert).
  * 데이터 객체의 각 키-값 쌍을 하나의 트랜잭션으로 넣는다.
  * @param {IDBDatabase} db
@@ -201,10 +233,11 @@ async function syncDatabase() {
       return;
     }
 
-    // ── Step 3: IndexedDB 교체 ──
+    // ── Step 3: IndexedDB 교체 (DLC 키 보존) ──
     const db = await getCachedDB();
-    await dbClear(db, STORE_CASES);
+    const cleared = await dbClearCoreOnly(db, STORE_CASES);
     const count = await dbBulkInsert(db, STORE_CASES, data.cases);
+    console.log(`[bupgogae] Core DB 교체: ${cleared}건 삭제 → ${count}건 삽입 (DLC 보존)`);
 
     // ── Step 4: 메타데이터 + ETag 저장 ──
     const version = data.version || new Date().toISOString().slice(0, 10);
@@ -226,7 +259,7 @@ async function syncDatabase() {
   }
 
   // ── 어댑터 원격 설정 동기화 (DB 동기화와 독립적으로 실행) ──
-  await fetchAdaptersConfig();
+  try { await fetchAdaptersConfig(); } catch {}
 
   // ── DLC 동기화 (조세심판 + 특허심판) ──
   await syncTaxDLCIfEnabled();
@@ -318,7 +351,7 @@ async function loadBundledDB() {
     }
 
     const db = await getCachedDB();
-    await dbClear(db, STORE_CASES);
+    await dbClearCoreOnly(db, STORE_CASES);
     const count = await dbBulkInsert(db, STORE_CASES, data.cases);
     const version = data.version || 'bundled';
     await updateMetadata(db, version, data.total || count);
@@ -922,10 +955,7 @@ async function deleteDlcData() {
     await new Promise((resolve, reject) => {
       req.onsuccess = (e) => {
         const cursor = e.target.result;
-        if (!cursor) {
-          resolve();
-          return;
-        }
+        if (!cursor) return; // cursor 소진 — tx.oncomplete 대기
         // TX prefix = 조세심판, KP prefix = 특허심판
         if (typeof cursor.key === 'string' &&
             (cursor.key.startsWith('TX') || cursor.key.startsWith('KP'))) {
@@ -934,7 +964,8 @@ async function deleteDlcData() {
         }
         cursor.continue();
       };
-      req.onerror = () => reject(new Error('cursor failed'));
+      tx.oncomplete = () => resolve(deleted);
+      tx.onerror = () => reject(new Error(`DLC delete tx failed: ${tx.error}`));
     });
 
     // ETag도 초기화

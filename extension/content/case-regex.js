@@ -219,8 +219,8 @@ function validateCaseNumber(parsed) {
   let fullYear;
   if (parsed.year.length === 2) {
     const twoDigit = parseInt(parsed.year, 10);
-    // 00~29 → 2000~2029, 30~99 → 1930~1999
-    fullYear = twoDigit <= 29 ? 2000 + twoDigit : 1900 + twoDigit;
+    // 30~99 → 1930~1999, 00~29 → 2000~2029
+    fullYear = twoDigit >= 30 ? 1900 + twoDigit : 2000 + twoDigit;
   } else {
     fullYear = parseInt(parsed.year, 10);
   }

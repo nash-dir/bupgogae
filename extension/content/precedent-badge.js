@@ -216,6 +216,37 @@ const BUPGOGAE_CSS = `
   background: rgba(255,255,255,0.22);
 }
 
+/* --- Green 사건 목록 --- */
+.bgae-tooltip-case-list {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.bgae-tooltip-case-item {
+  display: block;
+  margin: 3px 0;
+}
+
+.bgae-tooltip-case-item a {
+  display: block;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  border-left: 2.5px solid rgba(34, 197, 94, 0.6);
+  color: inherit;
+  text-decoration: none;
+  font-size: 11.5px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.bgae-tooltip-case-item a:hover {
+  background: rgba(255,255,255,0.18);
+}
+
 .bgae-tooltip-footer {
   display: block;
   margin-top: 6px;
@@ -343,42 +374,68 @@ function _el(tag, className, text) {
 
 const TOOLTIP_BUILDERS = {
   /**
-   * Green 툴팁 DOM 조립.
-   * @param {string} caseName
-   * @param {string} fullCitation
-   * @param {number|string} serialNumber
-   * @param {string} [caseType] - 'court' | 'constitutional' | 'tax' | 'patent'
+   * Green 툴팁 DOM 조립 — 동일 키에 매칭되는 사건 목록을 링크 리스트로 표시.
+   *
+   * @param {Array} entries - [{serialNumber, courtCode, dateInt, caseName, caseType, caseCode, trialType}]
+   * @param {string} rawCaseNumber - 원본 사건번호 문자열 ("2015다6302")
+   * @param {Object} courtCodeMap - 법원코드 매핑
    * @returns {DocumentFragment}
    */
-  green(caseName, fullCitation, serialNumber, caseType) {
+  green(entries, rawCaseNumber, courtCodeMap) {
     const frag = document.createDocumentFragment();
-    frag.appendChild(_el('span', 'bgae-tooltip-title', '공개 DB에 존재하는 사건번호입니다.'));
-    frag.appendChild(_el('span', 'bgae-tooltip-body', '인용 내용의 정확성은 보장되지 않으니, 원문 확인이 반드시 필요합니다.'));
-    if (fullCitation) {
-      frag.appendChild(_el('span', 'bgae-tooltip-citation', fullCitation));
+
+    // 헤더 경고
+    frag.appendChild(_el('span', 'bgae-tooltip-title',
+      '법제처 DB에 존재하는 사건번호입니다.'));
+    frag.appendChild(_el('span', 'bgae-tooltip-body',
+      '인용 내용의 정확성은 보장되지 않으니, 원문 확인이 반드시 필요합니다.'));
+
+    // 사건 목록 (각각 하이퍼링크)
+    const list = _el('div', 'bgae-tooltip-case-list');
+
+    for (const entry of entries) {
+      const {
+        serialNumber, courtCode, dateInt,
+        caseName, caseType, caseCode, trialType,
+      } = entry;
+
+      // full citation 조립
+      const courtName = caseType === 'patent'
+        ? '특허심판원'
+        : decodeCourtName(courtCode, courtCodeMap);
+      const dateStr = formatDecisionDate(dateInt);
+      const fullCitation = buildFullCitation(
+        courtName, dateStr, rawCaseNumber, caseCode, caseType,
+      );
+
+      // 링크 URL 결정
+      const sn = String(serialNumber);
+      let href;
+      if (caseType === 'patent') {
+        href = 'https://www.kipris.or.kr/';
+      } else if (sn.startsWith('D')) {
+        href = `https://www.law.go.kr/detcInfoP.do?mode=1&detcSeq=${sn.slice(1)}`;
+      } else if (sn.startsWith('T')) {
+        href = `https://www.law.go.kr/DRF/lawService.do?target=ttSpecialDecc&ID=${sn.slice(1)}&type=HTML`;
+      } else {
+        href = `https://www.law.go.kr/precInfoP.do?precSeq=${sn}`;
+      }
+
+      // 표시 텍스트: full citation (+ 사건명이 있으면 추가)
+      let displayText = fullCitation;
+      if (caseName) displayText += ` [${caseName}]`;
+
+      // 리스트 아이템
+      const item = _el('div', 'bgae-tooltip-case-item');
+      const link = _el('a', '', displayText);
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      item.appendChild(link);
+      list.appendChild(item);
     }
-    if (caseName) {
-      frag.appendChild(_el('span', 'bgae-tooltip-body', `사건명: ${caseName}`));
-    }
-    // 클릭 가능한 링크 — serial 기반 상세 페이지 (API key 불필요)
-    // D prefix: 헌재결정례, T prefix: 조세심판원, 특허: KIPRIS, 숫자만: 판례
-    const sn = String(serialNumber);
-    const isPatent = caseType === 'patent';
-    const link = _el('a', 'bgae-tooltip-link',
-      isPatent ? 'KIPRIS 특허심판 조회' : '법제처 사이트 원문 조회');
-    if (isPatent) {
-      // KIPRIS Plus 심판정보 검색 (개별 심결 직링크 미제공)
-      link.href = `https://www.kipris.or.kr/`;
-    } else if (sn.startsWith('D')) {
-      link.href = `https://www.law.go.kr/detcInfoP.do?mode=1&detcSeq=${sn.slice(1)}`;
-    } else if (sn.startsWith('T')) {
-      link.href = `https://www.law.go.kr/DRF/lawService.do?target=ttSpecialDecc&ID=${sn.slice(1)}&type=HTML`;
-    } else {
-      link.href = `https://www.law.go.kr/precInfoP.do?precSeq=${sn}`;
-    }
-    link.target = '_blank';
-    link.rel = 'noopener';
-    frag.appendChild(link);
+
+    frag.appendChild(list);
     return frag;
   },
 
@@ -526,16 +583,18 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   // 툴팁 내용 (DOM API로 조립 — innerHTML 미사용)
   switch (level) {
     case 'green': {
-      // 특허심판원은 courtCode가 없으므로 caseType으로 기관명 결정
-      const courtName = options.caseType === 'patent'
-        ? '특허심판원'
-        : decodeCourtName(options.courtCode, options.courtCodeMap);
-      const dateStr = formatDecisionDate(options.dateInt);
-      const fullCitation = buildFullCitation(
-        courtName, dateStr, precedentString, options.caseCode, options.caseType
-      );
+      // greenEntries 배열 → 사건 목록 리스트 렌더링
+      const greenEntries = options.greenEntries || [{
+        serialNumber: options.serialNumber || '',
+        courtCode: options.courtCode,
+        dateInt: options.dateInt,
+        caseName: options.caseName || '',
+        caseType: options.caseType || 'court',
+        caseCode: options.caseCode || '',
+        trialType: options.trialType || '',
+      }];
       tooltip.appendChild(TOOLTIP_BUILDERS.green(
-        options.caseName || '', fullCitation, options.serialNumber, options.caseType
+        greenEntries, precedentString, options.courtCodeMap,
       ));
       break;
     }
@@ -590,6 +649,5 @@ if (typeof window !== 'undefined') {
     decodeCourtName,
     buildFullCitation,
     getDecisionType,
-    TOOLTIP_BUILDERS,
   };
 }

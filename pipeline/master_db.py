@@ -364,18 +364,8 @@ class MasterDB:
             else:
                 key = f"KP{case_number}"
 
-            # 날짜 → 6자리 정수 (YYMMDD)
-            date_int = 0
-            if decision_date:
-                clean_d = decision_date.replace("-", "").replace(".", "").replace("/", "")
-                if len(clean_d) >= 8:
-                    try:
-                        y = int(clean_d[:4]) % 100
-                        m = int(clean_d[4:6])
-                        d = int(clean_d[6:8])
-                        date_int = y * 10000 + m * 100 + d
-                    except ValueError:
-                        pass
+            # 날짜 → 6자리 정수 (YYMMDD) — compress_date() 재사용
+            date_int = compress_date(decision_date)
 
             entry = [serial, trial_type or "", date_int, case_name or ""]
 

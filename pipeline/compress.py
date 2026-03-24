@@ -318,19 +318,30 @@ def compress_date(date_str: str) -> int:
     선고일 → 6자리 정수.
     "2023.10.25" → 231025
     "1995.01.15" → 950115
+    "20230915"   → 230915  (KIPRIS 등 구분자 없는 형식)
     """
     if not date_str:
         return 0
-    # "YYYY.MM.DD" 또는 "YYYY-MM-DD"
+    # "YYYY.MM.DD" 또는 "YYYY-MM-DD" 또는 "YYYY/MM/DD"
     clean = date_str.replace("-", ".").replace("/", ".")
     parts = clean.split(".")
-    if len(parts) != 3:
-        return 0
-    try:
-        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
-        return (y % 100) * 10000 + m * 100 + d
-    except ValueError:
-        return 0
+    if len(parts) == 3:
+        try:
+            y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+            return (y % 100) * 10000 + m * 100 + d
+        except ValueError:
+            return 0
+    # "YYYYMMDD" 구분자 없는 형식
+    digits = clean.replace(".", "")
+    if len(digits) >= 8 and digits[:8].isdigit():
+        try:
+            y = int(digits[:4]) % 100
+            m = int(digits[4:6])
+            d = int(digits[6:8])
+            return y * 10000 + m * 100 + d
+        except ValueError:
+            return 0
+    return 0
 
 
 def compress_case_name(name: str) -> str:

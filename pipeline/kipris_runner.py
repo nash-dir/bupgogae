@@ -29,7 +29,7 @@ from datetime import datetime, date, timedelta
 import requests as _requests
 
 # 같은 디렉토리 의존성
-from kipris_api import fetch_kipris_xml, parse_kipris_items, NUM_OF_ROWS  # noqa: E402
+from kipris_api import fetch_kipris_xml, parse_kipris_items, PAGE_SIZE  # noqa: E402
 from master_db import MasterDB  # noqa: E402
 
 # ── 설정 ──
@@ -223,6 +223,10 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
 
         # API 에러 vs 정상 0건 구분
         if err_msg:
+            # EMPTY_RESPONSE: 구독 미활성 등으로 빈 <response/> → 미완료 유지
+            if err_msg == "EMPTY_RESPONSE":
+                print(f"  ⚠️ [{display}] 빈 응답(EMPTY_RESPONSE) — 미완료 유지")
+                continue
             api_errors += 1
             last_error_msg = err_msg
             print(f"  ❌ [{display}] API 에러: {err_msg} "
@@ -248,7 +252,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
             total_inserted += ins
             total_updated += upd
 
-        total_pages = math.ceil(total_cnt / NUM_OF_ROWS)
+        total_pages = math.ceil(total_cnt / PAGE_SIZE)
         pages_done = current_page
 
         print(f"  [{display}] p{current_page}/{total_pages} "

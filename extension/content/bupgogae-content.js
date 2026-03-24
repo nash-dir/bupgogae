@@ -355,45 +355,60 @@ async function processContainer(container) {
     const result = results[key];
 
     if (result && result.found) {
-      // Green
+      // Green — data 배열의 모든 매칭 사건을 entries로 조립
       const data = result.data;
-      // 법원/헌재 data 구조: [[serialNumber, courtCode, dateInt, caseNameTokenized], ...]
-      // 특허심판 data 구조: [[serial, trialType, dateInt, caseName], ...]
-      let caseName = '';
-      let serialNumber = null;
-      let courtCode = null;
-      let dateInt = null;
-      let trialType = null;
+      const entryType = entries[0]?.parsed?.type;
+      const caseCode = entries[0]?.parsed?.code;
 
-      if (data && data.length > 0 && data[0].length >= 1) {
-        serialNumber = data[0][0];
+      const greenEntries = [];
 
-        // parsed.type에 따라 data[0][1] 해석이 다름
-        const entryType = entries[0]?.parsed?.type;
+      if (data && data.length > 0) {
+        for (const row of data) {
+          if (!row || row.length < 1) continue;
 
-        if (entryType === 'patent') {
-          // 특허심판: [1]=trialType(문자열), [2]=dateInt, [3]=caseName
-          trialType = data[0][1] || '';
-          if (data[0].length >= 3 && typeof data[0][2] === 'number') dateInt = data[0][2];
-          if (data[0].length >= 4 && typeof data[0][3] === 'string') caseName = data[0][3] || '';
-        } else {
-          // 법원/헌재/조세: [1]=courtCode(정수), [2]=dateInt, [3]=caseName
-          if (data[0].length >= 2) courtCode = data[0][1];
-          if (data[0].length >= 3 && typeof data[0][2] === 'number') dateInt = data[0][2];
-          // tokenized name: index 3 (or 2 if date is missing)
-          const nameIdx = (typeof data[0][2] === 'string') ? 2 : 3;
-          if (data[0].length > nameIdx && typeof data[0][nameIdx] === 'string') {
-            caseName = data[0][nameIdx] || '';
+          const entry = {
+            serialNumber: row[0],
+            courtCode: null,
+            dateInt: null,
+            caseName: '',
+            caseType: entryType || 'court',
+            caseCode: caseCode || '',
+            trialType: '',
+          };
+
+          if (entryType === 'patent') {
+            // 특허심판: [1]=trialType, [2]=dateInt, [3]=caseName
+            entry.trialType = row[1] || '';
+            if (row.length >= 3 && typeof row[2] === 'number') entry.dateInt = row[2];
+            if (row.length >= 4 && typeof row[3] === 'string') entry.caseName = row[3] || '';
+          } else {
+            // 법원/헌재/조세: [1]=courtCode, [2]=dateInt, [3]=caseName
+            if (row.length >= 2) entry.courtCode = row[1];
+            if (row.length >= 3 && typeof row[2] === 'number') entry.dateInt = row[2];
+            const nameIdx = (typeof row[2] === 'string') ? 2 : 3;
+            if (row.length > nameIdx && typeof row[nameIdx] === 'string') {
+              entry.caseName = row[nameIdx] || '';
+            }
           }
+
+          greenEntries.push(entry);
         }
+      }
+
+      // 매칭이 0건이면 안전 처리 (빈 entries 배열)
+      if (greenEntries.length === 0) {
+        greenEntries.push({
+          serialNumber: '', courtCode: null, dateInt: null,
+          caseName: '', caseType: entryType || 'court',
+          caseCode: caseCode || '', trialType: '',
+        });
       }
 
       for (const { textNode, parsed } of entries) {
         renderBadge(textNode, parsed.raw, 'green', {
-          caseName, serialNumber, courtCode, dateInt,
+          greenEntries,
           caseCode: parsed.code,
           caseType: parsed.type,
-          trialType,
           courtCodeMap,
         });
       }

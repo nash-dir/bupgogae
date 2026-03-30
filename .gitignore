@@ -59,3 +59,8 @@ build/
 *.log
 *.tmp
 *.txt
+
+
+# ===== 임시 파일 =====
+AGENTS.md
+.agent/*

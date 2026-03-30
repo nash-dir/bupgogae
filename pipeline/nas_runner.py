@@ -56,23 +56,46 @@ TIER2_MOD   = 15
 
 # TIER3_START = 올해 1/1 (동적)
 
+RECENT_SCAN_PAGES = 3  # 최근 300건 (100건/page × 3)
 
 # ════════════════════════════════════════════════════════════
 # Date-Modulus 스케줄러
 # ════════════════════════════════════════════════════════════
+
+def fetch_recent_ruling_dates() -> set[str]:
+    """최근 선고된 판례 표제부 날짜를 추출 (sort=ddes)."""
+    dates = set()
+    for page in range(1, RECENT_SCAN_PAGES + 1):
+        xml_content = fetch_xml_safe(
+            target="prec", query="*", page=page, sort="ddes",
+        )
+        if not xml_content:
+            break
+        try:
+            root = ET.fromstring(xml_content)
+        except ET.ParseError:
+            break
+        for item in root.findall("prec"):
+            raw_date = get_text(item, "선고일자")
+            if raw_date and len(raw_date) == 8 and raw_date.isdigit():
+                dates.add(raw_date)
+        time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+    return dates
+
 
 def date_serial(d: date) -> int:
     """1900-01-01 = 1 기준 Date Serial Number."""
     return (d - SERIAL_EPOCH).days + 1
 
 
-def get_today_scan_ranges(today: date | None = None) -> list[tuple[str, str]]:
+def get_today_scan_ranges(today: date | None = None, recent_dates: set[str] | None = None) -> list[tuple[str, str]]:
     """오늘 스캔할 날짜 범위 목록 반환.
 
     Returns:
         [(start_date, end_date), ...] — YYYYMMDD 문자열
+        T0: 최근 선고 날짜
         T1/T2: 넓은 윈도우 (1년/1월 단위)
-        T3: 기존과 동일 (1일 단위)
+        T3: 기존과 동일 (1일 단위, T0 제외)
     """
     if today is None:
         today = date.today()
@@ -115,17 +138,25 @@ def get_today_scan_ranges(today: date | None = None) -> list[tuple[str, str]]:
         year = next_start.year
         month = next_start.month
 
-    # Tier 3: 작년~오늘 (전량, 일 단위)
+    # Tier 0: 최신선고 날짜 — 리스트 선두에 삽입
+    tier0_ranges = []
+    if recent_dates:
+        for d_str in sorted(recent_dates, reverse=True):
+            tier0_ranges.append((d_str, d_str))
+
+    # Tier 3: 작년~오늘 (전량, 일 단위 - Tier 0 제외)
+    tier3_exclude = recent_dates or set()
     d = tier3_start
     while d <= today:
         ds = d.strftime("%Y%m%d")
-        ranges.append((ds, ds))
+        if ds not in tier3_exclude:
+            ranges.append((ds, ds))
         d += timedelta(days=1)
 
-    return ranges
+    return tier0_ranges + ranges
 
 
-def scan_plan_summary(ranges: list[tuple[str, str]], today: date) -> dict:
+def scan_plan_summary(ranges: list[tuple[str, str]], today: date, recent_count: int = 0) -> dict:
     """스캔 계획 통계."""
     tier1 = [r for r in ranges if r[0] < "20000101"]
     tier2 = [r for r in ranges if "20000101" <= r[0] < f"{today.year - 1}0101"]
@@ -133,9 +164,10 @@ def scan_plan_summary(ranges: list[tuple[str, str]], today: date) -> dict:
 
     return {
         "total": len(ranges),
+        "tier0": recent_count,
         "tier1": len(tier1),
         "tier2": len(tier2),
-        "tier3": len(tier3),
+        "tier3": max(0, len(tier3) - recent_count),
         "est_minutes": round(len(ranges) * 0.9 / 60, 1),
     }
 
@@ -437,9 +469,6 @@ def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float, i
     # DLC: 조세심판
     tax_data, tax_skip = db.export_tax()
 
-    # DLC: 특허심판
-    patent_data, patent_skip = db.export_kipris()
-
     # 압축 후 확정된 court_code_map (auto-assigned 포함)
     court_map = dict(COURT_CODE_MAP)  # name → code
 
@@ -459,16 +488,9 @@ def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float, i
         "court_code_map": court_map,
     }, os.path.join(data_dir, "db_tax.json"))
 
-    patent_mb = _write_gzipped_json({
-        "version": version,
-        "total": len(patent_data),
-        "keys": len(patent_data),
-        "cases": patent_data,
-    }, os.path.join(data_dir, "db_patent.json"))
-
     print(f"  └ Core: {len(core_data):,}건, DLC(Tax): {len(tax_data):,}건 (⛔{tax_skip} skip), "
-          f"DLC(Patent): {len(patent_data):,}건, 법원: {len(court_map)}개")
-    return core_mb, tax_mb, patent_mb, tax_skip
+          f"법원: {len(court_map)}개")
+    return core_mb, tax_mb, tax_skip
 
 
 # ════════════════════════════════════════════════════════════
@@ -489,9 +511,18 @@ def main():
     master_db_path = os.path.join(data_dir, "master.db")
     today = date.today()
 
+    # 최신 선고 날짜 추출 (Tier 0)
+    print("🔍 최신선고판결 날짜 추출 중...")
+    try:
+        recent_dates = fetch_recent_ruling_dates()
+        print(f"  Tier 0: {len(recent_dates)}개 선고일 감지")
+    except Exception as e:
+        print(f"  ⚠️ 최신선고 추출 실패 (Tier 3 폴백): {e}")
+        recent_dates = set()
+
     # 스캔 계획
-    scan_ranges = get_today_scan_ranges(today)
-    summary = scan_plan_summary(scan_ranges, today)
+    scan_ranges = get_today_scan_ranges(today, recent_dates=recent_dates)
+    summary = scan_plan_summary(scan_ranges, today, recent_count=len(recent_dates))
 
     # 헌재/조세심판 스케줄 계산
     detc_pages = get_detc_pages_for_today(today)
@@ -502,7 +533,7 @@ def main():
     print(f"     날짜: {today}")
     print(f"     Serial: {date_serial(today)}")
     print(f"     판례: {summary['total']:,}건"
-          f" (T1:{summary['tier1']} T2:{summary['tier2']} T3:{summary['tier3']})")
+          f" (T0:{summary['tier0']} T1:{summary['tier1']} T2:{summary['tier2']} T3:{summary['tier3']})")
     print(f"     헌재: {len(detc_pages)}페이지 (mod {DETC_MOD})")
     print(f"     조세: {len(tax_pages)}페이지 (mod {TAX_MOD})")
     print(f"     예상: ~{summary['est_minutes']}분")
@@ -609,7 +640,7 @@ def main():
 
     # 풀 DB 덤프 (Core + DLC 분리)
     print(f"\n📦 DB 덤프 (Core + DLC)")
-    core_mb, tax_mb, patent_mb, tax_skipped = export_split_db(db, data_dir)
+    core_mb, tax_mb, tax_skipped = export_split_db(db, data_dir)
     db.close()
 
     # R2 업로드
@@ -625,8 +656,6 @@ def main():
         upload_db_to_r2(os.path.join(data_dir, "db.json.gz"))
         upload_db_to_r2(os.path.join(data_dir, "db_tax.json.gz"),
                         r2_key="bupgogae/db_tax.json.gz")
-        upload_db_to_r2(os.path.join(data_dir, "db_patent.json.gz"),
-                        r2_key="bupgogae/db_patent.json.gz")
 
     elapsed = (datetime.now() - now).total_seconds()
     minutes = int(elapsed // 60)
@@ -635,7 +664,7 @@ def main():
     print(f"\n{'=' * 55}")
     print(f"  🏁 완료 ({minutes}분 {seconds}초)")
     print(f"     DB: {after:,}건 (Δ {delta:+,})")
-    print(f"     Core: {core_mb:.2f} MB | DLC(Tax): {tax_mb:.2f} MB | DLC(Patent): {patent_mb:.2f} MB")
+    print(f"     Core: {core_mb:.2f} MB | DLC(Tax): {tax_mb:.2f} MB")
     print(f"{'=' * 55}")
 
     # 텔레그램 리포트
@@ -651,7 +680,6 @@ def main():
         db_delta=delta,
         gz_mb=core_mb,
         tax_gz_mb=tax_mb,
-        patent_gz_mb=patent_mb,
         elapsed_sec=elapsed,
         r2_uploaded=not missing_r2,
         detc_total=len(detc_cases),
@@ -703,7 +731,8 @@ def send_telegram_report(**kwargs):
         f"`{today}` | {minutes}분 {seconds}초\n"
         f"\n"
         f"📊 *판례*: {scan_count:,}건\n"
-        f"  T1: {summary.get('tier1', 0)} | "
+        f"  T0: {summary.get('tier0', 0)} | "
+        f"T1: {summary.get('tier1', 0)} | "
         f"T2: {summary.get('tier2', 0)} | "
         f"T3: {summary.get('tier3', 0)}\n"
         f"📜 *헌재*: {detc_total:,}건 (+{detc_ins_cnt} 신규)\n"
@@ -712,8 +741,7 @@ def send_telegram_report(**kwargs):
         f"🗄 *Master DB*: {db_total:,}건 (Δ {db_delta:+,})\n"
         f"  +{total_ins} 신규 | ={total_upd} 갱신 | ⛔{total_skip} 스킵 | ❌{errors} 에러\n"
         f"\n"
-        f"📦 *Core*: {gz_mb:.2f} MB | *DLC(Tax)*: {kwargs.get('tax_gz_mb', 0):.2f} MB | "
-        f"*DLC(Patent)*: {kwargs.get('patent_gz_mb', 0):.2f} MB\n"
+        f"📦 *Core*: {gz_mb:.2f} MB | *DLC(Tax)*: {kwargs.get('tax_gz_mb', 0):.2f} MB\n"
         f"☁️ *R2*: {r2_status}"
     )
 

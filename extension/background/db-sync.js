@@ -20,7 +20,7 @@
 // ============================================================
 const DB_URL = 'https://api.bup.live/bupgogae/db.json.gz';
 const DB_TAX_URL = 'https://api.bup.live/bupgogae/db_tax.json.gz';  // DLC: 조세심판
-const DB_PATENT_URL = 'https://api.bup.live/bupgogae/db_patent.json.gz';  // DLC: 특허심판
+
 const ADAPTERS_URL = 'https://api.bup.live/bupgogae/adapters.json'; // 원격 어댑터 셀렉터 설정
 const BUNDLED_DB_URL = 'data/db.json'; // 로컬 디버깅용 폴백
 const DB_NAME = 'bupgogae';
@@ -29,6 +29,16 @@ const STORE_CASES = 'cases';
 const STORE_META = 'metadata';
 const ALARM_NAME = 'bupgogae-sync';
 const SYNC_INTERVAL_MINUTES = 60 * 6; // 6시간마다 동기화 시도
+
+// [보안 상수]
+const MAX_DB_SIZE_BYTES = 50 * 1024 * 1024; // 50MB 제한
+const MAX_SELECTORS_PER_SITE = 10;   // 사이트당 최대 선택자 개수
+const MAX_SELECTOR_LENGTH = 150;     // 선택자 하나당 최대 길이 (문자 수)
+
+// [무결성 검증 상수]
+const MIN_KEYS_CORE = 100_000;       // Core DB 최소 키 수 (미달 시 파이프라인 장애 판정)
+const MIN_KEYS_TAX_DLC = 30_000;     // 조세 DLC 최소 키 수
+const VERSION_REGEX = /^\d{8}$/;     // version 형식: YYYYMMDD
 
 // ============================================================
 // 1. IndexedDB Promise 래퍼
@@ -193,8 +203,40 @@ async function fetchDB(url, cachedETag = null) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
 
+      // 1차 방어: Content-Length 헤더 확인
+      const contentLength = res.headers.get('Content-Length');
+      if (contentLength && parseInt(contentLength, 10) > MAX_DB_SIZE_BYTES) {
+        throw new Error(`DB 파일 크기 초과 (헤더 기준): ${contentLength} bytes`);
+      }
+
+      // 2차 방어: 스트림 단위 파일 크기 제한 (50MB 하드 리미트)
+      const reader = res.body.getReader();
+      let receivedLength = 0;
+      const chunks = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        receivedLength += value.length;
+        if (receivedLength > MAX_DB_SIZE_BYTES) {
+          reader.cancel();
+          throw new Error(`DB 파일 크기 하드 리미트 초과. 연결 강제 종료됨.`);
+        }
+        chunks.push(value);
+      }
+
+      // 청크 조합 후 JSON 파싱
+      const chunksAll = new Uint8Array(receivedLength);
+      let position = 0;
+      for (const chunk of chunks) {
+        chunksAll.set(chunk, position);
+        position += chunk.length;
+      }
+      const text = new TextDecoder('utf-8').decode(chunksAll);
+      const data = JSON.parse(text);
+
       const etag = res.headers.get('ETag') || null;
-      const data = await res.json();
       return { data, etag, notModified: false };
     } catch (err) {
       console.warn(`[bupgogae] fetch 실패 (${attempt}/3):`, err.message);
@@ -233,6 +275,16 @@ async function syncDatabase() {
       return;
     }
 
+    // ── 무결성 게이트: 키 수 하한선 + version 형식 ──
+    const keyCount = Object.keys(data.cases).length;
+    if (keyCount < MIN_KEYS_CORE) {
+      throw new Error(`DB 무결성 검증 실패: 키 수 ${keyCount.toLocaleString()} < 하한 ${MIN_KEYS_CORE.toLocaleString()}`);
+    }
+    if (data.version && !VERSION_REGEX.test(String(data.version))) {
+      throw new Error(`DB 무결성 검증 실패: version 형식 오류 '${data.version}'`);
+    }
+    console.log(`[bupgogae] 무결성 검증 통과: ${keyCount.toLocaleString()}건, ver=${data.version}`);
+
     // ── Step 3: IndexedDB 교체 (DLC 키 보존) ──
     const db = await getCachedDB();
     const cleared = await dbClearCoreOnly(db, STORE_CASES);
@@ -261,9 +313,8 @@ async function syncDatabase() {
   // ── 어댑터 원격 설정 동기화 (DB 동기화와 독립적으로 실행) ──
   try { await fetchAdaptersConfig(); } catch {}
 
-  // ── DLC 동기화 (조세심판 + 특허심판) ──
+  // ── DLC 동기화 (조세심판) ──
   await syncTaxDLCIfEnabled();
-  await syncPatentDLCIfEnabled();
 }
 
 // ============================================================
@@ -308,17 +359,34 @@ async function fetchAdaptersConfig() {
       return;
     }
 
-    // 보안 검증: 모든 값이 순수 데이터(문자열/배열)인지 확인
+    // 🚨 보안 검증 (Sanitization)
     for (const [siteId, siteConfig] of Object.entries(config.adapters)) {
       if (siteConfig.responseSelectors) {
-        if (!Array.isArray(siteConfig.responseSelectors)) {
+        let selectors = siteConfig.responseSelectors;
+        if (Array.isArray(selectors)) {
+          // 1. 배열 크기 제한
+          selectors = selectors.slice(0, MAX_SELECTORS_PER_SITE);
+          
+          // 2. 문자열 길이 및 타입 검사, 3. 위험 문법(:has) 차단
+          selectors = selectors.filter(s => 
+            typeof s === 'string' && 
+            s.length <= MAX_SELECTOR_LENGTH &&
+            !s.includes(':has(')
+          );
+
+          config.adapters[siteId].responseSelectors = selectors;
+        } else {
           console.warn(`[bupgogae] ${siteId}: responseSelectors가 배열이 아님 — 무시`);
           delete config.adapters[siteId].responseSelectors;
-          continue;
         }
-        // 각 셀렉터가 문자열인지 검증
-        config.adapters[siteId].responseSelectors =
-          siteConfig.responseSelectors.filter(s => typeof s === 'string');
+      }
+
+      // streamingIndicator 검증 (문자열 타입 및 길이 제한)
+      if (siteConfig.streamingIndicator) {
+        if (typeof siteConfig.streamingIndicator !== 'string' || 
+            siteConfig.streamingIndicator.length > MAX_SELECTOR_LENGTH) {
+          delete config.adapters[siteId].streamingIndicator;
+        }
       }
     }
 
@@ -622,6 +690,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // ── 비상 정지 (Circuit Breaker) 수신부 ──
+  if (message.type === 'EMERGENCY_DISABLE') {
+    console.error('[bupgogae] 🚨 서킷 브레이커: EMERGENCY_DISABLE 수신. 부하 방지를 위해 글로벌 비활성화를 실행합니다.');
+    chrome.storage.local.set({ bupgogae_disabled_global: true }, () => {
+      // 모든 활성 탭 아이콘 배지를 ERR로 무조건 업데이트
+      chrome.tabs.query({}, (tabs) => {
+        for (const tab of tabs) {
+          chrome.action.setBadgeText({ text: 'ERR', tabId: tab.id });
+          chrome.action.setBadgeBackgroundColor({ color: '#ef4444', tabId: tab.id });
+        }
+      });
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+
   // ── 메타데이터 요청 (Content Script → case_code_map 전달) ──
   if (message.type === 'GET_META') {
     getMetadata()
@@ -643,13 +727,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.dlc === 'tax') {
       console.log('[bupgogae] DLC 다운로드 요청: 조세심판');
       syncTaxDLC()
-        .then(() => sendResponse({ success: true }))
-        .catch(err => sendResponse({ success: false, error: err.message }));
-      return true;
-    }
-    if (message.dlc === 'patent') {
-      console.log('[bupgogae] DLC 다운로드 요청: 특허심판');
-      syncPatentDLC()
         .then(() => sendResponse({ success: true }))
         .catch(err => sendResponse({ success: false, error: err.message }));
       return true;
@@ -878,6 +955,16 @@ async function syncTaxDLC() {
       return;
     }
 
+    // ── 무결성 게이트: 키 수 하한선 + version 형식 ──
+    const taxKeyCount = Object.keys(data.cases).length;
+    if (taxKeyCount < MIN_KEYS_TAX_DLC) {
+      throw new Error(`조세 DLC 무결성 검증 실패: 키 수 ${taxKeyCount.toLocaleString()} < 하한 ${MIN_KEYS_TAX_DLC.toLocaleString()}`);
+    }
+    if (data.version && !VERSION_REGEX.test(String(data.version))) {
+      throw new Error(`조세 DLC 무결성 검증 실패: version 형식 오류 '${data.version}'`);
+    }
+    console.log(`[bupgogae] 조세 DLC 무결성 검증 통과: ${taxKeyCount.toLocaleString()}건`);
+
     // Core DB와 같은 스토어에 merge (TX prefix 키라 충돌 없음)
     const db = await getCachedDB();
     const count = await dbBulkInsert(db, STORE_CASES, data.cases);
@@ -890,57 +977,8 @@ async function syncTaxDLC() {
   }
 }
 
-// ============================================================
-// 9. DLC 동기화 (특허심판원)
-// ============================================================
-
 /**
- * 특허심판 DLC 설정이 켜져있으면 동기화.
- */
-async function syncPatentDLCIfEnabled() {
-  const { bupgogae_dlc_patent } = await chrome.storage.local.get('bupgogae_dlc_patent');
-  if (bupgogae_dlc_patent === true) {
-    await syncPatentDLC();
-  }
-}
-
-/**
- * 특허심판 DLC DB를 R2에서 fetch하여 IndexedDB에 추가 (merge).
- * Core DB와 같은 cases 스토어를 사용하되, KP prefix 키로 구분.
- */
-async function syncPatentDLC() {
-  console.log('[bupgogae] 특허심판 DLC 동기화 시작...');
-
-  try {
-    const { bupgogae_patent_etag: cachedETag = null } =
-      await chrome.storage.local.get('bupgogae_patent_etag');
-
-    const { data, etag, notModified } = await fetchDB(DB_PATENT_URL, cachedETag);
-
-    if (notModified) {
-      console.log('[bupgogae] 특허심판 DLC 변경 없음 (304)');
-      return;
-    }
-
-    if (!data || !data.cases) {
-      console.warn('[bupgogae] 특허심판 DLC 유효하지 않음');
-      return;
-    }
-
-    // Core DB와 같은 스토어에 merge (KP prefix 키라 충돌 없음)
-    const db = await getCachedDB();
-    const count = await dbBulkInsert(db, STORE_CASES, data.cases);
-
-    await chrome.storage.local.set({ bupgogae_patent_etag: etag });
-    console.log(`[bupgogae] ✅ 특허심판 DLC 동기화 완료: ${count}건 merge`);
-
-  } catch (err) {
-    console.error('[bupgogae] ❌ 특허심판 DLC 동기화 실패:', err);
-  }
-}
-
-/**
- * DLC 데이터 삭제: TX + KP prefix 키를 cases 스토어에서 제거.
+ * DLC 데이터 삭제: TX prefix 키를 cases 스토어에서 제거.
  */
 async function deleteDlcData() {
   console.log('[bupgogae] DLC DB 삭제 시작...');
@@ -956,9 +994,9 @@ async function deleteDlcData() {
       req.onsuccess = (e) => {
         const cursor = e.target.result;
         if (!cursor) return; // cursor 소진 — tx.oncomplete 대기
-        // TX prefix = 조세심판, KP prefix = 특허심판
+        // TX prefix = 조세심판
         if (typeof cursor.key === 'string' &&
-            (cursor.key.startsWith('TX') || cursor.key.startsWith('KP'))) {
+            cursor.key.startsWith('TX')) {
           cursor.delete();
           deleted++;
         }
@@ -969,7 +1007,7 @@ async function deleteDlcData() {
     });
 
     // ETag도 초기화
-    await chrome.storage.local.remove(['bupgogae_tax_etag', 'bupgogae_patent_etag']);
+    await chrome.storage.local.remove(['bupgogae_tax_etag']);
 
     console.log(`[bupgogae] ✅ DLC 삭제 완료: ${deleted}건 제거`);
   } catch (err) {

@@ -44,7 +44,6 @@ let _categoryFilters = {         // 카테고리별 필터 (기본값)
   court: true,
   constitutional: true,
   tax: false,
-  patent: false,
 };
 
 /**
@@ -101,13 +100,11 @@ async function init() {
       'bupgogae_filter_court',
       'bupgogae_filter_constitutional',
       'bupgogae_dlc_tax',
-      'bupgogae_dlc_patent',
     ]);
     _categoryFilters = {
       court: filterData.bupgogae_filter_court !== false,         // 기본 ON
       constitutional: filterData.bupgogae_filter_constitutional !== false, // 기본 ON
       tax: filterData.bupgogae_dlc_tax === true,                 // 기본 OFF
-      patent: filterData.bupgogae_dlc_patent === true,           // 기본 OFF
     };
     console.log('[bupgogae] 카테고리 필터:', _categoryFilters);
   } catch (err) {
@@ -208,7 +205,13 @@ function scheduleProcessing() {
  */
 async function processAllResponses() {
   if (_isProcessing) return;
+  // 메타데이터 준비 완료 전에는 실행 건너뛰기
+  if (window.bupgogaeCaseRegex && !window.bupgogaeCaseRegex.isMetaReady()) {
+    console.debug('[bupgogae] 처리 스킵: 메타데이터 준비 안됨');
+    return;
+  }
   _isProcessing = true;
+  const startTime = performance.now();
 
   try {
     // Gemini 응답 컨테이너 찾기
@@ -225,6 +228,64 @@ async function processAllResponses() {
     console.error('[bupgogae] 처리 중 오류:', err);
   } finally {
     _isProcessing = false;
+    const duration = performance.now() - startTime;
+    await handleCircuitBreaker(duration);
+  }
+}
+
+/**
+ * 서킷 브레이커 (Circuit Breaker): 이상 현상(1500ms 초과) 감지 및 비상 정지
+ * @param {number} duration 실행 시간 (ms)
+ */
+async function handleCircuitBreaker(duration) {
+  try {
+    const data = await chrome.storage.local.get([
+      'bupgogae_circuit_strikes',
+      'bupgogae_circuit_fast_streak'
+    ]);
+    
+    let strikes = data.bupgogae_circuit_strikes || 0;
+    let fastStreak = data.bupgogae_circuit_fast_streak || 0;
+    let updated = false;
+
+    if (duration > 1500) {
+      strikes += 1;
+      fastStreak = 0;
+      updated = true;
+      console.warn(`[bupgogae] ⚠️ 서킷 브레이커: 처리 시간 지연 감지 (${duration.toFixed(2)}ms). 누적 스트라이크: ${strikes}/3`);
+
+      if (strikes >= 3) {
+        // 비상 정지 요건 충족
+        if (_observer) {
+          _observer.disconnect();
+          _observer = null;
+        }
+        chrome.runtime.sendMessage({ type: 'EMERGENCY_DISABLE' });
+        alert('원격 설정 오류가 지속 감지되어 보호를 위해 확장프로그램을 영구 비활성화합니다.');
+        return; // 추가 업데이트 진행 안 함
+      }
+    } else if (duration <= 100) {
+      // 100ms 이하이면 회복 카운트 증가 (과거 strike 기록이 있을 때만 측정)
+      if (strikes > 0 || fastStreak > 0) {
+        fastStreak += 1;
+        updated = true;
+        
+        if (fastStreak >= 10) {
+          console.log(`[bupgogae] 🔄 서킷 브레이커 상태 복구: 연속 ${fastStreak}회 정상 처리. 스트라이크 리셋.`);
+          strikes = 0;
+          fastStreak = 0;
+        }
+      }
+    }
+
+    if (updated) {
+      await chrome.storage.local.set({
+        bupgogae_circuit_strikes: strikes,
+        bupgogae_circuit_fast_streak: fastStreak
+      });
+    }
+  } catch (err) {
+    console.error('[bupgogae] 서킷 브레이커 상태 처리 실패:', err);
   }
 }
 
@@ -344,21 +405,44 @@ async function processContainer(container) {
 
   if (keyToCases.size === 0) return;
 
-  // ── Stage 3: 배치 조회 ──
-  const keys = Array.from(keyToCases.keys());
-  const results = await batchLookup(keys);
-
-  // ── Stage 4: Green/Orange 렌더링 ──
-  const courtCodeMap = window.bupgogaeCaseRegex.getCourtCodeMap();
+  // ── Stage 2.5: Pending (Gray) 렌더링 ──
+  const pendingBadges = new Map(); // key -> { badge, parsed }[]
 
   for (const [key, entries] of keyToCases) {
+    const items = [];
+    for (const { textNode, parsed } of entries) {
+      // 타다닥 효과를 위한 회색 껍데기 렌더링
+      const badge = renderBadge(textNode, parsed.raw, 'gray');
+      items.push({ badge, parsed }); // badge가 null이어도(이미 렌더링됨) 안전하게 모아둠
+    }
+    pendingBadges.set(key, items);
+  }
+
+  // ── Stage 3: 배치 조회 ──
+  const keys = Array.from(pendingBadges.keys());
+  const results = await batchLookup(keys);
+
+  // ── Stage 4: Green/Orange 렌더링 (결과 덮어쓰기) ──
+  const courtCodeMap = window.bupgogaeCaseRegex.getCourtCodeMap();
+
+  for (const [key, items] of pendingBadges) {
     const result = results[key];
+
+    // 🚨 DB 조회 지연/시스템 에러: 원래 텍스트 노드로 원복 (다음 스캔을 위해)
+    if (result && result.error) {
+      for (const item of items) {
+        if (item.badge) {
+          window.bupgogae.revertPrecedentBadge(item.badge, item.parsed.raw);
+        }
+      }
+      continue;
+    }
 
     if (result && result.found) {
       // Green — data 배열의 모든 매칭 사건을 entries로 조립
       const data = result.data;
-      const entryType = entries[0]?.parsed?.type;
-      const caseCode = entries[0]?.parsed?.code;
+      const entryType = items[0]?.parsed?.type;
+      const caseCode = items[0]?.parsed?.code;
 
       const greenEntries = [];
 
@@ -376,19 +460,11 @@ async function processContainer(container) {
             trialType: '',
           };
 
-          if (entryType === 'patent') {
-            // 특허심판: [1]=trialType, [2]=dateInt, [3]=caseName
-            entry.trialType = row[1] || '';
-            if (row.length >= 3 && typeof row[2] === 'number') entry.dateInt = row[2];
-            if (row.length >= 4 && typeof row[3] === 'string') entry.caseName = row[3] || '';
-          } else {
-            // 법원/헌재/조세: [1]=courtCode, [2]=dateInt, [3]=caseName
-            if (row.length >= 2) entry.courtCode = row[1];
-            if (row.length >= 3 && typeof row[2] === 'number') entry.dateInt = row[2];
-            const nameIdx = (typeof row[2] === 'string') ? 2 : 3;
-            if (row.length > nameIdx && typeof row[nameIdx] === 'string') {
-              entry.caseName = row[nameIdx] || '';
-            }
+          if (row.length >= 2) entry.courtCode = row[1];
+          if (row.length >= 3 && typeof row[2] === 'number') entry.dateInt = row[2];
+          const nameIdx = (typeof row[2] === 'string') ? 2 : 3;
+          if (row.length > nameIdx && typeof row[nameIdx] === 'string') {
+            entry.caseName = row[nameIdx] || '';
           }
 
           greenEntries.push(entry);
@@ -404,18 +480,22 @@ async function processContainer(container) {
         });
       }
 
-      for (const { textNode, parsed } of entries) {
-        renderBadge(textNode, parsed.raw, 'green', {
-          greenEntries,
-          caseCode: parsed.code,
-          caseType: parsed.type,
-          courtCodeMap,
-        });
+      for (const item of items) {
+        if (item.badge) {
+          window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'green', {
+            greenEntries,
+            caseCode: item.parsed.code,
+            caseType: item.parsed.type,
+            courtCodeMap,
+          });
+        }
       }
     } else {
       // Orange
-      for (const { textNode, parsed } of entries) {
-        renderBadge(textNode, parsed.raw, 'orange');
+      for (const item of items) {
+        if (item.badge) {
+          window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'orange');
+        }
       }
     }
   }
@@ -495,10 +575,10 @@ async function batchLookup(keys) {
         (response) => {
           if (chrome.runtime.lastError) {
             console.warn('[bupgogae] 배치 조회 실패:', chrome.runtime.lastError.message);
-            // 전부 not found로 처리
+            // 에러 시 error: true 플래그 포함시켜서 렌더링 스킵 유도 (Orange 방지)
             const fallback = {};
             for (const k of chunk) {
-              fallback[k] = { found: false, data: null };
+              fallback[k] = { found: false, data: null, error: true };
             }
             resolve(fallback);
             return;
@@ -525,17 +605,18 @@ async function batchLookup(keys) {
  *
  * @param {Text} textNode
  * @param {string} raw - 원본 사건번호 문자열
- * @param {'green'|'orange'|'red'} level
+ * @param {'green'|'orange'|'red'|'gray'} level
  * @param {Object} [options]
+ * @returns {HTMLElement|null} 생성된 배지 DOM 엘리먼트
  */
 function renderBadge(textNode, raw, level, options = {}) {
   try {
     // 이미 처리된 텍스트 노드 확인
-    if (!textNode.parentNode) return;
-    if (textNode.parentNode.closest && textNode.parentNode.closest('.bgae-badge')) return;
+    if (!textNode.parentNode) return null;
+    if (textNode.parentNode.closest && textNode.parentNode.closest('.bgae-badge')) return null;
 
     // 텍스트 노드 내에 해당 문자열이 여전히 있는지 확인
-    if (!textNode.textContent.includes(raw)) return;
+    if (!textNode.textContent.includes(raw)) return null;
 
     const badge = window.bupgogae.renderPrecedentBadge(textNode, raw, level, options);
 
@@ -543,10 +624,12 @@ function renderBadge(textNode, raw, level, options = {}) {
       // 렌더링 성공 → 부모에 처리 완료 마킹
       // (정확히는 배지 자체가 마킹 역할)
       console.debug(`[bupgogae] ${level.toUpperCase()} 렌더링: ${raw}`);
+      return badge;
     }
   } catch (err) {
     console.error(`[bupgogae] 렌더링 실패 (${raw}):`, err);
   }
+  return null;
 }
 
 

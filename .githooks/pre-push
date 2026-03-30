@@ -1,0 +1,118 @@
+#!/bin/sh
+#
+# 법고개(Bupgogae) — Pre-Push Hook
+# =================================
+# push 전 보안 금칙어, 테스트, 번들 크기를 검증한다.
+# 실패 시 push를 차단한다.
+#
+# [설치]
+#   git config core.hooksPath .githooks
+#
+
+set -e
+
+echo "╔══════════════════════════════════════════╗"
+echo "║  법고개 Pre-Push Hook                    ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+FAILED=0
+
+# ──────────────────────────────────────────
+# 1. 보안 금칙어 검사 (MV3 CSP / XSS 차단)
+# ──────────────────────────────────────────
+echo "🔒 [1/4] 보안 금칙어 검사..."
+
+FORBIDDEN_PATTERNS='innerHTML\s*=|outerHTML\s*=|eval\s*\(|new\s+Function\s*\(|document\.write\s*\(|\.insertAdjacentHTML\s*\('
+
+# extension/ 내 모든 JS 파일 검사 (테스트 제외)
+MATCHES=$(grep -rnE "$FORBIDDEN_PATTERNS" \
+  "$REPO_ROOT/extension/background/"*.js \
+  "$REPO_ROOT/extension/content/"*.js \
+  "$REPO_ROOT/extension/popup/"*.js \
+  2>/dev/null | grep -v '\.test\.js' | grep -v '// safe:' || true)
+
+if [ -n "$MATCHES" ]; then
+  echo "  ❌ 보안 금칙어 감지:"
+  echo "$MATCHES"
+  echo ""
+  echo "  innerHTML, eval, new Function, document.write 등은"
+  echo "  Chrome Web Store 심사 탈락 + XSS 경로입니다."
+  echo "  DOM API(createElement/textContent)를 사용하세요."
+  echo "  의도적 사용이면 해당 줄에 '// safe:' 주석을 추가하세요."
+  FAILED=1
+else
+  echo "  ✅ 금칙어 없음"
+fi
+
+# ──────────────────────────────────────────
+# 2. Jest 단위 테스트 (case-regex)
+# ──────────────────────────────────────────
+echo ""
+echo "🧪 [2/4] Jest 단위 테스트..."
+
+if [ -f "$REPO_ROOT/extension/package.json" ]; then
+  cd "$REPO_ROOT/extension"
+  if npx jest --silent 2>/dev/null; then
+    echo "  ✅ Jest 통과"
+  else
+    echo "  ❌ Jest 실패"
+    FAILED=1
+  fi
+  cd "$REPO_ROOT"
+else
+  echo "  ⏭  extension/package.json 없음 — 스킵"
+fi
+
+# ──────────────────────────────────────────
+# 3. PyTest 단위 테스트 (compress)
+# ──────────────────────────────────────────
+echo ""
+echo "🐍 [3/4] PyTest 단위 테스트..."
+
+if [ -f "$REPO_ROOT/pipeline/test_compress.py" ]; then
+  cd "$REPO_ROOT/pipeline"
+  if python -m pytest test_compress.py -q 2>/dev/null; then
+    echo "  ✅ PyTest 통과"
+  else
+    echo "  ❌ PyTest 실패"
+    FAILED=1
+  fi
+  cd "$REPO_ROOT"
+else
+  echo "  ⏭  pipeline/test_compress.py 없음 — 스킵"
+fi
+
+# ──────────────────────────────────────────
+# 4. 번들 크기 가드
+# ──────────────────────────────────────────
+echo ""
+echo "📦 [4/4] 번들 크기 검사..."
+
+MAX_BUNDLE_MB=10
+OVERSIZED=$(find "$REPO_ROOT/extension/data" -name "*.json" -size +${MAX_BUNDLE_MB}M 2>/dev/null || true)
+
+if [ -n "$OVERSIZED" ]; then
+  echo "  ❌ 번들 JSON ${MAX_BUNDLE_MB}MB 초과:"
+  echo "$OVERSIZED"
+  FAILED=1
+else
+  echo "  ✅ 번들 크기 정상"
+fi
+
+# ──────────────────────────────────────────
+# 최종 판정
+# ──────────────────────────────────────────
+echo ""
+if [ $FAILED -ne 0 ]; then
+  echo "══════════════════════════════════════════"
+  echo "  ❌ Pre-Push 검증 실패 — push 차단됨"
+  echo "══════════════════════════════════════════"
+  exit 1
+else
+  echo "══════════════════════════════════════════"
+  echo "  ✅ Pre-Push 검증 통과"
+  echo "══════════════════════════════════════════"
+  exit 0
+fi

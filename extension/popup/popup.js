@@ -29,8 +29,7 @@ const $dlcArrow = document.getElementById('dlcArrow');
 const $dlcBody = document.getElementById('dlcBody');
 const $taxDlcToggle = document.getElementById('taxDlcToggle');
 const $taxDlcDesc = document.getElementById('taxDlcDesc');
-const $patentDlcToggle = document.getElementById('patentDlcToggle');
-const $patentDlcDesc = document.getElementById('patentDlcDesc');
+
 const $courtFilterToggle = document.getElementById('courtFilterToggle');
 const $courtFilterDesc = document.getElementById('courtFilterDesc');
 const $constitutionalFilterToggle = document.getElementById('constitutionalFilterToggle');
@@ -47,7 +46,7 @@ let _disabledGlobal = false;     // 전체 비활성
 let _disabledSites = [];         // 비활성 사이트 목록
 let _isSupportedSite = false;    // 현재 사이트가 지원 대상인지
 let _dlcTaxEnabled = false;      // 조세심판 DLC 활성 여부
-let _dlcPatentEnabled = false;   // 특허심판 DLC 활성 여부
+
 let _filterCourt = true;         // 법원 판례 필터 (기본 ON)
 let _filterConstitutional = true; // 헌법재판소 필터 (기본 ON)
 
@@ -100,14 +99,14 @@ async function loadState() {
       'bupgogae_disabled_global',
       'bupgogae_disabled_sites',
       'bupgogae_dlc_tax',
-      'bupgogae_dlc_patent',
+
       'bupgogae_filter_court',
       'bupgogae_filter_constitutional',
     ]);
     _disabledGlobal = data.bupgogae_disabled_global === true;
     _disabledSites = Array.isArray(data.bupgogae_disabled_sites) ? data.bupgogae_disabled_sites : [];
     _dlcTaxEnabled = data.bupgogae_dlc_tax === true;
-    _dlcPatentEnabled = data.bupgogae_dlc_patent === true;
+
     // 법원/헌재 기본값은 true (undefined → true)
     _filterCourt = data.bupgogae_filter_court !== false;
     _filterConstitutional = data.bupgogae_filter_constitutional !== false;
@@ -204,8 +203,7 @@ function renderUI() {
   updateConstitutionalFilterDesc();
   $taxDlcToggle.checked = _dlcTaxEnabled;
   updateTaxDlcDesc();
-  $patentDlcToggle.checked = _dlcPatentEnabled;
-  updatePatentDlcDesc();
+
 }
 
 function updateCourtFilterDesc() {
@@ -226,11 +224,7 @@ function updateTaxDlcDesc() {
     : '조세심판 사건 검증 비활성';
 }
 
-function updatePatentDlcDesc() {
-  $patentDlcDesc.textContent = _dlcPatentEnabled
-    ? '특허심판 사건 검증 활성'
-    : '특허심판 사건 검증 비활성';
-}
+
 
 function updateSiteDesc(enabled) {
   $siteToggleDesc.textContent = enabled
@@ -299,39 +293,26 @@ function bindEvents() {
     }
   });
 
-  // DLC 특허심판 토글
-  $patentDlcToggle.addEventListener('change', async () => {
-    _dlcPatentEnabled = $patentDlcToggle.checked;
-    await chrome.storage.local.set({ bupgogae_dlc_patent: _dlcPatentEnabled });
-    updatePatentDlcDesc();
 
-    if (_dlcPatentEnabled) {
-      chrome.runtime.sendMessage({ type: 'DOWNLOAD_DLC', dlc: 'patent' });
-    }
-  });
 
   // DLC DB 삭제
   $dlcDeleteBtn.addEventListener('click', async () => {
     if (!confirm('확장기능 DB를 삭제하시겠습니까?')) return;
 
     _dlcTaxEnabled = false;
-    _dlcPatentEnabled = false;
     _filterCourt = true;
     _filterConstitutional = true;
     $taxDlcToggle.checked = false;
-    $patentDlcToggle.checked = false;
     $courtFilterToggle.checked = true;
     $constitutionalFilterToggle.checked = true;
     await chrome.storage.local.set({
       bupgogae_dlc_tax: false,
-      bupgogae_dlc_patent: false,
       bupgogae_filter_court: true,
       bupgogae_filter_constitutional: true,
     });
     updateCourtFilterDesc();
     updateConstitutionalFilterDesc();
     updateTaxDlcDesc();
-    updatePatentDlcDesc();
 
     chrome.runtime.sendMessage({ type: 'DELETE_DLC_DB' });
     $dlcDeleteBtn.textContent = '삭제 완료 ✔';

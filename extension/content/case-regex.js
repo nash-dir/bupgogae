@@ -7,7 +7,6 @@
  *   1. extractCaseNumbers(text) → 화이트리스트 정규식으로 사건번호 추출
  *      - 법원/헌재: case_code_map 기반 동적 정규식 (등록된 사건부호만 매칭)
  *      - 조세심판: "조심" prefix 전용 정규식
- *      - 특허심판: 당/원/취/정/무 전용 정규식
  *   2. validateCaseNumber(num)  → Red 필터: 미래 연도, 비현실적 과거, 비정상 일련번호
  *   3. compressCaseKey(num)     → "2015다6302" → "15Da6302"
  *
@@ -102,21 +101,7 @@ const CASE_PARTS_REGEX = /^((?:19|20)\d{2}|\d{2})([가-힣]{1,4})(\d{1,7})$/;
  */
 const TAX_CASE_REGEX = /조심\s*(\d{2,4})([가-힣])(\d{1,5})/g;
 
-/**
- * 특허심판원 사건번호 정규식.
- *
- * 구조: [연도][심판종류코드][일련번호]
- *   - 연도: 4자리
- *   - 심판종류코드: 당(거절결정/무효), 원(권리범위확인/정정무효),
- *                   취(권리범위확인), 정(정정심판)
- *   - 일련번호: 1~6자리 숫자
- *
- * 주의: 법원 '무'(형사재심)와 충돌 방지 위해 '무' 제외.
- *       KIPRIS 무효사건은 '당' 코드를 사용.
- *
- * 예시: "2023당1234", "2022원5678", "2021취100"
- */
-const PATENT_TRIAL_REGEX = /(\d{4})(당|원|취|정)\s*(\d{1,6})/g;
+
 
 
 /**
@@ -178,18 +163,6 @@ function extractCaseNumbers(text) {
     });
   }
 
-  // --- 특허심판원 ---
-  PATENT_TRIAL_REGEX.lastIndex = 0;
-  while ((match = PATENT_TRIAL_REGEX.exec(text)) !== null) {
-    const raw = match[0];
-    if (seen.has(raw)) continue;
-    seen.add(raw);
-    results.push({
-      raw, year: match[1], code: match[2], serial: match[3].trim(),
-      startIdx: match.index, type: 'patent',
-    });
-  }
-
   return results;
 }
 
@@ -234,7 +207,7 @@ function validateCaseNumber(parsed) {
   }
 
   // ── Red 2: 비현실적 과거 연도 ──
-  const minYears = { tax: 1966, patent: 1956, court: 1945 };
+  const minYears = { tax: 1966, court: 1945 };
   const minYear = minYears[parsed.type] || 1945;
   if (fullYear < minYear) {
     return {
@@ -286,11 +259,6 @@ function compressCaseKey(parsed) {
   // 조세심판원: "TX" prefix + 지역코드 그대로
   if (parsed.type === 'tax') {
     return `TX${yearSuffix}${parsed.code}${parsed.serial}`;
-  }
-
-  // 특허심판원: "KP" prefix + 심판종류 + 일련번호
-  if (parsed.type === 'patent') {
-    return `KP${yearSuffix}${parsed.code}${parsed.serial}`;
   }
 
   // 법원 판례: 기존 로직

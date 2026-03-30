@@ -84,6 +84,20 @@ const BUPGOGAE_CSS = `
   background-color: rgba(234, 88, 12, 0.30);
 }
 
+/* --- Gray (Pending) --- */
+.bgae-gray {
+  background-color: rgba(156, 163, 175, 0.20);
+  color: inherit;
+  border-bottom: 2.5px dotted rgba(156, 163, 175, 0.6);
+  animation: bgae-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  cursor: wait;
+}
+
+@keyframes bgae-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 /* --- 툴팁 (hover + pinned) --- */
 .bgae-tooltip {
   visibility: hidden;
@@ -302,13 +316,10 @@ function decodeCourtName(courtCode, courtCodeMap) {
  * 사건부호로 판결/결정/심결 유형 판별.
  * 결정 사건부호: 마,모,후,브,스,즈,초,초기,비,인,그,르,슈,즈,카,타,파,하 등
  * @param {string} caseCode - 한글 사건부호 (예: "다", "마", "후", "당")
- * @param {string} [caseType] - 'court' | 'constitutional' | 'tax' | 'patent'
+ * @param {string} [caseType] - 'court' | 'constitutional' | 'tax'
  * @returns {string} "판결", "결정", 또는 "심결"
  */
 function getDecisionType(caseCode, caseType) {
-  // 특허심판원: 모두 "심결"
-  if (caseType === 'patent') return '심결';
-
   // 결정 유형 사건부호 (1글자 + 2글자)
   const decisionCodes = new Set([
     '마', '모', '후', '브', '스', '즈', '쿠', '터', '토',
@@ -329,19 +340,18 @@ function getDecisionType(caseCode, caseType) {
  * full citation 포맷 생성.
  * "대법원 2015. 1. 15. 선고 2015다6302 판결"
  * "대법원 1976. 4. 28.자 75모81 결정"
- * "특허심판원 2023. 9. 15. 2023당1234 심결"
+ * "대법원 1976. 4. 28.자 75모81 결정"
  *
  * @param {string} courtName
  * @param {string} dateStr - formatDecisionDate 결과
  * @param {string} caseNumber - 원본 사건번호 (예: "2015다6302")
  * @param {string} caseCode - 한글 사건부호 (예: "다", "마", "당")
- * @param {string} [caseType] - 'court' | 'constitutional' | 'tax' | 'patent'
+ * @param {string} [caseType] - 'court' | 'constitutional' | 'tax'
  * @returns {string}
  */
 function buildFullCitation(courtName, dateStr, caseNumber, caseCode, caseType) {
   const type = getDecisionType(caseCode, caseType);
-  // 심결(특허심판)은 '선고'/'자' 대신 날짜만 표시
-  const connector = type === '심결' ? '' : (type === '결정' ? '자' : '선고');
+  const connector = type === '결정' ? '자' : '선고';
 
   let parts = [];
   if (courtName) parts.push(courtName);
@@ -400,9 +410,7 @@ const TOOLTIP_BUILDERS = {
       } = entry;
 
       // full citation 조립
-      const courtName = caseType === 'patent'
-        ? '특허심판원'
-        : decodeCourtName(courtCode, courtCodeMap);
+      const courtName = decodeCourtName(courtCode, courtCodeMap);
       const dateStr = formatDecisionDate(dateInt);
       const fullCitation = buildFullCitation(
         courtName, dateStr, rawCaseNumber, caseCode, caseType,
@@ -411,9 +419,7 @@ const TOOLTIP_BUILDERS = {
       // 링크 URL 결정
       const sn = String(serialNumber);
       let href;
-      if (caseType === 'patent') {
-        href = 'https://www.kipris.or.kr/';
-      } else if (sn.startsWith('D')) {
+      if (sn.startsWith('D')) {
         href = `https://www.law.go.kr/detcInfoP.do?mode=1&detcSeq=${sn.slice(1)}`;
       } else if (sn.startsWith('T')) {
         href = `https://www.law.go.kr/DRF/lawService.do?target=ttSpecialDecc&ID=${sn.slice(1)}&type=HTML`;
@@ -566,59 +572,62 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   badge.textContent = precedentString;
 
   // ── 툴팁 생성 ──
-  const tooltip = document.createElement('span');
-  tooltip.className = 'bgae-tooltip';
+  // 회색(gray) Pending 상태일 때는 툴팁을 달지 않음
+  if (level !== 'gray') {
+    const tooltip = document.createElement('span');
+    tooltip.className = 'bgae-tooltip';
 
-  // 닫기 버튼 (pinned 상태에서만 보임)
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'bgae-tooltip-close';
-  closeBtn.textContent = '\u00D7'; // ×
-  closeBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    unpinCurrentTooltip();
-  });
-  tooltip.appendChild(closeBtn);
+    // 닫기 버튼 (pinned 상태에서만 보임)
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'bgae-tooltip-close';
+    closeBtn.textContent = '\u00D7'; // ×
+    closeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      unpinCurrentTooltip();
+    });
+    tooltip.appendChild(closeBtn);
 
-  // 툴팁 내용 (DOM API로 조립 — innerHTML 미사용)
-  switch (level) {
-    case 'green': {
-      // greenEntries 배열 → 사건 목록 리스트 렌더링
-      const greenEntries = options.greenEntries || [{
-        serialNumber: options.serialNumber || '',
-        courtCode: options.courtCode,
-        dateInt: options.dateInt,
-        caseName: options.caseName || '',
-        caseType: options.caseType || 'court',
-        caseCode: options.caseCode || '',
-        trialType: options.trialType || '',
-      }];
-      tooltip.appendChild(TOOLTIP_BUILDERS.green(
-        greenEntries, precedentString, options.courtCodeMap,
-      ));
-      break;
+    // 툴팁 내용 (DOM API로 조립 — innerHTML 미사용)
+    switch (level) {
+      case 'green': {
+        // greenEntries 배열 → 사건 목록 리스트 렌더링
+        const greenEntries = options.greenEntries || [{
+          serialNumber: options.serialNumber || '',
+          courtCode: options.courtCode,
+          dateInt: options.dateInt,
+          caseName: options.caseName || '',
+          caseType: options.caseType || 'court',
+          caseCode: options.caseCode || '',
+          trialType: options.trialType || '',
+        }];
+        tooltip.appendChild(TOOLTIP_BUILDERS.green(
+          greenEntries, precedentString, options.courtCodeMap,
+        ));
+        break;
+      }
+
+      case 'red':
+        tooltip.appendChild(TOOLTIP_BUILDERS.red(options.redReason || ''));
+        break;
+
+      case 'orange':
+        tooltip.appendChild(TOOLTIP_BUILDERS.orange());
+        break;
     }
 
-    case 'red':
-      tooltip.appendChild(TOOLTIP_BUILDERS.red(options.redReason || ''));
-      break;
+    badge.appendChild(tooltip);
 
-    case 'orange':
-      tooltip.appendChild(TOOLTIP_BUILDERS.orange());
-      break;
+    // ── 클릭 → 툴팁 고정 ──
+    // 링크 클릭은 통과시키고, 배지 자체 클릭만 툴팁 고정
+    badge.addEventListener('click', (e) => {
+      // 툴팁 내 링크 클릭은 그대로 진행 (새 탭 열기)
+      if (e.target.closest('a')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      togglePinTooltip(tooltip);
+    });
   }
-
-  badge.appendChild(tooltip);
-
-  // ── 클릭 → 툴팁 고정 ──
-  // 링크 클릭은 통과시키고, 배지 자체 클릭만 툴팁 고정
-  badge.addEventListener('click', (e) => {
-    // 툴팁 내 링크 클릭은 그대로 진행 (새 탭 열기)
-    if (e.target.closest('a')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    togglePinTooltip(tooltip);
-  });
 
   // ── DOM 교체 ──
   if (beforeText) {
@@ -633,10 +642,33 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   return badge;
 }
 
+/**
+ * 기존 배지를 해제하고 일반 텍스트 노드로 원복 (실패 시 복구용)
+ * @param {HTMLElement} badge
+ * @param {string} precedentString
+ * @returns {Text|null} 새로 삽입된 텍스트 노드
+ */
+function revertPrecedentBadge(badge, precedentString) {
+  if (!badge || !badge.parentNode) return null;
+  const textNode = document.createTextNode(precedentString);
+  badge.parentNode.insertBefore(textNode, badge);
+  badge.parentNode.removeChild(badge);
+  return textNode;
+}
 
-
-
-
+/**
+ * 렌더링된 배지(주로 gray)를 파괴하고 새로운 색상으로 재렌더링
+ * @param {HTMLElement} badge 
+ * @param {string} precedentString 
+ * @param {'green'|'orange'|'red'} level 
+ * @param {Object} options 
+ * @returns {HTMLElement|null} 새로 생성된 배지
+ */
+function updatePrecedentBadge(badge, precedentString, level, options = {}) {
+  const textNode = revertPrecedentBadge(badge, precedentString);
+  if (!textNode) return null;
+  return renderPrecedentBadge(textNode, precedentString, level, options);
+}
 
 // ============================================================
 // 7. 외부 인터페이스
@@ -645,6 +677,8 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
 if (typeof window !== 'undefined') {
   window.bupgogae = {
     renderPrecedentBadge,
+    updatePrecedentBadge,
+    revertPrecedentBadge,
     formatDecisionDate,
     decodeCourtName,
     buildFullCitation,

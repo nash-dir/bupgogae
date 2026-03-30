@@ -16,7 +16,7 @@ AI(LLM)가 생성한 허위 판례 인용을 실시간으로 탐지합니다. 13
 법고개 (Bupgogae) — LLM 환각 판례 탐지기
 
 ◆ 무엇을 하나요?
-AI 챗봇(ChatGPT, Gemini, Copilot, Claude, Perplexity, Grok)이 생성한 응답에서 한국 판례 사건번호를 실시간으로 감지하고, 실제 존재하는 판례인지 3단계(Green/Orange/Red) 신호등으로 즉시 알려드립니다.
+AI 챗봇(ChatGPT, Gemini, Copilot, Claude, Perplexity, Grok)이 생성한 응답에서 대한민국 판례 사건번호를 실시간으로 감지하고, 실제 존재하는 판례인지 3단계(Green/Orange/Red) 신호등으로 즉시 알려드립니다.
 
 ◆ 왜 필요한가요?
 AI가 존재하지 않는 판례를 그럴듯하게 인용하는 "환각(hallucination)" 현상은 법률 업무에서 치명적인 위험을 초래합니다. 법고개는 이 위험을 브라우저에서 즉시 차단합니다.
@@ -27,6 +27,7 @@ AI가 존재하지 않는 판례를 그럴듯하게 인용하는 "환각(halluci
 ✓ AI 환각(Hallucination) 의심 판례 경고
 ✓ 법제처 사이트 원문 바로가기 링크
 ✓ 판례 상세 정보 툴팁 (사건명, 선고일, 사건유형)
+✓ 주요 LLM 챗봇 호환
 
 🟢 실존 판례 : 공개 판례 DB와 교차 검증된 안전한 판례 (판례일련번호 기반 원문 직접 링크)
 🟠 의심 판례 : 사건번호 형식은 맞으나 DB에서 확인되지 않는 판례 (사법정보공개포털 검증 유도)
@@ -36,14 +37,6 @@ AI가 존재하지 않는 판례를 그럴듯하게 인용하는 "환각(halluci
 ✓ 14만여 건 대한민국 공공 판례 DB 내장 (설치 즉시 동작)
 ✓ 100% 로컬 처리 — 개인정보·채팅 내용 일절 수집하지 않음
 ✓ 오픈소스 (GitHub: github.com/nashdir/bupgogae)
-
-◆ 지원 플랫폼
-• ChatGPT
-• Google Gemini
-• Microsoft Copilot
-• Claude (Anthropic)
-• Perplexity
-• Grok (xAI)
 
 ◆ 데이터 출처
 대법원 종합법률정보, 국가법령정보센터 등 공공 데이터 활용
@@ -89,7 +82,7 @@ Used to update extension badge status (ON/OFF) when switching or loading tabs.
 
 ### host_permissions
 ```
-Required to read LLM-generated response text on supported chatbot pages (ChatGPT, Gemini, Claude, Copilot, Perplexity, Grok) to detect and validate case law citations. No data is collected or transmitted. api.bup.live is the extension's own API server for database synchronization.
+Required to read LLM-generated response text on supported chatbot pages (ChatGPT, Gemini, Claude, Copilot, Perplexity, Grok) to detect and validate case law citations. No data is collected or transmitted outside. api.bup.live is the extension's own API server for database synchronization.
 ```
 
 ---
@@ -113,5 +106,5 @@ Required to read LLM-generated response text on supported chatbot pages (ChatGPT
 ## Privacy Policy URL
 
 ```
-https://github.com/nashdir/bupgogae/blob/main/PRIVACY.md
+http://api.bup.live/bupgogae/privacy.html
 ```

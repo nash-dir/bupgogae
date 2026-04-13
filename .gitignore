@@ -63,4 +63,4 @@ build/
 
 # ===== 임시 파일 =====
 AGENTS.md
-.agent/*
+.agents/*

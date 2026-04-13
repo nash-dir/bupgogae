@@ -99,13 +99,21 @@
       <button class="popup-dlc-delete-btn" id="dlcDeleteBtn" type="button">
         확장기능 DB 삭제
       </button>
+
+      <!-- 주황색 사건번호 복사 버튼 -->
+      <button class="popup-dlc-delete-btn" id="copyOrangeBtn" type="button" style="margin-top: 8px; background-color: #ea580c; border-color: #c2410c; color: white;">
+        주황색 사건번호 복사 (Ctrl+Shift+C)
+      </button>
     </div>
   </div>
 
   <!-- 푸터 상태 -->
   <footer class="popup-footer">
     <span class="popup-status" id="statusText">활성 상태</span>
-    <span class="popup-db-date" id="dbDate">DB 일자 : —</span>
+    <div class="popup-db-date-group">
+      <span class="popup-db-date" id="dbDate">DB 일자 : —</span>
+      <button id="dbRefreshBtn" class="popup-refresh-btn" title="DB 수동 동기화">🔄</button>
+    </div>
     <span class="popup-db-count" id="dbCount">판례 수 : —</span>
     <span class="popup-contact">개발자 연락처: <a href="mailto:nashdir.dev@gmail.com" id="contactLink">nashdir.dev@gmail.com</a></span>
   </footer>

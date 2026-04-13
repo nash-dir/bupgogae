@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "법고개 (Bupgogae)",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "LLM 환각 판례를 실시간으로 탐지합니다",
   "permissions": ["alarms", "storage", "unlimitedStorage", "tabs"],
   "host_permissions": [
@@ -53,6 +53,15 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "commands": {
+    "copy_orange_cases": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+C",
+        "mac": "Command+Shift+C"
+      },
+      "description": "DB 미확인 사건번호(주황색) 복사"
+    }
   },
   "web_accessible_resources": [{
     "resources": ["data/bupgogae_meta.json", "data/db.json"],

@@ -1015,3 +1015,19 @@ async function deleteDlcData() {
   }
 }
 
+/**
+ * 단축키(commands) 핸들러
+ */
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'copy_orange_cases') {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0] && tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_ORANGE_CASES' }, (res) => {
+          if (chrome.runtime.lastError) {
+             console.warn('[bupgogae] 단축키 복사 오류:', chrome.runtime.lastError.message);
+          }
+        });
+      }
+    });
+  }
+});

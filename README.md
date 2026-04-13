@@ -28,6 +28,10 @@
 
 ## 🚀 설치 방법
 
+**방법 1: Chrome 웹 스토어 설치 (권장)**
+* [Chrome 웹 스토어에서 법고개 다운로드](https://chromewebstore.google.com/detail/법고개-bupgogae/ippnejkimhofmcbghlkabbhhgiehgajf) 페이지에 접속하여 스토어 버전으로 설치합니다.
+
+**방법 2: 개발자 모드 설치 (수동 최신 빌드)**
 1. 이 저장소를 로컬로 Clone 하거나 ZIP 파일로 다운로드합니다.
 2. 크롬 브라우저에서 `chrome://extensions/` 에 접속합니다.
 3. 우측 상단의 **'개발자 모드'**를 활성화합니다.
@@ -83,6 +87,10 @@ While AI is revolutionizing legal practice, fabricated case citations can lead t
 
 ## 🚀 Installation
 
+**Method 1: Chrome Web Store (Recommended)**
+* Install directly from the [Chrome Web Store](https://chromewebstore.google.com/detail/법고개-bupgogae/ippnejkimhofmcbghlkabbhhgiehgajf).
+
+**Method 2: Developer Mode (Manual latest build)**
 1. Clone or download this repository.
 2. Navigate to `chrome://extensions/` in Chrome.
 3. Enable **Developer Mode** in the top right corner.
@@ -378,7 +386,7 @@ Case names are stored as raw strings without tokenization. We evaluated two comp
 The **only** network communication is a periodic download of a static, pre-built database file — no user data, telemetry, or analytics are ever transmitted:
 
 ```
-   NAS Crawler (daily 22:00)                Extension
+   Serverless Pipeline (daily 24:00)        Extension
    ┌──────────────────────────┐            ┌──────────────────────────┐
    │ 법제처 API → master.db   │            │ Install: load bundled DB │
    │ (date-modulus scan)      │            │ from extension/data/     │
@@ -400,17 +408,21 @@ The **only** network communication is a periodic download of a static, pre-built
 
 ---
 
-## NAS Crawler Pipeline
+## GitHub Actions Serverless Pipeline
 
-The data pipeline runs as a Docker container on a Synology NAS, scheduled daily at 22:00 KST:
+The backend data pipeline runs as a serverless cron job on GitHub Actions, scheduled daily at 24:00 KST (UTC 15:00):
 
-```
-법제처 Open API  ──→  NAS Docker Container  ──→  Cloudflare R2
+```text
+법제처 Open API  ──→  GitHub Actions Runner  ──→  Cloudflare R2
 (law.go.kr)          │                          (db.json.gz)
-                     ├── master.db (SQLite)
+                     ├── master.db (SQLite synced via R2)
                      ├── blacklist.json (326 bad serials)
                      └── Telegram report
 ```
+
+### State Synchronization (R2)
+
+Because GitHub Actions operates in an ephemeral environment, the `master.db` SQLite state is synchronized using Cloudflare R2 before and after each execution. The script `pipeline/sync_state.py` handles the `boto3` bidirectional state transfer, allowing the crawler to seamlessly continue its modulus queries without losing track of past scanned data.
 
 ### Date-Modulus Scheduler
 
@@ -436,7 +448,11 @@ Verified case badges link directly to `law.go.kr/precInfoP.do?precSeq={serial}` 
 
 ## Directory Structure
 
-```
+```text
+.github/
+└── workflows/
+    └── daily-pipeline.yml      # GHA Serverless Cron Scheduler
+
 extension/
 ├── background/
 │   └── db-sync.js              # Service Worker — IndexedDB sync via R2
@@ -464,7 +480,8 @@ pipeline/
 ├── kipris_runner.py            # KIPRIS Slow Grazing backfill runner
 ├── compress.py                 # SQLite → compressed JSON converter
 ├── master_db.py                # SQLite master DB with blacklist
-├── nas_runner.py               # NAS daily orchestrator (date-modulus)
+├── nas_runner.py               # Crawler orchestrator (date-modulus)
+├── sync_state.py               # Local ↔ R2 serverless state synchronizer
 ├── upload_r2.py                # R2 upload helper
 └── blacklist.json              # 326 known-bad serial numbers
 ```

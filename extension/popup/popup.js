@@ -21,6 +21,7 @@ const $globalToggleDesc = document.getElementById('globalToggleDesc');
 const $siteToggleRow = document.getElementById('siteToggleRow');
 const $statusText = document.getElementById('statusText');
 const $dbDate = document.getElementById('dbDate');
+const $dbRefreshBtn = document.getElementById('dbRefreshBtn');
 const $dbCount = document.getElementById('dbCount');
 
 // DLC
@@ -35,6 +36,7 @@ const $courtFilterDesc = document.getElementById('courtFilterDesc');
 const $constitutionalFilterToggle = document.getElementById('constitutionalFilterToggle');
 const $constitutionalFilterDesc = document.getElementById('constitutionalFilterDesc');
 const $dlcDeleteBtn = document.getElementById('dlcDeleteBtn');
+const $copyOrangeBtn = document.getElementById('copyOrangeBtn');
 
 // ============================================================
 // 2. 상태
@@ -261,6 +263,19 @@ function bindEvents() {
   $siteToggle.addEventListener('change', onSiteToggle);
   $globalToggle.addEventListener('change', onGlobalToggle);
 
+  // DB 새로고침 버튼
+  $dbRefreshBtn.addEventListener('click', () => {
+    $dbRefreshBtn.classList.add('spinning');
+    chrome.runtime.sendMessage({ type: 'FORCE_SYNC' }, async (response) => {
+      $dbRefreshBtn.classList.remove('spinning');
+      if (response && response.success) {
+        await loadSyncDate(); // UI 갱신 (DB 날짜/건수)
+      } else {
+        alert('동기화 실패: ' + (response?.error || '알 수 없는 오류'));
+      }
+    });
+  });
+
   // DLC accordion
   $dlcToggleBtn.addEventListener('click', () => {
     $dlcBody.classList.toggle('open');
@@ -295,9 +310,20 @@ function bindEvents() {
 
 
 
-  // DLC DB 삭제
+  let _deleteConfirmTimer = null;
   $dlcDeleteBtn.addEventListener('click', async () => {
-    if (!confirm('확장기능 DB를 삭제하시겠습니까?')) return;
+    if (!$dlcDeleteBtn.classList.contains('confirming')) {
+      $dlcDeleteBtn.classList.add('confirming');
+      $dlcDeleteBtn.textContent = '정말 삭제할까요? (클릭 시 실행)';
+      _deleteConfirmTimer = setTimeout(() => {
+        $dlcDeleteBtn.classList.remove('confirming');
+        $dlcDeleteBtn.textContent = '확장기능 DB 삭제';
+      }, 3000);
+      return;
+    }
+
+    if (_deleteConfirmTimer) clearTimeout(_deleteConfirmTimer);
+    $dlcDeleteBtn.classList.remove('confirming');
 
     _dlcTaxEnabled = false;
     _filterCourt = true;
@@ -314,9 +340,27 @@ function bindEvents() {
     updateConstitutionalFilterDesc();
     updateTaxDlcDesc();
 
-    chrome.runtime.sendMessage({ type: 'DELETE_DLC_DB' });
+    chrome.runtime.sendMessage({ type: 'DELETE_DLC_DB' }, () => {});
     $dlcDeleteBtn.textContent = '삭제 완료 ✔';
     setTimeout(() => { $dlcDeleteBtn.textContent = '확장기능 DB 삭제'; }, 1500);
+  });
+
+  // 주황색 사건번호 복사
+  $copyOrangeBtn.addEventListener('click', async () => {
+    if (!_currentTabId) return;
+    chrome.tabs.sendMessage(_currentTabId, { type: 'EXTRACT_ORANGE_CASES' }, (res) => {
+      if (chrome.runtime.lastError) {
+        $copyOrangeBtn.textContent = '실행 오류 (새로고침 필요)';
+        setTimeout(() => { $copyOrangeBtn.textContent = '주황색 사건번호 복사 (Ctrl+Shift+C)'; }, 2000);
+        return;
+      }
+      if (res && res.count > 0) {
+        $copyOrangeBtn.textContent = `${res.count}개 복사 완료 ✔`;
+      } else {
+        $copyOrangeBtn.textContent = '주황색 사건번호 없음';
+      }
+      setTimeout(() => { $copyOrangeBtn.textContent = '주황색 사건번호 복사 (Ctrl+Shift+C)'; }, 2000);
+    });
   });
 }
 

@@ -428,11 +428,11 @@ async function processContainer(container) {
   for (const [key, items] of pendingBadges) {
     const result = results[key];
 
-    // 🚨 DB 조회 지연/시스템 에러: 원래 텍스트 노드로 원복 (다음 스캔을 위해)
+    // 🚨 DB 조회 지연/시스템 에러: 무한 깜빡임 루프 방지를 위해 임시 Orange 배지로 폴백
     if (result && result.error) {
       for (const item of items) {
         if (item.badge) {
-          window.bupgogae.revertPrecedentBadge(item.badge, item.parsed.raw);
+          window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'orange');
         }
       }
       continue;
@@ -634,7 +634,42 @@ function renderBadge(textNode, raw, level, options = {}) {
 
 
 // ============================================================
-// 9. 시작
+// 9. 메시지 수신 (팝업/단축키용)
+// ============================================================
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'EXTRACT_ORANGE_CASES') {
+    const badges = document.querySelectorAll('.bgae-badge.bgae-orange');
+    const cases = Array.from(new Set(Array.from(badges).map(b => b.getAttribute('data-bgae-case')))).filter(Boolean);
+    
+    if (cases.length === 0) {
+      sendResponse({ count: 0 });
+      return false; // 동기 응답
+    }
+
+    const textToCopy = `다음의 판결은 DB에서 존재가 확인되지 않음 : ${cases.join(', ')}`;
+    
+    // Clipboard API 사용 (현대 브라우저)
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      sendResponse({ count: cases.length, text: textToCopy });
+    }).catch(err => {
+      console.warn('[bupgogae] Clipboard write failed, using fallback.', err);
+      // Fallback
+      const input = document.createElement('textarea');
+      input.value = textToCopy;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      sendResponse({ count: cases.length, text: textToCopy });
+    });
+
+    return true; // 비동기 응답 대기
+  }
+});
+
+// ============================================================
+// 10. 시작
 // ============================================================
 
 // Content Script 로드 시 즉시 초기화 시작

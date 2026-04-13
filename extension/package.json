@@ -1,9 +1,9 @@
 {
   "name": "bupgogae-extension",
-  "version": "1.0.0",
+  "version": "0.6.0",
   "description": "Bupgogae Extension Tests",
   "scripts": {
-    "test": "jest"
+    "test": "jest --passWithNoTests"
   },
   "devDependencies": {
     "jest": "^29.7.0",

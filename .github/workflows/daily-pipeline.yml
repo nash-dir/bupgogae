@@ -43,8 +43,9 @@ jobs:
       - name: 크롤러 실행 (판례, 헌재, 조세심판) 및 DB 덤프 R2 업로드
         run: python pipeline/crawler_runner.py --data-dir ./pipeline/data
 
-      - name: KIPRIS 특허심판 백필 실행 (선택적)
-        run: python pipeline/kipris_runner.py --data-dir ./pipeline/data
+      # API KEY 문제로 임시 중단
+      # - name: KIPRIS 특허심판 백필 실행 (선택적)
+      #   run: python pipeline/kipris_runner.py --data-dir ./pipeline/data
 
       - name: 갱신된 상태 파일(master.db) R2에 업로드 백업
         if: always()

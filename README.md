@@ -480,7 +480,7 @@ pipeline/
 ├── kipris_runner.py            # KIPRIS Slow Grazing backfill runner
 ├── compress.py                 # SQLite → compressed JSON converter
 ├── master_db.py                # SQLite master DB with blacklist
-├── nas_runner.py               # Crawler orchestrator (date-modulus)
+├── crawler_runner.py               # Crawler orchestrator (date-modulus)
 ├── sync_state.py               # Local ↔ R2 serverless state synchronizer
 ├── upload_r2.py                # R2 upload helper
 └── blacklist.json              # 326 known-bad serial numbers

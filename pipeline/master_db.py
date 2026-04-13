@@ -1,7 +1,7 @@
 """
-Master DB 관리 모듈 — NAS 영속 SQLite.
+Master DB 관리 모듈 — 영속 SQLite.
 
-NAS에 유지되는 master.db를 관리한다.
+유지되는 master.db를 관리한다.
 - 판례 UPSERT (serial 기준 중복 방지)
 - 날짜별 / 전체 조회
 - 압축 JSON 포맷 변환
@@ -34,7 +34,7 @@ from api import clean_case_number  # noqa: E402
 
 
 class MasterDB:
-    """NAS 영속 SQLite master DB."""
+    """영속 SQLite master DB."""
 
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS cases (

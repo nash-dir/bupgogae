@@ -1,4 +1,4 @@
-# ===== Docker (NAS 인프라 경로 포함) =====
+# ===== Docker (크롤러 인프라 경로 포함) =====
 docker-compose*.yml
 Dockerfile*
 

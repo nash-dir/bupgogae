@@ -5,7 +5,7 @@
  * IndexedDB 기반 판례 DB 동기화 엔진.
  *
  * [아키텍처]
- *   백엔드(NAS Runner)가 매일 master.db를 갱신하고
+ *   백엔드(Crawler Runner)가 매일 master.db를 갱신하고
  *   db.json.gz로 구워 Cloudflare R2에 업로드한다.
  *
  * [동기화 전략]

@@ -1,5 +1,5 @@
 """
-NAS Runner — Date-Modulus 스케줄러 + 풀 DB 배포.
+Crawler Runner — Date-Modulus 스케줄러 + 풀 DB 배포.
 
 매일 ~1,420건의 균일 API 호출로 master.db를 갱신하고,
 풀 DB를 db.json으로 덤프한 뒤 R2에 업로드한다.
@@ -11,9 +11,9 @@ NAS Runner — Date-Modulus 스케줄러 + 풀 DB 배포.
   합계: ~1,420건/day (~21분)
 
 Usage:
-  python nas_runner.py              # 자동 스캔 + 풀 DB 배포
-  python nas_runner.py --plan       # 오늘 스캔 계획만 출력 (dry-run)
-  python nas_runner.py --data-dir ./testdata
+  python crawler_runner.py              # 자동 스캔 + 풀 DB 배포
+  python crawler_runner.py --plan       # 오늘 스캔 계획만 출력 (dry-run)
+  python crawler_runner.py --data-dir ./testdata
 
 환경변수 (.env):
   BUPGOGAE_API_KEY
@@ -500,7 +500,7 @@ def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float, i
 def main():
     default_data_dir = os.environ.get("DATA_DIR", "/app/data")
 
-    parser = argparse.ArgumentParser(description="NAS Date-Modulus Runner")
+    parser = argparse.ArgumentParser(description="Crawler Date-Modulus Runner")
     parser.add_argument("--plan", action="store_true",
                         help="스캔 계획만 출력 (dry-run)")
     parser.add_argument("--data-dir", default=default_data_dir,
@@ -529,7 +529,7 @@ def main():
     tax_pages = get_tax_pages_for_today(today)
 
     print("=" * 55)
-    print(f"  🚀 NAS Runner (Range-Modulus)")
+    print(f"  🚀 Crawler Runner (Range-Modulus)")
     print(f"     날짜: {today}")
     print(f"     Serial: {date_serial(today)}")
     print(f"     판례: {summary['total']:,}건"
@@ -727,7 +727,7 @@ def send_telegram_report(**kwargs):
     tax_ins_cnt = kwargs.get("tax_ins", 0)
 
     msg = (
-        f"{status} *법고개 NAS Runner*\n"
+        f"{status} *법고개 Crawler Runner*\n"
         f"`{today}` | {minutes}분 {seconds}초\n"
         f"\n"
         f"📊 *판례*: {scan_count:,}건\n"

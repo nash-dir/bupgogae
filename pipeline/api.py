@@ -1,7 +1,7 @@
 """
 법제처 Open API 클라이언트 — 판례/헌재결정례 검색 API 래퍼.
 
-법고개 파이프라인의 API 레이어. 다른 모듈(nas_runner, master_db 등)이
+법고개 파이프라인의 API 레이어. 다른 모듈(crawler_runner, master_db 등)이
 법제처 API와 통신할 때 이 모듈의 함수를 사용한다.
 
 공개 API:

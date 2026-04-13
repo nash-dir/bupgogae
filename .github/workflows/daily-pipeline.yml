@@ -40,8 +40,8 @@ jobs:
       - name: 기존 상태 파일(master.db) R2에서 다운로드
         run: python pipeline/sync_state.py download --dir ./pipeline/data
 
-      - name: NAS 크롤러 실행 (판례, 헌재, 조세심판) 및 DB 덤프 R2 업로드
-        run: python pipeline/nas_runner.py --data-dir ./pipeline/data
+      - name: 크롤러 실행 (판례, 헌재, 조세심판) 및 DB 덤프 R2 업로드
+        run: python pipeline/crawler_runner.py --data-dir ./pipeline/data
 
       - name: KIPRIS 특허심판 백필 실행 (선택적)
         run: python pipeline/kipris_runner.py --data-dir ./pipeline/data

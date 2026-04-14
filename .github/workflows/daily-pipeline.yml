@@ -2,7 +2,7 @@ name: Daily Crawler Pipeline
 
 on:
   schedule:
-    - cron: '0 15 * * *'  # KST 24:00 (UTC 15:00) 매일 실행
+    - cron: '0 13 * * *'  # KST 22:00 (UTC 13:00) 매일 실행
   workflow_dispatch:      # 수동 실행 지원
 
 jobs:

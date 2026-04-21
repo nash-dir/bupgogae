@@ -317,7 +317,8 @@ class BupgogaeSidebar {
 
   showLoading() {
     this.headerTitle.textContent = '원문 불러오는 중...';
-    this.contentArea.innerHTML = ` // safe: 정적인 로딩 UI
+    // safe: 정적인 로딩 UI
+    this.contentArea.innerHTML = `
       <div class="bgae-loader-container">
         <div class="bgae-spinner"></div>
         <span>국가법령정보센터 연결 중...</span>
@@ -413,7 +414,8 @@ class BupgogaeSidebar {
 
   showError(msg, url) {
     this.headerTitle.textContent = '조회 실패';
-    this.contentArea.innerHTML = ` // safe: msg는 파싱 내부에서 안전하게 정규화됨
+    // safe: msg는 파싱 내부에서 안전하게 정규화됨
+    this.contentArea.innerHTML = `
       <div class="bgae-error-msg">
         ${msg}
       </div>
@@ -492,7 +494,8 @@ class BupgogaeSidebar {
       // 4. 렌더링
       this.headerTitle.textContent = titleStr.replace(/<[^>]+>/g, ''); // 혹시 모를 태그 제거
       
-      this.contentArea.innerHTML = ` // safe: detailsHtml 내부 데이터는 _escapeHtml 처리를 보장함
+      // safe: detailsHtml 내부 데이터는 _escapeHtml 처리를 보장함
+      this.contentArea.innerHTML = `
         ${detailsHtml}
         <a href="${url}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 더 넓게 보기 ↗</a>
       `;

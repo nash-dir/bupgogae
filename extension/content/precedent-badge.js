@@ -239,11 +239,14 @@ const BUPGOGAE_CSS = `
 }
 
 .bgae-tooltip-case-item {
-  display: block;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
   margin: 3px 0;
 }
 
-.bgae-tooltip-case-item a {
+.bgae-tooltip-case-item a.bgae-main-link {
+  flex: 1;
   display: block;
   padding: 4px 8px;
   background: rgba(255,255,255,0.08);
@@ -257,8 +260,28 @@ const BUPGOGAE_CSS = `
   transition: background 0.12s ease;
 }
 
-.bgae-tooltip-case-item a:hover {
+.bgae-tooltip-case-item a.bgae-main-link:hover {
   background: rgba(255,255,255,0.18);
+}
+
+.bgae-tooltip-newtab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.bgae-tooltip-newtab-btn:hover {
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+}
+.bgae-tooltip-newtab-btn svg {
+  width: 12px;
+  height: 12px;
 }
 
 .bgae-tooltip-footer {
@@ -433,11 +456,44 @@ const TOOLTIP_BUILDERS = {
 
       // 리스트 아이템
       const item = _el('div', 'bgae-tooltip-case-item');
-      const link = _el('a', '', displayText);
+      
+      const link = _el('a', 'bgae-main-link', displayText);
       link.href = href;
-      link.target = '_blank';
-      link.rel = 'noopener';
+      link.title = "클릭 시 사이드바 원문 뷰어 열림 (Shift+클릭 시 새 탭)";
+      
+      link.addEventListener('click', (e) => {
+        // Shift/Ctrl/Meta 누르고 클릭하면 기존 브라우저 기본 동작(새 탭 열림) 허용
+        if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+        
+        e.preventDefault();
+        e.stopPropagation();
+        if (window.bupgogae && window.bupgogae.openSidebar) {
+           window.bupgogae.openSidebar(href);
+        } else {
+           window.open(href, '_blank', 'noopener');
+        }
+      });
+
+      // 새 탭 아이콘 버튼 생성
+      const newTabBtn = _el('a', 'bgae-tooltip-newtab-btn');
+      newTabBtn.href = href;
+      newTabBtn.target = '_blank';
+      newTabBtn.rel = 'noopener noreferrer';
+      newTabBtn.title = '새 탭에서 열기';
+      newTabBtn.innerHTML = ` // safe: 정적인 SVG 아이콘 구조 
+        <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>
+      `;
+      // 새 탭 클릭시 사이드 패널/사이드바 등 기타 방해 요소를 막기 위해 기본동작만 타게 함
+      newTabBtn.addEventListener('click', (e) => {
+         e.stopPropagation(); // 툴팁 영역 전체 클릭 무력화
+      });
+
       item.appendChild(link);
+      item.appendChild(newTabBtn);
       list.appendChild(item);
     }
 

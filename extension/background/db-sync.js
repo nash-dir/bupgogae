@@ -390,6 +390,17 @@ async function fetchAdaptersConfig() {
       }
     }
 
+    // scraping_adapters 검증
+    if (config.scraping_adapters && typeof config.scraping_adapters === 'object') {
+      for (const [siteId, selObj] of Object.entries(config.scraping_adapters)) {
+        for (const [key, val] of Object.entries(selObj)) {
+          if (typeof val !== 'string' || val.length > MAX_SELECTOR_LENGTH || val.includes(':has(')) {
+             delete selObj[key];
+          }
+        }
+      }
+    }
+
     await chrome.storage.local.set({ bupgogae_remote_adapters: config });
     console.log(`[bupgogae] ✅ 어댑터 원격 설정 저장 완료 (ver=${config.version || '?'})`);
 
@@ -686,6 +697,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_SYNC_STATUS') {
     getSyncStatus()
       .then(status => sendResponse(status))
+      .catch(err => sendResponse({ error: err.message }));
+    return true;
+  }
+
+  // ── 법제처 HTML 원문 Fetch (CORS 우회) ──
+  if (message.type === 'FETCH_LAW_HTML') {
+    if (!message.url || !message.url.startsWith('https://www.law.go.kr/')) {
+      sendResponse({ error: "Invalid URL or Host. Only law.go.kr is permitted." });
+      return true;
+    }
+    fetch(message.url)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+      })
+      .then(html => sendResponse({ html }))
       .catch(err => sendResponse({ error: err.message }));
     return true;
   }

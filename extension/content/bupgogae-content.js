@@ -40,6 +40,7 @@ let _debounceTimer = null;
 let _isProcessing = false;
 let _adapter = null; // 현재 사이트 어댑터
 let _adapterFetchRequested = false; // Auto-Fetch 쓰로틀링 플래그 (세션당 1회)
+let _hasShownOrangeToast = false; // Orange 배지 토스트 알림을 한 번만 띄우기 위한 플래그
 let _categoryFilters = {         // 카테고리별 필터 (기본값)
   court: true,
   constitutional: true,
@@ -394,6 +395,7 @@ async function processContainer(container) {
     if (!key) {
       // case_code_map에 없는 부호 → Orange (안전 처리)
       renderBadge(textNode, parsed.raw, 'orange');
+      showOrangeToast();
       continue;
     }
 
@@ -435,6 +437,7 @@ async function processContainer(container) {
           window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'orange');
         }
       }
+      if (items.length > 0) showOrangeToast();
       continue;
     }
 
@@ -497,6 +500,7 @@ async function processContainer(container) {
           window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'orange');
         }
       }
+      if (items.length > 0) showOrangeToast();
     }
   }
 }
@@ -639,7 +643,14 @@ function renderBadge(textNode, raw, level, options = {}) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'EXTRACT_ORANGE_CASES') {
-    const badges = document.querySelectorAll('.bgae-badge.bgae-orange');
+    let badges = [];
+    const containers = findResponseContainers();
+    if (containers && containers.length > 0) {
+      const lastContainer = containers[containers.length - 1];
+      badges = lastContainer.querySelectorAll('.bgae-badge.bgae-orange');
+    } else {
+      badges = document.querySelectorAll('.bgae-badge.bgae-orange');
+    }
     const cases = Array.from(new Set(Array.from(badges).map(b => b.getAttribute('data-bgae-case')))).filter(Boolean);
     
     if (cases.length === 0) {
@@ -647,7 +658,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false; // 동기 응답
     }
 
-    const textToCopy = `다음의 판결은 DB에서 존재가 확인되지 않음 : ${cases.join(', ')}`;
+    const textToCopy = `다음 사건번호의 출처를 확인하세요 : ${cases.join(', ')}`;
     
     // Clipboard API 사용 (현대 브라우저)
     navigator.clipboard.writeText(textToCopy).then(() => {
@@ -669,7 +680,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // ============================================================
-// 10. 시작
+// 10. 토스트 알림
+// ============================================================
+
+function showOrangeToast() {
+  if (_hasShownOrangeToast) return;
+  _hasShownOrangeToast = true;
+
+  const toast = document.createElement('div');
+  toast.className = 'bgae-orange-toast';
+  toast.textContent = '국가법령정보 DB에서 확인되지 않는 사건번호가 감지되었습니다(Alt+C로 사건번호 복사)';
+  Object.assign(toast.style, {
+    position: 'fixed',
+    bottom: '20px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    backgroundColor: '#ea580c',
+    color: '#fff',
+    padding: '12px 24px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+    zIndex: '2147483647',
+    opacity: '0',
+    transition: 'opacity 0.3s ease, bottom 0.3s ease',
+    pointerEvents: 'none'
+  });
+  
+  document.body.appendChild(toast);
+  
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toast.style.bottom = '30px';
+  });
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.bottom = '20px';
+    setTimeout(() => toast.remove(), 300);
+  }, 5000);
+}
+
+// ============================================================
+// 11. 시작
 // ============================================================
 
 // Content Script 로드 시 즉시 초기화 시작

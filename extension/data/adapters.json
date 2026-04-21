@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-22",
+  "version": "2026-04-21",
   "adapters": {
     "gemini": {
       "responseSelectors": [
@@ -47,6 +47,14 @@
         "[class*=\"message\"] [class*=\"content\"]",
         "[class*=\"response\"]"
       ]
+    }
+  },
+  "scraping_adapters": {
+    "law_go_kr": {
+      "title_selector": "#contentBody > h2",
+      "body_container": "#conScroll",
+      "section_title": "h4",
+      "section_body": "p.pty4, p.pty4_dep1, h5, div.subtit1"
     }
   }
 }

@@ -275,13 +275,35 @@ async function syncDatabase() {
       return;
     }
 
-    // ── 무결성 게이트: 키 수 하한선 + version 형식 ──
+    // ── 무결성 게이트 ──
+    // 1. 키 수 하한선
     const keyCount = Object.keys(data.cases).length;
     if (keyCount < MIN_KEYS_CORE) {
       throw new Error(`DB 무결성 검증 실패: 키 수 ${keyCount.toLocaleString()} < 하한 ${MIN_KEYS_CORE.toLocaleString()}`);
     }
+    // 2. version 형식 (YYYYMMDD)
     if (data.version && !VERSION_REGEX.test(String(data.version))) {
       throw new Error(`DB 무결성 검증 실패: version 형식 오류 '${data.version}'`);
+    }
+    // 3. total 필드 정합성 (존재하면 키 수와 일치해야 함)
+    if (data.total && data.total !== keyCount) {
+      throw new Error(`DB 무결성 검증 실패: total(${data.total}) ≠ keys(${keyCount})`);
+    }
+    // 4. 레코드 구조 샘플 검증 — 랜덤 5건이 [[serial, ...], ...] 형태인지
+    const sampleKeys = Object.keys(data.cases);
+    const sampleSize = Math.min(5, sampleKeys.length);
+    for (let i = 0; i < sampleSize; i++) {
+      const idx = Math.floor(Math.random() * sampleKeys.length);
+      const key = sampleKeys[idx];
+      const val = data.cases[key];
+      if (!Array.isArray(val) || val.length === 0) {
+        throw new Error(`DB 스키마 검증 실패: cases["${key}"]가 비어있거나 배열이 아님`);
+      }
+      for (const entry of val) {
+        if (!Array.isArray(entry) || entry.length < 1) {
+          throw new Error(`DB 스키마 검증 실패: cases["${key}"] 엔트리 형식 불량`);
+        }
+      }
     }
     console.log(`[bupgogae] 무결성 검증 통과: ${keyCount.toLocaleString()}건, ver=${data.version}`);
 

@@ -205,7 +205,12 @@ function scheduleProcessing() {
 // ============================================================
 
 /**
- * 모든 Gemini 응답 컨테이너를 스캔하고 판례번호를 처리.
+ * 모든 LLM 응답 컨테이너를 스캔하고 판례번호를 처리.
+ *
+ * [Circuit Breaker 측정 범위]
+ *   동기 처리 구간만 측정: 컨테이너 탐색 + 텍스트 노드 수집 + 정규식 추출
+ *   비동기 대기(IndexedDB batchLookup)는 측정에서 제외.
+ *   → 정상적인 DB 초기 로딩 지연이 Circuit Breaker를 오발동시키지 않음.
  */
 async function processAllResponses() {
   if (_isProcessing) return;
@@ -215,33 +220,59 @@ async function processAllResponses() {
     return;
   }
   _isProcessing = true;
-  const startTime = performance.now();
+  // 동기 처리 시간만 측정 (비동기 IndexedDB 대기 제외)
+  const syncStart = performance.now();
+  let syncDuration = 0;
 
   try {
-    // Gemini 응답 컨테이너 찾기
+    // 동기 구간: 컨테이너 탐색
     const containers = findResponseContainers();
     if (containers.length === 0) {
       _isProcessing = false;
       return;
     }
+    // 동기 구간 스냅샷 (컨테이너 탐색 완료)
+    syncDuration = performance.now() - syncStart;
 
     for (const container of containers) {
+      // processContainer 내부의 batchLookup은 비동기이므로
+      // 동기 처리 시간에 포함되지 않음
       await processContainer(container);
     }
   } catch (err) {
     console.error('[bupgogae] 처리 중 오류:', err);
   } finally {
     _isProcessing = false;
-    const duration = performance.now() - startTime;
-    await handleCircuitBreaker(duration);
+    // 동기 처리 시간 기준으로 Circuit Breaker 판단
+    await handleCircuitBreaker(syncDuration);
   }
 }
 
 /**
- * 서킷 브레이커 (Circuit Breaker): 이상 현상(1500ms 초과) 감지 및 비상 정지
- * @param {number} duration 실행 시간 (ms)
+ * 서킷 브레이커 (Circuit Breaker): DOM 동기 처리 이상(5초 초과) 감지 및 비상 정지.
+ *
+ * [설계 의도]
+ *   이 브레이커는 단순한 UX 가드가 아니라, 잘못된 DB 패턴이나
+ *   stale adapters.json으로 인해 광범위 DOM 스캔이 무한반복되어
+ *   브라우저 탭이 영구 프리징되는 것을 방지하는 안전장치.
+ *
+ * [측정 대상]
+ *   동기 처리 시간만 측정 (컨테이너 탐색 + TreeWalker + 정규식).
+ *   IndexedDB 비동기 조회 시간은 포함하지 않음.
+ *   → 정상적인 첫 로딩(DB cold start ~20초)에서 오발동 없음.
+ *
+ * [발동 조건]
+ *   5회 연속 동기 처리 5초 초과 → 영구 비활성화 + alert
+ *   5회 연속 정상 처리(500ms 이하) → 스트라이크 리셋
+ *
+ * @param {number} syncDuration 동기 처리 시간 (ms) — batchLookup 제외
  */
-async function handleCircuitBreaker(duration) {
+const CIRCUIT_THRESHOLD_MS = 5000;  // 동기 처리 5초 초과 = 1 strike
+const CIRCUIT_MAX_STRIKES = 5;     // 5 strikes = 영구 비활성화
+const CIRCUIT_RECOVERY_STREAK = 5; // 5회 연속 정상 = 리셋
+const CIRCUIT_FAST_MS = 500;       // 정상 판정 기준
+
+async function handleCircuitBreaker(syncDuration) {
   try {
     const data = await chrome.storage.local.get([
       'bupgogae_circuit_strikes',
@@ -252,13 +283,13 @@ async function handleCircuitBreaker(duration) {
     let fastStreak = data.bupgogae_circuit_fast_streak || 0;
     let updated = false;
 
-    if (duration > 1500) {
+    if (syncDuration > CIRCUIT_THRESHOLD_MS) {
       strikes += 1;
       fastStreak = 0;
       updated = true;
-      console.warn(`[bupgogae] ⚠️ 서킷 브레이커: 처리 시간 지연 감지 (${duration.toFixed(2)}ms). 누적 스트라이크: ${strikes}/3`);
+      console.warn(`[bupgogae] ⚠️ 서킷 브레이커: 동기 처리 지연 (${syncDuration.toFixed(0)}ms > ${CIRCUIT_THRESHOLD_MS}ms). 스트라이크: ${strikes}/${CIRCUIT_MAX_STRIKES}`);
 
-      if (strikes >= 3) {
+      if (strikes >= CIRCUIT_MAX_STRIKES) {
         // 비상 정지 요건 충족
         if (_observer) {
           _observer.disconnect();
@@ -268,14 +299,14 @@ async function handleCircuitBreaker(duration) {
         alert('원격 설정 오류가 지속 감지되어 보호를 위해 확장프로그램을 영구 비활성화합니다.');
         return; // 추가 업데이트 진행 안 함
       }
-    } else if (duration <= 100) {
-      // 100ms 이하이면 회복 카운트 증가 (과거 strike 기록이 있을 때만 측정)
+    } else if (syncDuration <= CIRCUIT_FAST_MS) {
+      // 정상 처리 회복 카운트 (과거 strike 기록이 있을 때만)
       if (strikes > 0 || fastStreak > 0) {
         fastStreak += 1;
         updated = true;
         
-        if (fastStreak >= 10) {
-          console.log(`[bupgogae] 🔄 서킷 브레이커 상태 복구: 연속 ${fastStreak}회 정상 처리. 스트라이크 리셋.`);
+        if (fastStreak >= CIRCUIT_RECOVERY_STREAK) {
+          console.log(`[bupgogae] 🔄 서킷 브레이커 복구: 연속 ${fastStreak}회 정상 처리. 스트라이크 리셋.`);
           strikes = 0;
           fastStreak = 0;
         }

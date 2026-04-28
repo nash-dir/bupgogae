@@ -108,6 +108,10 @@ const TAX_CASE_REGEX = /조심\s*(\d{2,4})([가-힣])(\d{1,5})/g;
  * 텍스트에서 모든 사건번호 후보를 추출.
  * 법원 판례 + 조세심판원 통합.
  *
+ * [주의] g 플래그 정규식의 lastIndex를 수동 리셋함.
+ * Content Script는 단일 스레드이므로 안전하나,
+ * 이 함수를 모듈 외부에서 공유·병렬 호출 시 주의 필요.
+ *
  * @param {string} text - 스캔할 텍스트
  * @returns {Array<{raw: string, year: string, code: string, serial: string, startIdx: number, type: string}>}
  *          매칭 결과 배열 (중복 제거됨). type: 'court' | 'tax'

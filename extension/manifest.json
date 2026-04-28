@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "법고개 (Bupgogae)",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "LLM 환각 판례를 실시간으로 탐지합니다",
   "permissions": ["alarms", "storage", "unlimitedStorage", "tabs"],
   "host_permissions": [
@@ -10,6 +10,7 @@
   ],
   "background": { "service_worker": "background/db-sync.js" },
   "content_scripts": [{
+    "_comment_matches": "이 목록은 data/adapters.json의 hosts 필드와 반드시 동기화 필요 (manifest.json은 정적 파일이라 동적 생성 불가)",
     "matches": [
       "https://gemini.google.com/*",
       "https://chatgpt.com/*",
@@ -21,12 +22,6 @@
     ],
     "js": [
       "content/adapters/base-adapter.js",
-      "content/adapters/gemini-adapter.js",
-      "content/adapters/chatgpt-adapter.js",
-      "content/adapters/claude-adapter.js",
-      "content/adapters/copilot-adapter.js",
-      "content/adapters/perplexity-adapter.js",
-      "content/adapters/grok-adapter.js",
       "content/adapters/registry.js",
       "content/case-regex.js",
       "content/precedent-badge.js",

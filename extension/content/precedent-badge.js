@@ -319,6 +319,9 @@ function formatDecisionDate(dateInt) {
   return `${fullYear}. ${mm}. ${dd}.`;
 }
 
+// L-3: 역변환 맵 캐시 (법원 코드 → 법원명). 첫 호출 시 빌드.
+let _reverseCourtMap = null;
+
 /**
  * 법원 코드(정수)를 법원명으로 변환.
  * @param {number} courtCode
@@ -327,11 +330,15 @@ function formatDecisionDate(dateInt) {
  */
 function decodeCourtName(courtCode, courtCodeMap) {
   if (!courtCodeMap || courtCode == null) return '';
-  // courtCodeMap은 name→code이므로 역변환
-  for (const [name, code] of Object.entries(courtCodeMap)) {
-    if (code === courtCode) return name;
+  // 캐시된 역변환 맵 사용 (courtCodeMap 참조가 바뀌면 재빌드)
+  if (!_reverseCourtMap || _reverseCourtMap._source !== courtCodeMap) {
+    _reverseCourtMap = {};
+    for (const [name, code] of Object.entries(courtCodeMap)) {
+      _reverseCourtMap[code] = name;
+    }
+    _reverseCourtMap._source = courtCodeMap;
   }
-  return '';
+  return _reverseCourtMap[courtCode] || '';
 }
 
 /**
@@ -615,7 +622,7 @@ function showTooltip(badge, level, options, precedentString) {
   
   const tooltip = getGlobalTooltip();
   const contentBox = tooltip.querySelector('.bgae-tooltip-content-box');
-  contentBox.innerHTML = ''; // safe: 빈 문자열 할당 (내용 초기화)
+  contentBox.replaceChildren(); // L-1: replaceChildren()이 의도가 더 명확
   
   // 툴팁 내용 조립
   switch (level) {

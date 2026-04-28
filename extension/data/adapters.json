@@ -1,5 +1,14 @@
 {
   "version": "2026-04-23",
+  "hosts": {
+    "gemini.google.com": "gemini",
+    "chatgpt.com": "chatgpt",
+    "claude.ai": "claude",
+    "copilot.microsoft.com": "copilot",
+    "www.perplexity.ai": "perplexity",
+    "perplexity.ai": "perplexity",
+    "grok.com": "grok"
+  },
   "adapters": {
     "gemini": {
       "responseSelectors": [

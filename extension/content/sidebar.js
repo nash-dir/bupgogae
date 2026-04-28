@@ -293,11 +293,14 @@ class BupgogaeSidebar {
     this.initCopyInterceptor();
 
     // 저장된 사이즈 폭 불러오기
-    chrome.storage.local.get('bupgogae_sidebar_width', (data) => {
-      if (data.bupgogae_sidebar_width && !isNaN(data.bupgogae_sidebar_width)) {
-        this.container.style.setProperty('--bgae-sidebar-width', data.bupgogae_sidebar_width + 'px');
-      }
-    });
+    try {
+      chrome.storage.local.get('bupgogae_sidebar_width', (data) => {
+        if (chrome.runtime.lastError) return; // 컨텍스트 무효화 시 무시
+        if (data.bupgogae_sidebar_width && !isNaN(data.bupgogae_sidebar_width)) {
+          this.container.style.setProperty('--bgae-sidebar-width', data.bupgogae_sidebar_width + 'px');
+        }
+      });
+    } catch { /* Extension context invalidated — 확장 리로드 후 페이지 미새로고침 시 발생. 무시. */ }
   }
 
   open(url) {
@@ -321,8 +324,7 @@ class BupgogaeSidebar {
 
   showLoading() {
     this.headerTitle.textContent = '원문 불러오는 중...';
-    // safe: 정적인 로딩 UI
-    this.contentArea.innerHTML = `
+    this.contentArea.innerHTML = ` // safe: 정적인 로딩 UI
       <div class="bgae-loader-container">
         <div class="bgae-spinner"></div>
         <span>국가법령정보센터 연결 중...</span>
@@ -360,7 +362,9 @@ class BupgogaeSidebar {
 
       // 브라우저 Storage 에 현재 너비 고정 저장 (같은 기기에서 기억)
       const currentWidth = this.container.offsetWidth;
-      chrome.storage.local.set({ bupgogae_sidebar_width: currentWidth });
+      try {
+        chrome.storage.local.set({ bupgogae_sidebar_width: currentWidth });
+      } catch { /* Extension context invalidated — 무시 */ }
     };
 
     this.resizer.addEventListener('mousedown', (e) => {
@@ -421,8 +425,7 @@ class BupgogaeSidebar {
     // H-1 fix: msg를 escape하고, url을 sanitize하여 XSS 차단
     const safeMsg = this._escapeHtml(msg);
     const safeUrl = this._escapeHtml(url);
-    // safe: safeMsg와 safeUrl은 _escapeHtml로 sanitize 완료
-    this.contentArea.innerHTML = `
+    this.contentArea.innerHTML = ` // safe: safeMsg와 safeUrl은 _escapeHtml로 sanitize 완료
       <div class="bgae-error-msg">
         ${safeMsg}
       </div>
@@ -435,10 +438,18 @@ class BupgogaeSidebar {
    */
   async fetchAndParse(url) {
     try {
-      const response = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'FETCH_LAW_HTML', url }, (res) => {
-          resolve(res);
-        });
+      const response = await new Promise((resolve, reject) => {
+        try {
+          chrome.runtime.sendMessage({ type: 'FETCH_LAW_HTML', url }, (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            resolve(res);
+          });
+        } catch (ctxErr) {
+          reject(new Error('확장프로그램이 업데이트되었습니다. 페이지를 새로고침해 주세요.'));
+        }
       });
 
       if (response && response.error) {
@@ -453,8 +464,11 @@ class BupgogaeSidebar {
       const doc = parser.parseFromString(response.html, 'text/html');
 
       // 2. 셀렉터 가져오기 (R2 원격 설정 우선, 실패 시 기본값)
-      const data = await chrome.storage.local.get('bupgogae_remote_adapters');
-      const remoteConfig = data.bupgogae_remote_adapters?.scraping_adapters?.law_go_kr || {};
+      let remoteConfig = {};
+      try {
+        const data = await chrome.storage.local.get('bupgogae_remote_adapters');
+        remoteConfig = data.bupgogae_remote_adapters?.scraping_adapters?.law_go_kr || {};
+      } catch { /* Extension context invalidated — 기본 셀렉터 사용 */ }
       
       const selectors = {
         title: remoteConfig.title_selector || '#contentBody > h2', 
@@ -525,10 +539,10 @@ class BupgogaeSidebar {
       // 4. 렌더링
       this.headerTitle.textContent = titleStr.replace(/<[^>]+>/g, ''); // 혹시 모를 태그 제거
       
-      // safe: detailsHtml 내부 데이터는 _escapeHtml 처리를 보장함
-      this.contentArea.innerHTML = `
+      const safeFooterUrl = this._escapeHtml(url);
+      this.contentArea.innerHTML = ` // safe: detailsHtml 내부 데이터는 _escapeHtml 처리를 보장함
         ${detailsHtml}
-        <a href="${url}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 더 넓게 보기 ↗</a>
+        <a href="${safeFooterUrl}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 더 넓게 보기 ↗</a>
       `;
 
     } catch (err) {

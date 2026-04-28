@@ -17,10 +17,14 @@
   * Microsoft Copilot (`copilot.microsoft.com`)
   * Perplexity (`perplexity.ai`)
   * Grok (`grok.com`) — 실험적 지원
+* **📖 사이드바 판례 원문 뷰어**
+  * 초록색(안전) 배지로 검증된 판례 클릭 시, 화면 이탈 없이 우측 뷰어에서 법제처 원문을 즉시 열람합니다. (Shadow DOM 캡슐화로 호스트 UI와 충돌 방지)
+* **📋 미확인 판례 일괄 복사**
+  * 단축키(`Alt+C`)를 통해 화면에 출력된 주황색(DB 미확인) 사건번호만 추출하여 클립보드에 일괄 복사합니다.
 * **🔄 원격 설정 자동 업데이트 (Remote Config)**
-  * 각 플랫폼의 DOM 셀렉터가 변경되어 탐지에 실패할 경우, 서버(`api.bup.live/bupgogae/adapters.json`)에서 최신 셀렉터를 자동으로 가져와 적용합니다.
+  * 각 플랫폼의 DOM 셀렉터가 변경되어 탐지에 실패할 경우, 서버(`adapters.json`)에서 최신 셀렉터를 자동으로 가져와 적용합니다.
   * 기존 어댑터에 내장된(Batteries-included) 셀렉터가 폴백(Fallback)으로 사용되므로, 서버에 접근할 수 없는 오프라인 환경에서도 정상 동작합니다.
-  * 순수 JSON 데이터만 수신하며 원격 코드 실행은 일체 없습니다 (MV3 CSP 준수).
+  * 순수 JSON 데이터만 수신하며 엄격한 CSS 화이트리스트 검증을 거칩니다 (MV3 CSP 준수).
 * **⚡ 초고속 로컬 매칭**
   * 수십만 건의 판례 메타데이터를 압축된 JSON 형태로 로컬 IndexedDB에 동기화하여, 외부 API 통신 지연 없이 즉각적으로 판별합니다.
 * **🔒 완벽한 프라이버시**
@@ -76,10 +80,14 @@ While AI is revolutionizing legal practice, fabricated case citations can lead t
   * Microsoft Copilot (`copilot.microsoft.com`)
   * Perplexity (`perplexity.ai`)
   * Grok (`grok.com`) — experimental
+* **📖 Built-in Sidebar Viewer**
+  * Click any Green (Verified) badge to instantly view the original case law document from the Ministry of Government Legislation in a sliding sidebar, without leaving the chatbot tab. Uses Shadow DOM to prevent CSS conflicts.
+* **📋 Extract Unverified Cases**
+  * Use the keyboard shortcut (`Alt+C`) to instantly extract and copy all Orange (Unverified) case numbers from the current response to your clipboard for further manual review.
 * **🔄 Remote Config — Dynamic Selector Updates**
-  * When a platform's DOM changes break detection, the extension automatically fetches updated CSS selectors from the server (`api.bup.live/bupgogae/adapters.json`).
+  * When a platform's DOM changes break detection, the extension automatically fetches updated CSS selectors from the server (`adapters.json`).
   * Built-in (batteries-included) selectors serve as a fallback, ensuring full offline functionality when the server is unreachable.
-  * Only pure JSON data is fetched — no remote code execution (MV3 CSP compliant).
+  * Only pure JSON data is fetched and validated against a strict CSS whitelist (MV3 CSP compliant).
 * **⚡ Ultra-Fast Local Matching**
   * Hundreds of thousands of case metadata entries are compressed and synchronized to local IndexedDB, enabling instant verification with zero API latency.
 * **🔒 Complete Privacy**
@@ -459,15 +467,10 @@ extension/
 ├── content/
 │   ├── adapters/               # Site-specific DOM adapters
 │   │   ├── base-adapter.js     #   SiteAdapter base class
-│   │   ├── gemini-adapter.js   #   Gemini adapter
-│   │   ├── chatgpt-adapter.js  #   ChatGPT adapter
-│   │   ├── claude-adapter.js   #   Claude adapter
-│   │   ├── copilot-adapter.js  #   Copilot adapter
-│   │   ├── perplexity-adapter.js #  Perplexity adapter
-│   │   ├── grok-adapter.js     #   Grok adapter
-│   │   └── registry.js         #   Hostname → adapter mapping
+│   │   └── registry.js         #   Inline adapters & Hostname → adapter mapping
 │   ├── case-regex.js           # Case number extraction & validation
 │   ├── precedent-badge.js      # 3-level inline highlight + tooltip
+│   ├── sidebar.js              # Shadow DOM sidebar for case law documents
 │   └── bupgogae-content.js     # Main controller (adapter-agnostic)
 ├── popup/                      # Extension popup UI (enable/disable toggle)
 ├── icons/                      # Extension icons (16/48/128 px)
@@ -488,32 +491,33 @@ pipeline/
 
 ## Adding a New Platform
 
-To add support for a new chatbot, create a single adapter file:
+To add support for a new chatbot in v0.8.0+, you only need to update two files.
 
-```javascript
-// content/adapters/newsite-adapter.js
-class NewSiteAdapter extends window.bupgogaeAdapters.SiteAdapter {
-  get siteId()      { return 'newsite'; }
-  get displayName() { return 'NewSite'; }
-
-  getResponseSelectors() {
-    return [
-      '[data-role="assistant"] .prose',  // Primary selector
-      '[data-role="assistant"]',          // Fallback
-    ];
+1. Add the CSS response selectors to `extension/data/adapters.json`:
+```json
+"hosts": {
+  "newsite.com": "newsite"
+},
+"adapters": {
+  "newsite": {
+    "responseSelectors": [
+      "[data-role=\"assistant\"] .prose",
+      ".response-container"
+    ]
   }
-}
-if (typeof window !== 'undefined') {
-  window.bupgogaeAdapters = window.bupgogaeAdapters || {};
-  window.bupgogaeAdapters.NewSiteAdapter = NewSiteAdapter;
 }
 ```
 
-Then register it in `registry.js`:
-
+2. Register the boilerplate adapter in `extension/content/adapters/registry.js`:
 ```javascript
+class NewSiteAdapter extends window.bupgogaeAdapters.SiteAdapter {
+  get siteId() { return 'newsite'; }
+  get displayName() { return 'New Site AI'; }
+}
+window.bupgogaeAdapters.NewSiteAdapter = NewSiteAdapter;
+
 const ADAPTER_MAP = {
-  // ... existing entries ...
+  // ...
   'newsite.com': 'NewSiteAdapter',
 };
 ```

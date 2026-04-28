@@ -19,7 +19,7 @@
  * [의존성]
  *   - adapters/*.js   (SiteAdapter 구현체 + 레지스트리)
  *   - case-regex.js   (extractCaseNumbers, validateCaseNumber, compressCaseKey)
- *   - precedent-badge.js (renderPrecedentBadge, decodeCaseName)
+ *   - precedent-badge.js (renderPrecedentBadge)
  *   - db-sync.js      (Service Worker — LOOKUP_BATCH, GET_META)
  */
 
@@ -415,6 +415,11 @@ async function processContainer(container) {
 
   if (filteredCases.length === 0) return;
 
+  // ── M-1: 동일 텍스트 노드 내 다중 사건번호 역순 정렬 ──
+  // 같은 텍스트 노드에서 뒤쪽(startIdx가 큰) 매칭부터 처리하면
+  // 앞쪽 텍스트 노드의 인덱스가 무효화되지 않는다.
+  filteredCases.sort((a, b) => b.parsed.startIdx - a.parsed.startIdx);
+
   console.log(`[bupgogae] ${filteredCases.length}개 사건번호 감지 (${allCases.length}개 중 필터 통과)`);
 
   // ── Stage 1: Red 필터 ──
@@ -719,18 +724,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const textToCopy = `다음 사건번호의 출처를 확인하세요 : ${cases.join(', ')}`;
     
     // Clipboard API 사용 (현대 브라우저)
+    // 주의: 확장프로그램 단축키(Alt+C)로 트리거 시, Content Script는
+    // 'User Activation' 컨텍스트를 잃어버려 NotAllowedError가 발생할 수 있습니다.
     navigator.clipboard.writeText(textToCopy).then(() => {
       sendResponse({ count: cases.length, text: textToCopy });
     }).catch(err => {
-      console.warn('[bupgogae] Clipboard write failed, using fallback.', err);
-      // Fallback
-      const input = document.createElement('textarea');
-      input.value = textToCopy;
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand('copy');
-      document.body.removeChild(input);
-      sendResponse({ count: cases.length, text: textToCopy });
+      console.warn('[bupgogae] Clipboard API failed (User Activation lost), using execCommand fallback.', err);
+      // Fallback: deprecated이지만 확장프로그램 단축키 환경에서는 유일하게 작동하는 안정적 우회책
+      try {
+        const input = document.createElement('textarea');
+        input.value = textToCopy;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        sendResponse({ count: cases.length, text: textToCopy });
+      } catch (fallbackErr) {
+        console.error('[bupgogae] Fallback execCommand also failed:', fallbackErr);
+        sendResponse({ count: cases.length, text: textToCopy, copyFailed: true });
+      }
     });
 
     return true; // 비동기 응답 대기
@@ -748,7 +760,9 @@ function showOrangeToast() {
   const toast = document.createElement('div');
   toast.className = 'bgae-orange-toast';
   toast.textContent = '국가법령정보 DB에서 확인되지 않는 사건번호가 감지되었습니다(Alt+C로 사건번호 복사)';
+  // M-5: all:initial + !important로 호스트 페이지 CSS 간섭 방지
   Object.assign(toast.style, {
+    all: 'initial',
     position: 'fixed',
     bottom: '20px',
     left: '50%',
@@ -757,14 +771,21 @@ function showOrangeToast() {
     color: '#fff',
     padding: '12px 24px',
     borderRadius: '8px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     fontSize: '14px',
     fontWeight: 'bold',
     boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
     zIndex: '2147483647',
     opacity: '0',
     transition: 'opacity 0.3s ease, bottom 0.3s ease',
-    pointerEvents: 'none'
+    pointerEvents: 'none',
+    lineHeight: '1.4',
+    textAlign: 'center',
+    boxSizing: 'border-box',
   });
+  // !important 적용 (호스트 CSS 오버라이드 방어)
+  toast.style.setProperty('position', 'fixed', 'important');
+  toast.style.setProperty('z-index', '2147483647', 'important');
   
   document.body.appendChild(toast);
   

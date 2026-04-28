@@ -62,12 +62,12 @@ LLM이 생성한 한국 법률 판례의 사건번호 진위를 내장 DB를 통
 
 ### alarms
 ```
-Used to schedule periodic background database synchronization (every 6 hours) to keep the local case law database up to date.
+Used to schedule periodic background database synchronization to keep the local case law database up to date without persistent background processes.
 ```
 
 ### storage
 ```
-Used to cache metadata (case code mapping) locally for efficient case number validation.
+Used to save user preferences (e.g., sidebar width, filters) and cache metadata and remote CSS selectors locally for efficient validation.
 ```
 
 ### unlimitedStorage
@@ -77,12 +77,12 @@ Required to store the full Korean public case law database (~12MB, 140K+ entries
 
 ### tabs
 ```
-Used to update extension badge status (ON/OFF) when switching or loading tabs.
+Used to identify the active tab's hostname to update the extension popup state and to route keyboard shortcut commands (e.g., Alt+C) to the correct content script.
 ```
 
 ### host_permissions
 ```
-Required to read LLM-generated response text on supported chatbot pages (ChatGPT, Gemini, Claude, Copilot, Perplexity, Grok) to detect and validate case law citations. No data is collected or transmitted outside. api.bup.live is the extension's own API server for database synchronization.
+Only two endpoints are requested: "*://*.law.go.kr/*" is used solely to fetch original Korean case law documents to display safely in the extension's side-viewer, and "https://api.bup.live/*" is the extension's own API server for database synchronization.
 ```
 
 ---

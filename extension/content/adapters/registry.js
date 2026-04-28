@@ -11,13 +11,55 @@
  *   const adapter = window.bupgogaeAdapters.getAdapter();
  *
  * [등록 방식]
- *   각 어댑터 파일이 window.bupgogaeAdapters에 클래스를 등록하고,
- *   이 파일의 ADAPTER_MAP이 호스트명 → 클래스를 매핑.
+ *   L-7: 셀렉터가 adapters.json으로 통합된 결과, 각 어댑터 클래스는
+ *   siteId/displayName getter만 정의하는 빈 껍데기이므로 이 파일에 인라인 정의.
  */
+
+// ============================================================
+// 인라인 어댑터 클래스 (L-7: 6개 파일 → 1개 통합)
+// ============================================================
+
+class GeminiAdapter extends window.bupgogaeAdapters.SiteAdapter {
+  get siteId() { return 'gemini'; }
+  get displayName() { return 'Google Gemini'; }
+}
+
+class ChatGPTAdapter extends window.bupgogaeAdapters.SiteAdapter {
+  get siteId() { return 'chatgpt'; }
+  get displayName() { return 'ChatGPT'; }
+}
+
+class ClaudeAdapter extends window.bupgogaeAdapters.SiteAdapter {
+  get siteId() { return 'claude'; }
+  get displayName() { return 'Claude'; }
+}
+
+class CopilotAdapter extends window.bupgogaeAdapters.SiteAdapter {
+  get siteId() { return 'copilot'; }
+  get displayName() { return 'Copilot (실험적)'; }
+}
+
+class PerplexityAdapter extends window.bupgogaeAdapters.SiteAdapter {
+  get siteId() { return 'perplexity'; }
+  get displayName() { return 'Perplexity'; }
+}
+
+class GrokAdapter extends window.bupgogaeAdapters.SiteAdapter {
+  get siteId() { return 'grok'; }
+  get displayName() { return 'Grok (실험적)'; }
+}
+
+// 레지스트리에 등록
+window.bupgogaeAdapters.GeminiAdapter = GeminiAdapter;
+window.bupgogaeAdapters.ChatGPTAdapter = ChatGPTAdapter;
+window.bupgogaeAdapters.ClaudeAdapter = ClaudeAdapter;
+window.bupgogaeAdapters.CopilotAdapter = CopilotAdapter;
+window.bupgogaeAdapters.PerplexityAdapter = PerplexityAdapter;
+window.bupgogaeAdapters.GrokAdapter = GrokAdapter;
 
 /**
  * 호스트명 → 어댑터 클래스 매핑.
- * 새 사이트 추가 시 여기에 한 줄 추가.
+ * 새 사이트 추가 시 여기에 한 줄 추가 + adapters.json hosts에도 추가.
  */
 const ADAPTER_MAP = {
   'gemini.google.com':     'GeminiAdapter',
@@ -195,18 +237,27 @@ async function reloadRemoteConfig(adapter) {
 }
 
 /**
+ * 어댑터 클래스명 → 표시명 정적 매핑 (M-2: 불필요한 인스턴스 생성 제거).
+ */
+const ADAPTER_DISPLAY_NAMES = {
+  GeminiAdapter: 'Google Gemini',
+  ChatGPTAdapter: 'ChatGPT',
+  ClaudeAdapter: 'Claude',
+  CopilotAdapter: 'Copilot (실험적)',
+  PerplexityAdapter: 'Perplexity',
+  GrokAdapter: 'Grok (실험적)',
+};
+
+/**
  * 지원 사이트 목록 반환 (팝업 UI 등에서 사용).
  * @returns {{ hostname: string, displayName: string }[]}
  */
 function getSupportedSites() {
-  return Object.entries(ADAPTER_MAP).map(([hostname, name]) => {
-    const AdapterClass = window.bupgogaeAdapters[name];
-    return {
-      hostname,
-      displayName: AdapterClass ? new AdapterClass().displayName : name,
-      adapterName: name,
-    };
-  });
+  return Object.entries(ADAPTER_MAP).map(([hostname, name]) => ({
+    hostname,
+    displayName: ADAPTER_DISPLAY_NAMES[name] || name,
+    adapterName: name,
+  }));
 }
 
 // 외부 인터페이스

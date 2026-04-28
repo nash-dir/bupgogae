@@ -150,10 +150,8 @@ class SiteAdapter {
       this._bundledStreamingIndicator;
 
     if (indicator) {
-      return !!(
-        container.classList.contains(indicator.replace(/^\./,'')) ||
-        container.closest(indicator)
-      );
+      // L-4: closest()는 클래스 셀렉터(.result-streaming)도 정확히 처리
+      return !!container.closest(indicator);
     }
     return false;
   }

@@ -51,8 +51,9 @@ let _dlcTaxEnabled = false;      // 조세심판 DLC 활성 여부
 let _filterCourt = true;         // 법원 판례 필터 (기본 ON)
 let _filterConstitutional = true; // 헌법재판소 필터 (기본 ON)
 
-// 지원 대상 호스트 (manifest.json matches와 동기화)
-const SUPPORTED_HOSTS = [
+// 지원 대상 호스트 — adapters.json에서 동적 로드 (M-8: SSOT 통합)
+// 로드 실패 시 폴백용 정적 목록
+let SUPPORTED_HOSTS = [
   'gemini.google.com',
   'chatgpt.com',
   'claude.ai',
@@ -62,11 +63,29 @@ const SUPPORTED_HOSTS = [
   'grok.com',
 ];
 
+/**
+ * adapters.json에서 hosts 필드를 로드하여 SUPPORTED_HOSTS 갱신.
+ */
+async function loadSupportedHosts() {
+  try {
+    const url = chrome.runtime.getURL('data/adapters.json');
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const config = await res.json();
+    if (config && config.hosts && typeof config.hosts === 'object') {
+      SUPPORTED_HOSTS = Object.keys(config.hosts);
+    }
+  } catch (err) {
+    console.warn('[popup] adapters.json 로드 실패, 정적 호스트 목록 사용:', err.message);
+  }
+}
+
 // ============================================================
 // 3. 초기화
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', async () => {
+  await loadSupportedHosts();
   await loadCurrentTab();
   await loadState();
   renderUI();

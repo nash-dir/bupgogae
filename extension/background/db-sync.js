@@ -40,6 +40,27 @@ const MIN_KEYS_CORE = 100_000;       // Core DB 최소 키 수 (미달 시 파�
 const MIN_KEYS_TAX_DLC = 30_000;     // 조세 DLC 최소 키 수
 const VERSION_REGEX = /^\d{8}$/;     // version 형식: YYYYMMDD
 
+/**
+ * CSS 셀렉터 화이트리스트 검증.
+ * 원격 어댑터 설정(adapters.json)에서 받은 셀렉터가
+ * querySelectorAll()에 안전한지 검증한다.
+ *
+ * 블랙리스트만으로는 우회 벡터가 다수 존재하므로,
+ * 금지 패턴 차단 + 허용 문자 화이트리스트를 조합.
+ *
+ * @param {string} s - 검증할 CSS 셀렉터 문자열
+ * @returns {boolean} 안전하면 true
+ */
+function isValidCssSelector(s) {
+  if (typeof s !== 'string' || s.length === 0 || s.length > MAX_SELECTOR_LENGTH) return false;
+  // 금지 패턴 차단
+  const DANGEROUS = [':has(', 'url(', '@import', 'expression(', 'javascript:'];
+  const lower = s.toLowerCase();
+  if (DANGEROUS.some(p => lower.includes(p))) return false;
+  // 허용 문자만 통과 (CSS 셀렉터에 사용되는 안전한 문자 집합)
+  return /^[a-zA-Z0-9\-_.*#>+~:=\[\]"\\,\s()]+$/.test(s);
+}
+
 // ============================================================
 // 1. IndexedDB Promise 래퍼
 // ============================================================
@@ -60,7 +81,7 @@ function openDB() {
         db.createObjectStore(STORE_CASES);
       }
 
-      // metadata 스토어: 'local_ver', 'last_updated' 등
+      // metadata 스토어: 'local_ver', 'last_synced' 등
       if (!db.objectStoreNames.contains(STORE_META)) {
         db.createObjectStore(STORE_META);
       }
@@ -153,26 +174,39 @@ function dbClearCoreOnly(db, storeName) {
 
 /**
  * 대량 데이터 삽입 (Bulk Insert).
- * 데이터 객체의 각 키-값 쌍을 하나의 트랜잭션으로 넣는다.
+ * chunkSize 단위로 분할하여 각 chunk를 별도 트랜잭션으로 삽입.
+ * GC 기회를 확보하여 DB가 20만건 이상으로 성장해도 안정적으로 동기화.
+ *
  * @param {IDBDatabase} db
  * @param {string} storeName
  * @param {Object} data - { "15Da6302": [[...], ...], ... }
+ * @param {number} [chunkSize=10000] - 한 트랜잭션당 최대 레코드 수
  * @returns {Promise<number>} 삽입된 레코드 수
  */
-function dbBulkInsert(db, storeName, data) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, 'readwrite');
-    const store = tx.objectStore(storeName);
-    let count = 0;
+async function dbBulkInsert(db, storeName, data, chunkSize = 10000) {
+  const entries = Object.entries(data);
+  let totalCount = 0;
 
-    for (const [key, value] of Object.entries(data)) {
-      store.put(value, key);
-      count++;
-    }
+  for (let i = 0; i < entries.length; i += chunkSize) {
+    const chunk = entries.slice(i, i + chunkSize);
 
-    tx.oncomplete = () => resolve(count);
-    tx.onerror = () => reject(new Error(`dbBulkInsert failed: ${tx.error}`));
-  });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+
+      for (const [key, value] of chunk) {
+        store.put(value, key);
+      }
+
+      tx.oncomplete = () => {
+        totalCount += chunk.length;
+        resolve();
+      };
+      tx.onerror = () => reject(new Error(`dbBulkInsert failed: ${tx.error}`));
+    });
+  }
+
+  return totalCount;
 }
 
 // ============================================================
@@ -181,6 +215,12 @@ function dbBulkInsert(db, storeName, data) {
 
 /**
  * db.json.gz를 fetch. ETag 비교로 변경 확인.
+ *
+ * [메모리 주의] 50MB 기준 최대 ~150MB 피크 메모리 가능
+ * (chunks + chunksAll + text + data 동시 존재).
+ * DB가 20MB 이상 성장 시 Response.json() 또는
+ * 스트림 파이프라인 전환을 검토할 것.
+ *
  * @param {string} url
  * @param {string|null} cachedETag - 이전 ETag (null이면 무조건 다운로드)
  * @returns {Promise<{data: Object|null, etag: string|null, notModified: boolean}>}
@@ -381,7 +421,7 @@ async function fetchAdaptersConfig() {
       return;
     }
 
-    // 🚨 보안 검증 (Sanitization)
+    // 🚨 보안 검증 (Sanitization) — 화이트리스트 기반
     for (const [siteId, siteConfig] of Object.entries(config.adapters)) {
       if (siteConfig.responseSelectors) {
         let selectors = siteConfig.responseSelectors;
@@ -389,12 +429,8 @@ async function fetchAdaptersConfig() {
           // 1. 배열 크기 제한
           selectors = selectors.slice(0, MAX_SELECTORS_PER_SITE);
           
-          // 2. 문자열 길이 및 타입 검사, 3. 위험 문법(:has) 차단
-          selectors = selectors.filter(s => 
-            typeof s === 'string' && 
-            s.length <= MAX_SELECTOR_LENGTH &&
-            !s.includes(':has(')
-          );
+          // 2. 화이트리스트 검증
+          selectors = selectors.filter(s => isValidCssSelector(s));
 
           config.adapters[siteId].responseSelectors = selectors;
         } else {
@@ -403,10 +439,9 @@ async function fetchAdaptersConfig() {
         }
       }
 
-      // streamingIndicator 검증 (문자열 타입 및 길이 제한)
+      // streamingIndicator 검증 (화이트리스트 동일 적용)
       if (siteConfig.streamingIndicator) {
-        if (typeof siteConfig.streamingIndicator !== 'string' || 
-            siteConfig.streamingIndicator.length > MAX_SELECTOR_LENGTH) {
+        if (!isValidCssSelector(siteConfig.streamingIndicator)) {
           delete config.adapters[siteId].streamingIndicator;
         }
       }
@@ -416,7 +451,7 @@ async function fetchAdaptersConfig() {
     if (config.scraping_adapters && typeof config.scraping_adapters === 'object') {
       for (const [siteId, selObj] of Object.entries(config.scraping_adapters)) {
         for (const [key, val] of Object.entries(selObj)) {
-          if (typeof val !== 'string' || val.length > MAX_SELECTOR_LENGTH || val.includes(':has(')) {
+          if (!isValidCssSelector(val)) {
              delete selObj[key];
           }
         }
@@ -474,7 +509,6 @@ async function updateMetadata(db, version, totalCount) {
   const store = tx.objectStore(STORE_META);
 
   store.put(version, 'local_ver');
-  store.put(new Date().toISOString(), 'last_updated');
   store.put(new Date().toISOString(), 'last_synced');
   if (totalCount != null) {
     store.put(totalCount, 'total_count');
@@ -567,11 +601,10 @@ async function lookupBatch(compressedKeys) {
     const results = {};
 
     // 단일 readonly 트랜잭션으로 모든 키 조회
+    // tx.oncomplete 기준으로 resolve하여 트랜잭션 완료를 보장
     await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_CASES, 'readonly');
       const store = tx.objectStore(STORE_CASES);
-
-      let pending = compressedKeys.length;
 
       for (const key of compressedKeys) {
         const req = store.get(key);
@@ -581,18 +614,14 @@ async function lookupBatch(compressedKeys) {
           results[key] = (val && val.length > 0)
             ? { found: true, data: val }
             : { found: false, data: null };
-
-          pending--;
-          if (pending === 0) resolve();
         };
 
         req.onerror = () => {
           results[key] = { found: false, data: null, error: req.error?.message };
-          pending--;
-          if (pending === 0) resolve();
         };
       }
 
+      tx.oncomplete = () => resolve();
       tx.onerror = () => reject(new Error(`batch tx failed: ${tx.error}`));
     });
 
@@ -625,6 +654,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     delayInMinutes: 1,                   // 설치 후 1분 뒤 첫 실행
     periodInMinutes: SYNC_INTERVAL_MINUTES,
   });
+
+  // 설치/업데이트 시 Circuit Breaker 카운터 초기화 (이전 버전 누적 스트라이크 제거)
+  await chrome.storage.local.remove([
+    'bupgogae_circuit_strikes',
+    'bupgogae_circuit_fast_streak',
+    'bupgogae_disabled_global',
+  ]);
 
   // 설치/업데이트 시 R2에서 동기화 시도
   await syncDatabase();
@@ -725,11 +761,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // ── 법제처 HTML 원문 Fetch (CORS 우회) ──
   if (message.type === 'FETCH_LAW_HTML') {
-    if (!message.url || !message.url.startsWith('https://www.law.go.kr/')) {
-      sendResponse({ error: "Invalid URL or Host. Only law.go.kr is permitted." });
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(message.url || '');
+    } catch {
+      sendResponse({ error: "Invalid URL format." });
       return true;
     }
-    fetch(message.url)
+    if (parsedUrl.hostname !== 'www.law.go.kr' || parsedUrl.protocol !== 'https:') {
+      sendResponse({ error: "Invalid URL or Host. Only https://www.law.go.kr is permitted." });
+      return true;
+    }
+    fetch(parsedUrl.href)
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.text();
@@ -801,13 +844,11 @@ async function getSyncStatus() {
   try {
     const db = await getCachedDB();
     const localVer = await dbGet(db, STORE_META, 'local_ver');
-    const lastUpdated = await dbGet(db, STORE_META, 'last_updated');
     const lastSynced = await dbGet(db, STORE_META, 'last_synced');
     const totalCount = await dbGet(db, STORE_META, 'total_count');
 
     return {
       localVer: localVer || null,
-      lastUpdated: lastUpdated || null,
       lastSynced: lastSynced || null,
       totalCount: totalCount || null,
     };
@@ -1043,9 +1084,9 @@ async function deleteDlcData() {
       req.onsuccess = (e) => {
         const cursor = e.target.result;
         if (!cursor) return; // cursor 소진 — tx.oncomplete 대기
-        // TX prefix = 조세심판
+        // DLC prefix = TX(조세심판), KP(특허심판)
         if (typeof cursor.key === 'string' &&
-            cursor.key.startsWith('TX')) {
+            (cursor.key.startsWith('TX') || cursor.key.startsWith('KP'))) {
           cursor.delete();
           deleted++;
         }

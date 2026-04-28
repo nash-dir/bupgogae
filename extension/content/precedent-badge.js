@@ -802,7 +802,8 @@ function updatePrecedentBadge(badge, precedentString, level, options = {}) {
 // ============================================================
 
 if (typeof window !== 'undefined') {
-  window.bupgogae = {
+  window.bupgogae = window.bupgogae || {};
+  Object.assign(window.bupgogae, {
     renderPrecedentBadge,
     updatePrecedentBadge,
     revertPrecedentBadge,
@@ -810,5 +811,5 @@ if (typeof window !== 'undefined') {
     decodeCourtName,
     buildFullCitation,
     getDecisionType,
-  };
+  });
 }

@@ -267,7 +267,7 @@ class BupgogaeSidebar {
     this.headerTitle.textContent = '판례 원문 조회';
     const closeBtn = document.createElement('button');
     closeBtn.className = 'bgae-sidebar-close';
-    closeBtn.innerHTML = '&times;'; // safe: 정적인 맵핑
+    closeBtn.textContent = '\u00D7'; // × (곱셈 기호)
     closeBtn.addEventListener('click', () => this.close());
     header.appendChild(this.headerTitle);
     header.appendChild(closeBtn);
@@ -418,12 +418,15 @@ class BupgogaeSidebar {
 
   showError(msg, url) {
     this.headerTitle.textContent = '조회 실패';
-    // safe: msg는 파싱 내부에서 안전하게 정규화됨
+    // H-1 fix: msg를 escape하고, url을 sanitize하여 XSS 차단
+    const safeMsg = this._escapeHtml(msg);
+    const safeUrl = this._escapeHtml(url);
+    // safe: safeMsg와 safeUrl은 _escapeHtml로 sanitize 완료
     this.contentArea.innerHTML = `
       <div class="bgae-error-msg">
-        ${msg}
+        ${safeMsg}
       </div>
-      <a href="${url}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 직접 열기 ↗</a>
+      <a href="${safeUrl}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 직접 열기 ↗</a>
     `;
   }
 

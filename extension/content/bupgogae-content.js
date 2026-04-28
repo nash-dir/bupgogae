@@ -186,14 +186,23 @@ function startObserver() {
  * 처리를 debounce하여 스케줄링.
  * 빠른 연속 DOM 변경에 대해 마지막 변경 후 500ms 뒤에 1회만 처리.
  */
+let _rescheduleCount = 0;
+const MAX_RESCHEDULE = 10; // stuck 방지: 최대 10회 재스케줄
+
 function scheduleProcessing() {
   if (_debounceTimer) clearTimeout(_debounceTimer);
 
   _debounceTimer = setTimeout(() => {
     if (_isProcessing) {
-      // 🚨 버그 수정: 현재 처리 중일 때 들어온 Mutation을 무시하지 않고 다시 스케줄링 대기
-      scheduleProcessing();
+      _rescheduleCount++;
+      if (_rescheduleCount <= MAX_RESCHEDULE) {
+        scheduleProcessing();
+      } else {
+        console.warn(`[bupgogae] 재스케줄 상한 초과 (${MAX_RESCHEDULE}회) — 다음 Mutation 대기`);
+        _rescheduleCount = 0;
+      }
     } else {
+      _rescheduleCount = 0;
       processAllResponses();
     }
   }, DEBOUNCE_MS);

@@ -8,6 +8,8 @@
   fetch_xml_safe(date_str, page, target, query) → bytes | None
   get_text(element, tag) → str
   clean_case_number(raw_no) → str
+  get_network_stats() → dict
+  reset_network_stats() → None
 """
 
 import os
@@ -15,6 +17,8 @@ import random
 import time
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # 환경변수에서 API 키 로드
 API_KEY = os.getenv("BUPGOGAE_API_KEY", "test")
@@ -30,6 +34,45 @@ HEADERS = {
                   "Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.law.go.kr/",
 }
+
+# ── 네트워크 통계 (모듈 수준) ──
+_stats = {"requests": 0, "success": 0, "retries": 0, "failures": 0}
+
+
+def get_network_stats() -> dict:
+    """현재 세션의 네트워크 통계 반환."""
+    return dict(_stats)
+
+
+def reset_network_stats():
+    """네트워크 통계 초기화."""
+    _stats.update({"requests": 0, "success": 0, "retries": 0, "failures": 0})
+
+
+# ── 커넥션 풀 세션 (TCP/TLS 핸드셰이크 재사용) ──
+_session = None
+
+
+def _get_session() -> requests.Session:
+    """커넥션 풀링 + 자동 재시도 세션 반환 (lazy init)."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        retry = Retry(
+            total=3,
+            backoff_factor=1,           # 1, 2, 4초 자동 백오프
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(
+            max_retries=retry,
+            pool_connections=5,
+            pool_maxsize=5,
+        )
+        _session.mount("https://", adapter)
+        _session.headers.update(HEADERS)
+    return _session
 
 
 def get_text(element, tag):
@@ -48,7 +91,7 @@ def clean_case_number(raw_no):
 
 
 def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
-    """법제처 API 호출 (재시도 로직 포함).
+    """법제처 API 호출 (지수 백오프 재시도 포함).
 
     Args:
         date_str: 검색 날짜 (YYYYMMDD) — prec 전용
@@ -76,21 +119,30 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
     if sort:
         params["sort"] = sort
 
-    retries = 3
+    _stats["requests"] += 1
+    session = _get_session()
+    retries = 5
     for i in range(retries):
         try:
-            response = requests.get(
-                base_url, params=params, headers=HEADERS, timeout=15,
+            response = session.get(
+                base_url, params=params, timeout=20,
             )
             if response.status_code == 200:
+                _stats["success"] += 1
                 return response.content
 
+            _stats["retries"] += 1
+            backoff = min(5 * (2 ** i), 60)  # 5, 10, 20, 40, 60초
             print(f"⚠️ [HTTP {response.status_code}] "
-                  f"잠시 대기 후 재시도 ({i + 1}/{retries})...")
-            time.sleep(5 * (i + 1))
+                  f"대기 {backoff}초 후 재시도 ({i + 1}/{retries})...")
+            time.sleep(backoff)
 
         except requests.exceptions.RequestException as e:
-            print(f"❌ [Network Error] {e}. 재시도 중...")
-            time.sleep(5)
+            _stats["retries"] += 1
+            backoff = min(5 * (2 ** i), 60)
+            print(f"❌ [Network Error] {e}. "
+                  f"대기 {backoff}초 후 재시도 ({i + 1}/{retries})...")
+            time.sleep(backoff)
 
+    _stats["failures"] += 1
     return None

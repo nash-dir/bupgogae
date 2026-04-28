@@ -35,7 +35,7 @@ from datetime import datetime, timedelta, date
 from pathlib import Path
 
 # 의존성 (같은 디렉토리)
-from api import fetch_xml_safe, get_text  # noqa: E402
+from api import fetch_xml_safe, get_text, get_network_stats, reset_network_stats  # noqa: E402
 from compress import COURT_CODE_MAP  # noqa: E402
 from master_db import MasterDB  # noqa: E402
 
@@ -57,6 +57,8 @@ TIER2_MOD   = 15
 # TIER3_START = 올해 1/1 (동적)
 
 RECENT_SCAN_PAGES = 3  # 최근 300건 (100건/page × 3)
+
+CIRCUIT_BREAKER_THRESHOLD = 20  # 연속 N건 실패 시 크롤링 중단
 
 # ════════════════════════════════════════════════════════════
 # Date-Modulus 스케줄러
@@ -170,6 +172,37 @@ def scan_plan_summary(ranges: list[tuple[str, str]], today: date, recent_count: 
         "tier3": max(0, len(tier3) - recent_count),
         "est_minutes": round(len(ranges) * 0.9 / 60, 1),
     }
+
+
+# ════════════════════════════════════════════════════════════
+# 실패 날짜 관리 (다음 실행 재시도)
+# ════════════════════════════════════════════════════════════
+
+def load_failed_dates(data_dir: str) -> list[tuple[str, str]]:
+    """이전 실행에서 실패한 날짜 목록 로드 (1회 재시도 후 삭제)."""
+    path = os.path.join(data_dir, "failed_dates.json")
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        os.remove(path)
+        print(f"  🔄 이전 실패 {len(data)}건 재시도 대기열 로드")
+        return [(d["start"], d["end"]) for d in data]
+    except Exception as e:
+        print(f"  ⚠️ 실패 목록 로드 실패: {e}")
+        return []
+
+
+def save_failed_dates(data_dir: str, failed: list[tuple[str, str]]):
+    """실패한 날짜 목록을 저장 (다음 실행 시 재시도)."""
+    if not failed:
+        return
+    path = os.path.join(data_dir, "failed_dates.json")
+    data = [{"start": s, "end": e} for s, e in failed]
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"  💾 실패 {len(failed)}건 저장 → 다음 실행 시 재시도")
 
 
 # ════════════════════════════════════════════════════════════
@@ -558,6 +591,14 @@ def main():
         print("❌ BUPGOGAE_API_KEY 미설정")
         sys.exit(1)
 
+    # 이전 실행에서 실패한 날짜 재시도
+    retry_ranges = load_failed_dates(data_dir)
+    if retry_ranges:
+        scan_ranges = retry_ranges + scan_ranges
+        summary["total"] = len(scan_ranges)
+
+    reset_network_stats()
+
     now = datetime.now()
 
     # Master DB 열기
@@ -567,6 +608,9 @@ def main():
 
     # 크롤링
     total_ins, total_upd, total_skip, errors = 0, 0, 0, 0
+    consecutive_failures = 0
+    failed_ranges = []
+    circuit_broken = False
     for i, (start_date, end_date) in enumerate(scan_ranges):
         if start_date == end_date:
             display = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}"
@@ -586,14 +630,36 @@ def main():
                 total_ins += ins
                 total_upd += upd
                 total_skip += skp
+                consecutive_failures = 0
                 if ins > 0:
                     print(f"  [{i+1:4d}/{len(scan_ranges)}] {display}"
                           f"  +{ins} 신규, ={upd} 갱신, -{skp} 스킵")
+            else:
+                # fetch_xml_safe가 None 반환 → 네트워크 실패
+                consecutive_failures += 1
+                failed_ranges.append((start_date, end_date))
         except Exception as e:
             errors += 1
+            consecutive_failures += 1
+            failed_ranges.append((start_date, end_date))
             print(f"  [{i+1:4d}/{len(scan_ranges)}] {display}  ❌ {e}")
 
+        # Circuit Breaker: 연속 실패 임계값 초과 시 중단
+        if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+            remaining = len(scan_ranges) - i - 1
+            failed_ranges.extend(scan_ranges[i + 1:])
+            print(f"\n  🔌 Circuit Breaker 발동! 연속 {consecutive_failures}건 실패"
+                  f" — 잔여 {remaining}건 스킵")
+            send_pipeline_alert("Circuit Breaker",
+                f"연속 {consecutive_failures}건 실패 — 법제처 서버 장애 의심\n"
+                f"잔여 {remaining}건 → 다음 실행 재시도 예약")
+            circuit_broken = True
+            break
+
         time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+
+    # 실패 날짜 저장 (다음 실행 시 재시도)
+    save_failed_dates(data_dir, failed_ranges)
 
     after_prec = db.count()
     prec_delta = after_prec - before
@@ -668,6 +734,7 @@ def main():
     print(f"{'=' * 55}")
 
     # 텔레그램 리포트
+    net_stats = get_network_stats()
     send_telegram_report(
         today=today,
         scan_count=len(scan_ranges),
@@ -687,6 +754,9 @@ def main():
         tax_total=len(tax_cases),
         tax_ins=tax_ins,
         tax_skipped=tax_skipped,
+        net_stats=net_stats,
+        failed_count=len(failed_ranges),
+        circuit_broken=circuit_broken,
     )
 
 
@@ -718,13 +788,44 @@ def send_telegram_report(**kwargs):
 
     minutes = int(elapsed_sec // 60)
     seconds = int(elapsed_sec % 60)
-    status = "✅" if errors == 0 else "⚠️"
     r2_status = "✅ 업로드" if r2_uploaded else "⏭️ 스킵"
 
     detc_total = kwargs.get("detc_total", 0)
     detc_ins_cnt = kwargs.get("detc_ins", 0)
     tax_total = kwargs.get("tax_total", 0)
     tax_ins_cnt = kwargs.get("tax_ins", 0)
+
+    # 네트워크 통계
+    net_stats = kwargs.get("net_stats", {})
+    failed_count = kwargs.get("failed_count", 0)
+    circuit_broken = kwargs.get("circuit_broken", False)
+    net_failures = net_stats.get("failures", 0)
+    net_retries = net_stats.get("retries", 0)
+
+    # 상태 이모지: 정상 / 네트워크 경고 / Circuit Breaker
+    if circuit_broken:
+        status = "🔌"
+    elif failed_count > 0 or net_failures > 0:
+        status = "⚠️"
+    elif errors > 0:
+        status = "⚠️"
+    else:
+        status = "✅"
+
+    # 네트워크 경고 섹션 (실패 시에만 표시)
+    net_warning = ""
+    if failed_count > 0 or net_failures > 0:
+        net_warning = (
+            f"\n\n📡 *네트워크 경고*\n"
+            f"  요청: {net_stats.get('requests', 0):,}"
+            f" | 재시도: {net_retries}"
+            f" | 실패: {net_failures}\n"
+            f"  📋 누락 항목: {failed_count}건"
+        )
+        if failed_count > 0:
+            net_warning += " → 다음 실행 재시도 예약"
+    if circuit_broken:
+        net_warning += f"\n  🔌 *Circuit Breaker 발동*"
 
     msg = (
         f"{status} *법고개 Crawler Runner*\n"
@@ -743,6 +844,7 @@ def send_telegram_report(**kwargs):
         f"\n"
         f"📦 *Core*: {gz_mb:.2f} MB | *DLC(Tax)*: {kwargs.get('tax_gz_mb', 0):.2f} MB\n"
         f"☁️ *R2*: {r2_status}"
+        f"{net_warning}"
     )
 
     try:

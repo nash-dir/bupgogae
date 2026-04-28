@@ -35,8 +35,7 @@ const $courtFilterToggle = document.getElementById('courtFilterToggle');
 const $courtFilterDesc = document.getElementById('courtFilterDesc');
 const $constitutionalFilterToggle = document.getElementById('constitutionalFilterToggle');
 const $constitutionalFilterDesc = document.getElementById('constitutionalFilterDesc');
-const $dlcDeleteBtn = document.getElementById('dlcDeleteBtn');
-const $copyOrangeBtn = document.getElementById('copyOrangeBtn');
+
 
 // ============================================================
 // 2. 상태
@@ -308,60 +307,6 @@ function bindEvents() {
     }
   });
 
-
-
-  let _deleteConfirmTimer = null;
-  $dlcDeleteBtn.addEventListener('click', async () => {
-    if (!$dlcDeleteBtn.classList.contains('confirming')) {
-      $dlcDeleteBtn.classList.add('confirming');
-      $dlcDeleteBtn.textContent = '정말 삭제할까요? (클릭 시 실행)';
-      _deleteConfirmTimer = setTimeout(() => {
-        $dlcDeleteBtn.classList.remove('confirming');
-        $dlcDeleteBtn.textContent = '확장기능 DB 삭제';
-      }, 3000);
-      return;
-    }
-
-    if (_deleteConfirmTimer) clearTimeout(_deleteConfirmTimer);
-    $dlcDeleteBtn.classList.remove('confirming');
-
-    _dlcTaxEnabled = false;
-    _filterCourt = true;
-    _filterConstitutional = true;
-    $taxDlcToggle.checked = false;
-    $courtFilterToggle.checked = true;
-    $constitutionalFilterToggle.checked = true;
-    await chrome.storage.local.set({
-      bupgogae_dlc_tax: false,
-      bupgogae_filter_court: true,
-      bupgogae_filter_constitutional: true,
-    });
-    updateCourtFilterDesc();
-    updateConstitutionalFilterDesc();
-    updateTaxDlcDesc();
-
-    chrome.runtime.sendMessage({ type: 'DELETE_DLC_DB' }, () => {});
-    $dlcDeleteBtn.textContent = '삭제 완료 ✔';
-    setTimeout(() => { $dlcDeleteBtn.textContent = '확장기능 DB 삭제'; }, 1500);
-  });
-
-  // 주황색 사건번호 복사
-  $copyOrangeBtn.addEventListener('click', async () => {
-    if (!_currentTabId) return;
-    chrome.tabs.sendMessage(_currentTabId, { type: 'EXTRACT_ORANGE_CASES' }, (res) => {
-      if (chrome.runtime.lastError) {
-        $copyOrangeBtn.textContent = '실행 오류 (새로고침 필요)';
-        setTimeout(() => { $copyOrangeBtn.textContent = '주황색 사건번호 복사 (Ctrl+Shift+C)'; }, 2000);
-        return;
-      }
-      if (res && res.count > 0) {
-        $copyOrangeBtn.textContent = `${res.count}개 복사 완료 ✔`;
-      } else {
-        $copyOrangeBtn.textContent = '주황색 사건번호 없음';
-      }
-      setTimeout(() => { $copyOrangeBtn.textContent = '주황색 사건번호 복사 (Ctrl+Shift+C)'; }, 2000);
-    });
-  });
 }
 
 /**

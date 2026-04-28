@@ -98,14 +98,11 @@ const BUPGOGAE_CSS = `
   50% { opacity: 0.55; }
 }
 
-/* --- 툴팁 (hover + pinned) --- */
-.bgae-tooltip {
+/* --- 전역 툴팁 (Global Floating UI) --- */
+.bgae-global-tooltip {
   visibility: hidden;
   opacity: 0;
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
   z-index: 2147483647;
 
   max-width: 400px;
@@ -121,42 +118,44 @@ const BUPGOGAE_CSS = `
   user-select: none;
 
   transition: opacity 0.15s ease, visibility 0.15s ease;
+  transform: translate(-50%, -100%); /* 왼쪽 중앙, 위쪽으로 올림 */
+  margin-top: -8px; /* 배지와의 간격 */
 }
 
-/* hover 시 표시 */
-.bgae-badge:hover .bgae-tooltip {
+/* 표시 상태 (JS에서 제어) */
+.bgae-global-tooltip.bgae-show {
   visibility: visible;
   opacity: 1;
 }
 
-/* pinned 상태: 고정 표시 + 클릭 가능 */
-.bgae-tooltip.bgae-pinned {
+/* pinned 상태: 클릭 가능 */
+.bgae-global-tooltip.bgae-pinned {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
 }
 
-/* 툴팁 색상 */
-.bgae-green .bgae-tooltip {
+/* 툴팁 색상 테마 */
+.bgae-global-tooltip.bgae-tooltip-green {
   background: #14532d;
   color: #bbf7d0;
   border: 1px solid rgba(34, 197, 94, 0.3);
 }
 
-.bgae-red .bgae-tooltip {
+.bgae-global-tooltip.bgae-tooltip-red {
   background: #7f1d1d;
   color: #fecaca;
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
-.bgae-orange .bgae-tooltip {
+.bgae-global-tooltip.bgae-tooltip-orange {
   background: #7c2d12;
   color: #fed7aa;
   border: 1px solid rgba(234, 88, 12, 0.3);
 }
 
 /* 툴팁 화살표 */
-.bgae-tooltip::after {
+.bgae-global-tooltip::after {
   content: '';
   position: absolute;
   top: 100%;
@@ -164,9 +163,9 @@ const BUPGOGAE_CSS = `
   transform: translateX(-50%);
   border: 5px solid transparent;
 }
-.bgae-green .bgae-tooltip::after { border-top-color: #14532d; }
-.bgae-red .bgae-tooltip::after { border-top-color: #7f1d1d; }
-.bgae-orange .bgae-tooltip::after { border-top-color: #7c2d12; }
+.bgae-global-tooltip.bgae-tooltip-green::after { border-top-color: #14532d; }
+.bgae-global-tooltip.bgae-tooltip-red::after { border-top-color: #7f1d1d; }
+.bgae-global-tooltip.bgae-tooltip-orange::after { border-top-color: #7c2d12; }
 
 /* 닫기 버튼 */
 .bgae-tooltip-close {
@@ -249,10 +248,10 @@ const BUPGOGAE_CSS = `
   flex: 1;
   display: block;
   padding: 4px 8px;
-  background: rgba(255,255,255,0.08);
+  background: #e6f4ea;
   border-radius: 3px;
-  border-left: 2.5px solid rgba(34, 197, 94, 0.6);
-  color: inherit;
+  border-left: 2.5px solid rgba(34, 197, 94, 0.8);
+  color: #1a73e8;
   text-decoration: none;
   font-size: 11.5px;
   line-height: 1.5;
@@ -261,7 +260,7 @@ const BUPGOGAE_CSS = `
 }
 
 .bgae-tooltip-case-item a.bgae-main-link:hover {
-  background: rgba(255,255,255,0.18);
+  background: #ceead6;
 }
 
 .bgae-tooltip-newtab-btn {
@@ -269,15 +268,15 @@ const BUPGOGAE_CSS = `
   align-items: center;
   justify-content: center;
   width: 26px;
-  background: rgba(255,255,255,0.08);
+  background: #e6f4ea;
   border-radius: 3px;
-  color: #94a3b8;
+  color: #1a73e8;
   cursor: pointer;
   transition: all 0.2s;
 }
 .bgae-tooltip-newtab-btn:hover {
-  background: rgba(255,255,255,0.18);
-  color: #fff;
+  background: #ceead6;
+  color: #174ea6;
 }
 .bgae-tooltip-newtab-btn svg {
   width: 12px;
@@ -538,44 +537,170 @@ const TOOLTIP_BUILDERS = {
 
 
 // ============================================================
-// 5. 툴팁 핀(고정) 관리
+// 5. 툴팁 핀(고정) 관리 및 전역 툴팁 (Global Floating UI)
 // ============================================================
 
-let _currentPinnedTooltip = null;
+let _currentPinnedTooltip = false; // 전역 툴팁 고정 여부 플래그
+let _activeBadge = null;           // 현재 툴팁이 가리키고 있는 배지 요소
+let _globalTooltip = null;         // 전역 툴팁 DOM
+
+/**
+ * 전역 툴팁 DOM을 싱글톤으로 생성하여 반환.
+ */
+function getGlobalTooltip() {
+  if (!_globalTooltip) {
+    _globalTooltip = document.createElement('div');
+    _globalTooltip.className = 'bgae-global-tooltip';
+    
+    // 닫기 버튼
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'bgae-tooltip-close';
+    closeBtn.textContent = '\u00D7'; // ×
+    closeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      unpinCurrentTooltip();
+      hideTooltip();
+    });
+    
+    const contentBox = document.createElement('div');
+    contentBox.className = 'bgae-tooltip-content-box';
+    
+    _globalTooltip.appendChild(closeBtn);
+    _globalTooltip.appendChild(contentBox);
+    document.body.appendChild(_globalTooltip);
+    
+    // 툴팁 내부 클릭 시 클릭 이벤트가 문서 전체로 퍼지지 않게 방어
+    _globalTooltip.addEventListener('click', (e) => {
+      // 툴팁 안의 링크(a 태그)를 클릭한 경우는 통과
+      if (!e.target.closest('a')) {
+        e.stopPropagation();
+      }
+    });
+    
+    // 스크롤 및 리사이즈 시 위치 업데이트
+    window.addEventListener('scroll', () => {
+      if (_activeBadge) {
+        // 고정 상태가 아니면 화면이 스크롤될 때 즉시 툴팁을 숨김 (이질감 방지)
+        if (!_currentPinnedTooltip) hideTooltip();
+        // 고정 상태면 배지 위치를 따라감
+        else updateTooltipPosition();
+      }
+    }, { passive: true, capture: true }); // capture: true로 내부 div 스크롤도 감지
+    
+    window.addEventListener('resize', () => {
+      if (_activeBadge) updateTooltipPosition();
+    }, { passive: true });
+  }
+  return _globalTooltip;
+}
+
+/**
+ * 툴팁의 위치를 _activeBadge의 최신 화면 좌표로 동기화.
+ */
+function updateTooltipPosition() {
+  if (!_activeBadge || !_globalTooltip) return;
+  const rect = _activeBadge.getBoundingClientRect();
+  // 위치: 배지의 가로 중앙, 세로 상단 (transform: translate(-50%, -100%)로 보정됨)
+  _globalTooltip.style.left = (rect.left + rect.width / 2) + 'px';
+  _globalTooltip.style.top = rect.top + 'px';
+}
+
+/**
+ * 툴팁을 특정 배지에 띄움.
+ */
+function showTooltip(badge, level, options, precedentString) {
+  // 이미 다른 배지에 핀 고정되어 있다면 무시
+  if (_currentPinnedTooltip && _activeBadge !== badge) return;
+  
+  const tooltip = getGlobalTooltip();
+  const contentBox = tooltip.querySelector('.bgae-tooltip-content-box');
+  contentBox.innerHTML = ''; // safe: 빈 문자열 할당 (내용 초기화)
+  
+  // 툴팁 내용 조립
+  switch (level) {
+    case 'green': {
+      const greenEntries = options.greenEntries || [{
+        serialNumber: options.serialNumber || '',
+        courtCode: options.courtCode,
+        dateInt: options.dateInt,
+        caseName: options.caseName || '',
+        caseType: options.caseType || 'court',
+        caseCode: options.caseCode || '',
+        trialType: options.trialType || '',
+      }];
+      contentBox.appendChild(TOOLTIP_BUILDERS.green(
+        greenEntries, precedentString, options.courtCodeMap,
+      ));
+      break;
+    }
+    case 'red':
+      contentBox.appendChild(TOOLTIP_BUILDERS.red(options.redReason || ''));
+      break;
+    case 'orange':
+      contentBox.appendChild(TOOLTIP_BUILDERS.orange());
+      break;
+    default:
+      return; // gray 상태는 툴팁 표시 불가
+  }
+
+  // 클래스명 및 테마 업데이트
+  tooltip.className = `bgae-global-tooltip bgae-show bgae-tooltip-${level}`;
+  if (_currentPinnedTooltip) tooltip.classList.add('bgae-pinned');
+  
+  _activeBadge = badge;
+  updateTooltipPosition();
+}
+
+/**
+ * 툴팁 숨김.
+ */
+function hideTooltip() {
+  if (_currentPinnedTooltip) return; // 고정된 상태면 숨기지 않음
+  if (_globalTooltip) {
+    _globalTooltip.classList.remove('bgae-show');
+    _globalTooltip.classList.remove('bgae-pinned');
+  }
+  _activeBadge = null;
+}
 
 /**
  * 현재 고정된 툴팁 해제.
  */
 function unpinCurrentTooltip() {
-  if (_currentPinnedTooltip) {
-    _currentPinnedTooltip.classList.remove('bgae-pinned');
-    _currentPinnedTooltip = null;
+  _currentPinnedTooltip = false;
+  if (_globalTooltip) {
+    _globalTooltip.classList.remove('bgae-pinned');
   }
 }
 
 /**
- * 툴팁을 고정/해제 토글.
- * @param {HTMLElement} tooltip
+ * 툴팁 고정/해제 토글 (클릭 시).
  */
-function togglePinTooltip(tooltip) {
-  if (_currentPinnedTooltip === tooltip) {
-    // 이미 고정된 것을 다시 클릭 → 해제
+function togglePinTooltip(badge, level, options, precedentString) {
+  if (_currentPinnedTooltip && _activeBadge === badge) {
+    // 같은 배지를 다시 클릭하면 고정 해제 및 숨김
     unpinCurrentTooltip();
+    hideTooltip();
   } else {
-    // 기존 고정 해제 후 새로 고정
-    unpinCurrentTooltip();
-    tooltip.classList.add('bgae-pinned');
-    _currentPinnedTooltip = tooltip;
+    // 새 배지를 클릭하면 즉시 고정
+    _currentPinnedTooltip = false; // 강제 전환을 위해 일시 해제
+    showTooltip(badge, level, options, precedentString);
+    _currentPinnedTooltip = true;
+    if (_globalTooltip) _globalTooltip.classList.add('bgae-pinned');
   }
 }
 
-// 문서 전체 클릭 시 고정 해제 (배지 외 영역 클릭)
+// 문서 전체 클릭 시 고정 해제 (배지나 툴팁 외 영역 클릭 시)
 if (typeof document !== 'undefined') {
   document.addEventListener('click', (e) => {
-    if (_currentPinnedTooltip && !e.target.closest('.bgae-badge')) {
-      unpinCurrentTooltip();
+    if (_currentPinnedTooltip) {
+      if (!e.target.closest('.bgae-badge') && !e.target.closest('.bgae-global-tooltip')) {
+        unpinCurrentTooltip();
+        hideTooltip();
+      }
     }
-  }, true);
+  }, true); // 캡처 단계에서 처리하여 다른 요소의 클릭 차단 방지
 }
 
 
@@ -588,15 +713,8 @@ if (typeof document !== 'undefined') {
  *
  * @param {Text} textNode
  * @param {string} precedentString - "2015다6302"
- * @param {'green'|'orange'|'red'} level
+ * @param {'green'|'orange'|'red'|'gray'} level
  * @param {Object} [options]
- * @param {string} [options.caseName] - 디코딩된 사건명
- * @param {number} [options.serialNumber] - 법제처 일련번호
- * @param {string} [options.redReason] - Red 사유
- * @param {number} [options.courtCode] - 법원 코드 (1=대법원 등)
- * @param {number} [options.dateInt] - 선고일 정수 (150115 등)
- * @param {string} [options.caseCode] - 한글 사건부호 ("다", "마" 등)
- * @param {Object} [options.courtCodeMap] - 법원코드 매핑
  * @returns {HTMLElement|null}
  */
 function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
@@ -621,61 +739,20 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   badge.setAttribute('data-bgae-case', precedentString);
   badge.textContent = precedentString;
 
-  // ── 툴팁 생성 ──
-  // 회색(gray) Pending 상태일 때는 툴팁을 달지 않음
+  // ── 툴팁 이벤트 연결 ──
   if (level !== 'gray') {
-    const tooltip = document.createElement('span');
-    tooltip.className = 'bgae-tooltip';
-
-    // 닫기 버튼 (pinned 상태에서만 보임)
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'bgae-tooltip-close';
-    closeBtn.textContent = '\u00D7'; // ×
-    closeBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      unpinCurrentTooltip();
+    badge.addEventListener('mouseenter', () => {
+      showTooltip(badge, level, options, precedentString);
     });
-    tooltip.appendChild(closeBtn);
-
-    // 툴팁 내용 (DOM API로 조립 — innerHTML 미사용)
-    switch (level) {
-      case 'green': {
-        // greenEntries 배열 → 사건 목록 리스트 렌더링
-        const greenEntries = options.greenEntries || [{
-          serialNumber: options.serialNumber || '',
-          courtCode: options.courtCode,
-          dateInt: options.dateInt,
-          caseName: options.caseName || '',
-          caseType: options.caseType || 'court',
-          caseCode: options.caseCode || '',
-          trialType: options.trialType || '',
-        }];
-        tooltip.appendChild(TOOLTIP_BUILDERS.green(
-          greenEntries, precedentString, options.courtCodeMap,
-        ));
-        break;
-      }
-
-      case 'red':
-        tooltip.appendChild(TOOLTIP_BUILDERS.red(options.redReason || ''));
-        break;
-
-      case 'orange':
-        tooltip.appendChild(TOOLTIP_BUILDERS.orange());
-        break;
-    }
-
-    badge.appendChild(tooltip);
-
-    // ── 클릭 → 툴팁 고정 ──
-    // 링크 클릭은 통과시키고, 배지 자체 클릭만 툴팁 고정
+    
+    badge.addEventListener('mouseleave', () => {
+      hideTooltip();
+    });
+    
     badge.addEventListener('click', (e) => {
-      // 툴팁 내 링크 클릭은 그대로 진행 (새 탭 열기)
-      if (e.target.closest('a')) return;
       e.preventDefault();
       e.stopPropagation();
-      togglePinTooltip(tooltip);
+      togglePinTooltip(badge, level, options, precedentString);
     });
   }
 

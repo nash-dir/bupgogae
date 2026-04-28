@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-21",
+  "version": "2026-04-23",
   "adapters": {
     "gemini": {
       "responseSelectors": [
@@ -7,7 +7,10 @@
         ".model-response-text",
         ".markdown-main-panel",
         "model-response",
-        ".response-container"
+        ".response-container",
+        "chat-response",
+        "[class*=\"message-content\"]",
+        "[class*=\"model-response\"]"
       ]
     },
     "chatgpt": {
@@ -23,7 +26,12 @@
         "[data-testid=\"chat-message-content\"]",
         ".font-claude-message",
         "[data-testid=\"conversation-turn\"] .prose",
-        "div.prose"
+        "div.prose",
+        "[class*=\"font-claude\"]",
+        "[class*=\"message-content\"]",
+        "[class*=\"prose\"]",
+        "article",
+        "main"
       ]
     },
     "copilot": {

@@ -51,11 +51,11 @@
     </div>
   </div>
 
-  <!-- 확장기능 (DLC) -->
+  <!-- 검증 범위 -->
   <div class="popup-dlc-section">
     <button class="popup-dlc-header" id="dlcToggleBtn" type="button">
-      <span class="popup-dlc-icon">🧩</span>
-      <span class="popup-dlc-title">확장기능</span>
+      <span class="popup-dlc-icon">⚖️</span>
+      <span class="popup-dlc-title">검증 범위</span>
       <span class="popup-dlc-arrow" id="dlcArrow">▾</span>
     </button>
     <div class="popup-dlc-body" id="dlcBody">
@@ -83,8 +83,8 @@
         </label>
       </div>
 
-      <!-- 조세심판원 토글 (기본 OFF, DLC) -->
-      <div class="popup-toggle-row popup-dlc-row">
+      <!-- 조세심판원 토글 (DB 미완성 — 숨김 처리) -->
+      <div class="popup-toggle-row popup-dlc-row" style="display:none">
         <div class="popup-toggle-info">
           <span class="popup-toggle-label">조세심판원</span>
           <span class="popup-toggle-desc" id="taxDlcDesc">조세심판 사건 검증 비활성</span>
@@ -94,16 +94,6 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-
-      <!-- DB 삭제 버튼 -->
-      <button class="popup-dlc-delete-btn" id="dlcDeleteBtn" type="button">
-        확장기능 DB 삭제
-      </button>
-
-      <!-- 주황색 사건번호 복사 버튼 -->
-      <button class="popup-dlc-delete-btn" id="copyOrangeBtn" type="button" style="margin-top: 8px; background-color: #ea580c; border-color: #c2410c; color: white;">
-        주황색 사건번호 복사 (Ctrl+Shift+C)
-      </button>
     </div>
   </div>
 

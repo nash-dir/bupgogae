@@ -190,7 +190,10 @@ function scheduleProcessing() {
   if (_debounceTimer) clearTimeout(_debounceTimer);
 
   _debounceTimer = setTimeout(() => {
-    if (!_isProcessing) {
+    if (_isProcessing) {
+      // 🚨 버그 수정: 현재 처리 중일 때 들어온 Mutation을 무시하지 않고 다시 스케줄링 대기
+      scheduleProcessing();
+    } else {
       processAllResponses();
     }
   }, DEBOUNCE_MS);
@@ -286,7 +289,15 @@ async function handleCircuitBreaker(duration) {
       });
     }
   } catch (err) {
-    console.error('[bupgogae] 서킷 브레이커 상태 처리 실패:', err);
+    if (err.message && err.message.includes('Extension context invalidated')) {
+      console.log('[bupgogae] 확장 프로그램이 업데이트되었습니다. 구버전 스크립트를 중지합니다. (새로고침 F5 필요)');
+      if (_observer) {
+        _observer.disconnect();
+        _observer = null;
+      }
+    } else {
+      console.error('[bupgogae] 서킷 브레이커 상태 처리 실패:', err);
+    }
   }
 }
 
@@ -323,10 +334,10 @@ function findResponseContainers() {
     }
   }
 
-  // 폴백: 어댑터가 실패하면 body 전체를 대상으로
-  // (성능상 비효율적이지만 동작은 보장)
-  console.warn(`[bupgogae] ${_adapter ? _adapter.displayName : '(unknown)'} 응답 컨테이너를 찾지 못함. body 전체 스캔.`);
-  return [document.body];
+  // 폴백 제거: 빈 화면(채팅 시작 전)에서 body 전체를 스캔하면
+  // 성능 저하 및 서킷 브레이커 오작동을 유발하므로 빈 배열 반환.
+  // console.warn(`[bupgogae] ${_adapter ? _adapter.displayName : '(unknown)'} 응답 컨테이너를 찾지 못함.`);
+  return [];
 }
 
 /**
@@ -644,13 +655,20 @@ function renderBadge(textNode, raw, level, options = {}) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'EXTRACT_ORANGE_CASES') {
     let badges = [];
-    const containers = findResponseContainers();
-    if (containers && containers.length > 0) {
-      const lastContainer = containers[containers.length - 1];
-      badges = lastContainer.querySelectorAll('.bgae-badge.bgae-orange');
-    } else {
-      badges = document.querySelectorAll('.bgae-badge.bgae-orange');
+    const allBadges = document.querySelectorAll('.bgae-badge.bgae-orange');
+    
+    if (allBadges.length > 0) {
+      const lastBadge = allBadges[allBadges.length - 1];
+      // 해당 배지가 속한 메시지 전체 블록을 탐색 (플랫폼별 최상위 컨테이너)
+      const msgContainer = lastBadge.closest('article, [data-testid="conversation-turn"], [data-message-author-role], message-content, model-response, .response-container, .markdown-main-panel');
+      
+      if (msgContainer) {
+        badges = msgContainer.querySelectorAll('.bgae-badge.bgae-orange');
+      } else {
+        badges = allBadges; // 명확한 컨테이너가 없으면 전체 긁어오기 (안전 폴백)
+      }
     }
+
     const cases = Array.from(new Set(Array.from(badges).map(b => b.getAttribute('data-bgae-case')))).filter(Boolean);
     
     if (cases.length === 0) {

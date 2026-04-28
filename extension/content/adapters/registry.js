@@ -155,6 +155,11 @@ function getAdapter(remoteConfig, bundledConfig) {
  * 비동기 어댑터 초기화 — 번들 JSON + Remote Config 로드 후 어댑터 반환.
  * Content Script 초기화(init())에서 사용하는 권장 진입점.
  *
+ * [Stale-While-Revalidate 전략]
+ *   현재 세션은 캐시(chrome.storage.local)된 Remote Config로 즉시 시작.
+ *   동시에 백그라운드에서 R2 최신본을 fire-and-forget으로 가져와 캐시 갱신.
+ *   → 다음 페이지 로드 시 최신 설정이 자동 적용됨.
+ *
  * @returns {Promise<SiteAdapter|null>}
  */
 async function initAdapters() {
@@ -163,6 +168,15 @@ async function initAdapters() {
     loadBundledConfig(),
     loadRemoteConfig(),
   ]);
+
+  // Stale-While-Revalidate: 백그라운드에서 R2 최신본 fetch (fire-and-forget)
+  // 현재 세션에는 영향 없이, 다음 로드를 위해 캐시를 선제적으로 갱신
+  try {
+    chrome.runtime.sendMessage({ type: 'FETCH_ADAPTERS' }, () => {
+      if (chrome.runtime.lastError) { /* silent */ }
+    });
+  } catch { /* extension context invalidated — safe to ignore */ }
+
   return getAdapter(remoteConfig, bundledConfig);
 }
 

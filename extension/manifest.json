@@ -5,7 +5,8 @@
   "description": "LLM 환각 판례를 실시간으로 탐지합니다",
   "permissions": ["alarms", "storage", "unlimitedStorage", "tabs"],
   "host_permissions": [
-    "*://*.law.go.kr/*"
+    "*://*.law.go.kr/*",
+    "https://api.bup.live/*"
   ],
   "background": { "service_worker": "background/db-sync.js" },
   "content_scripts": [{
@@ -58,7 +59,7 @@
     }
   },
   "web_accessible_resources": [{
-    "resources": ["data/bupgogae_meta.json", "data/db.json"],
+    "resources": ["data/bupgogae_meta.json", "data/db.json", "data/adapters.json"],
     "matches": [
       "https://gemini.google.com/*",
       "https://chatgpt.com/*",

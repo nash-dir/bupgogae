@@ -140,6 +140,10 @@ const SIDEBAR_CSS = `
     color: #cbd5e1; /* slate-300 */
     white-space: pre-wrap;
     word-break: keep-all;
+    margin-bottom: 14px;
+  }
+  .bgae-section-body:last-child {
+    margin-bottom: 0;
   }
 
   /* 로딩 스피너 */
@@ -472,15 +476,39 @@ class BupgogaeSidebar {
       if (detailWrap) {
         // detailWrap 내부의 태그들을 순서대로 추출
         const elements = detailWrap.querySelectorAll(`${selectors.section_title}, ${selectors.section_body}`);
+        let currentSectionOpen = false;
         
         for (const el of elements) {
           if (el.matches(selectors.section_title)) {
             const sectTitle = el.textContent.trim();
-            if (sectTitle) detailsHtml += `<div class="bgae-section"><div class="bgae-section-title">${this._escapeHtml(sectTitle)}</div>`;
+            if (sectTitle) {
+              if (currentSectionOpen) {
+                detailsHtml += `</div>`; // 이전 section 닫기
+              }
+              detailsHtml += `<div class="bgae-section"><div class="bgae-section-title">${this._escapeHtml(sectTitle)}</div>`;
+              currentSectionOpen = true;
+            }
           } else if (el.matches(selectors.section_body)) {
-            const desc = el.textContent.trim();
-            if (desc) detailsHtml += `<div class="bgae-section-body">${this._escapeHtml(desc)}</div></div>`;
+            // <br> 태그를 줄바꿈(\n)으로 변환하기 위해 복제
+            const clone = el.cloneNode(true);
+            const brs = clone.querySelectorAll('br');
+            for (const br of brs) {
+              br.replaceWith('\n');
+            }
+            const desc = clone.textContent.trim();
+            
+            if (desc) {
+              if (!currentSectionOpen) {
+                detailsHtml += `<div class="bgae-section">`;
+                currentSectionOpen = true;
+              }
+              detailsHtml += `<div class="bgae-section-body">${this._escapeHtml(desc)}</div>`;
+            }
           }
+        }
+        
+        if (currentSectionOpen) {
+          detailsHtml += `</div>`; // 마지막 section 닫기
         }
         
         // 구조화된 추출이 잘 되지 않았을 경우 통으로 텍스트 처리

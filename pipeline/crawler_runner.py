@@ -250,7 +250,7 @@ def fetch_cases_for_range(date_range: str) -> list[dict]:
     cases = []
     xml_content = fetch_xml_safe(date_range, page=1)
     if not xml_content:
-        return cases
+        return None  # 네트워크 실패 → None (빈 결과 []와 구분)
     try:
         root = ET.fromstring(xml_content)
     except ET.ParseError:
@@ -625,7 +625,11 @@ def main():
         try:
             date_param = start_date if start_date == end_date else f"{start_date}~{end_date}"
             raw = fetch_cases_for_range(date_param)
-            if raw:
+            if raw is None:
+                # fetch_xml_safe가 None 반환 → 네트워크 실패
+                consecutive_failures += 1
+                failed_ranges.append((start_date, end_date))
+            elif raw:
                 ins, upd, skp = db.upsert_raw(raw)
                 total_ins += ins
                 total_upd += upd
@@ -635,9 +639,8 @@ def main():
                     print(f"  [{i+1:4d}/{len(scan_ranges)}] {display}"
                           f"  +{ins} 신규, ={upd} 갱신, -{skp} 스킵")
             else:
-                # fetch_xml_safe가 None 반환 → 네트워크 실패
-                consecutive_failures += 1
-                failed_ranges.append((start_date, end_date))
+                # 빈 결과 [] — 해당 날짜에 판례 없음 (정상)
+                consecutive_failures = 0
         except Exception as e:
             errors += 1
             consecutive_failures += 1

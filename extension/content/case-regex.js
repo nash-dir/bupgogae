@@ -307,3 +307,41 @@ if (typeof window !== 'undefined') {
     getCourtCodeMap,
   };
 }
+
+// CommonJS 노출 (단위 테스트용 — 런타임 동작에는 영향 없음)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    initMeta,
+    extractCaseNumbers,
+    validateCaseNumber,
+    compressCaseKey,
+    isMetaReady,
+    getCourtCodeMap,
+    /**
+     * 테스트 전용: 메타데이터(case_code_map / court_code_map)를 직접 주입.
+     * Service Worker 메시지 없이 화이트리스트 정규식·압축 로직을 검증하기 위함.
+     */
+    __setMetaForTest(caseCodeMap, courtCodeMap) {
+      _caseCodeMap = caseCodeMap || {};
+      _validCodes = new Set(Object.keys(_caseCodeMap));
+      _courtCodeMap = courtCodeMap || {};
+      const codes = Object.keys(_caseCodeMap)
+        .sort((a, b) => b.length - a.length || a.localeCompare(b));
+      if (codes.length > 0) {
+        const codesPattern = codes.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+        _courtCaseRegex = new RegExp(
+          `((?:19|20)\\d{2}|\\d{2})(${codesPattern})(\\d{1,7})`, 'g'
+        );
+      } else {
+        _courtCaseRegex = null;
+      }
+    },
+    /** 테스트 전용: 주입된 메타 초기화. */
+    __resetMetaForTest() {
+      _caseCodeMap = null;
+      _validCodes = null;
+      _courtCodeMap = null;
+      _courtCaseRegex = null;
+    },
+  };
+}

@@ -21,7 +21,8 @@ KIPRIS Plus 심판사항(DBII_000000000000019) 데이터를 가져오는 API 래
 import os
 import random
 import time
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # 타입 힌트(ET.Element)·예외(ET.ParseError)용
+from defusedxml.ElementTree import fromstring as _safe_fromstring  # XXE 방어 파싱
 
 import requests
 
@@ -165,7 +166,7 @@ def check_api_error(xml_bytes: bytes) -> str | None:
         에러 메시지 문자열 (에러 시), None (정상 시)
     """
     try:
-        root = ET.fromstring(xml_bytes)
+        root = _safe_fromstring(xml_bytes)
     except ET.ParseError:
         return "XML 파싱 오류"
 
@@ -207,7 +208,7 @@ def parse_kipris_items(xml_bytes: bytes) -> tuple[list[dict], int, str | None]:
     total_count = 0
 
     try:
-        root = ET.fromstring(xml_bytes)
+        root = _safe_fromstring(xml_bytes)
     except ET.ParseError as e:
         return items, total_count, f"XML 파싱 오류: {e}"
 

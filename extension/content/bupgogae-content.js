@@ -30,6 +30,7 @@
 const DEBOUNCE_MS = 500;
 const PROCESSED_ATTR = 'data-bgae-processed';
 const MAX_BATCH_SIZE = 50; // 한 번에 조회할 최대 키 수
+const LOOKUP_TIMEOUT_MS = 8000; // 배치 조회 응답 대기 한도 (SW 컨텍스트 무효화 시 무한 대기 방지)
 
 
 // ============================================================
@@ -630,22 +631,45 @@ async function batchLookup(keys) {
     const chunk = keys.slice(i, i + MAX_BATCH_SIZE);
 
     const result = await new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: 'LOOKUP_BATCH', keys: chunk },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            console.warn('[bupgogae] 배치 조회 실패:', chrome.runtime.lastError.message);
-            // 에러 시 error: true 플래그 포함시켜서 렌더링 스킵 유도 (Orange 방지)
-            const fallback = {};
-            for (const k of chunk) {
-              fallback[k] = { found: false, data: null, error: true };
-            }
-            resolve(fallback);
-            return;
-          }
-          resolve(response || {});
+      let settled = false;
+      // 에러/타임아웃 시 error: true 플래그로 렌더링 스킵 유도 (Orange 오탐 방지)
+      const resolveFallback = () => {
+        const fallback = {};
+        for (const k of chunk) {
+          fallback[k] = { found: false, data: null, error: true };
         }
-      );
+        resolve(fallback);
+      };
+
+      // SW 컨텍스트 무효화 등으로 콜백이 끝내 호출되지 않는 경우를 대비한 타임아웃 가드
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.warn('[bupgogae] 배치 조회 타임아웃 — 응답 없음');
+        resolveFallback();
+      }, LOOKUP_TIMEOUT_MS);
+
+      const handle = (response, err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (err) {
+          console.warn('[bupgogae] 배치 조회 실패:', err.message);
+          resolveFallback();
+          return;
+        }
+        resolve(response || {});
+      };
+
+      try {
+        chrome.runtime.sendMessage(
+          { type: 'LOOKUP_BATCH', keys: chunk },
+          (response) => handle(response, chrome.runtime.lastError)
+        );
+      } catch (e) {
+        // sendMessage 자체가 throw하는 경우(컨텍스트 무효화 등)
+        handle(null, e);
+      }
     });
 
     Object.assign(allResults, result);

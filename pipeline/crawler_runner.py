@@ -30,7 +30,8 @@ import random
 import sys
 import requests as _requests
 import time
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # 타입 힌트·예외(ET.ParseError)용
+from defusedxml.ElementTree import fromstring as _safe_fromstring  # XXE 방어 파싱
 from datetime import datetime, timedelta, date
 from pathlib import Path
 
@@ -74,7 +75,7 @@ def fetch_recent_ruling_dates() -> set[str]:
         if not xml_content:
             break
         try:
-            root = ET.fromstring(xml_content)
+            root = _safe_fromstring(xml_content)
         except ET.ParseError:
             break
         for item in root.findall("prec"):
@@ -252,7 +253,7 @@ def fetch_cases_for_range(date_range: str) -> list[dict]:
     if not xml_content:
         return None  # 네트워크 실패 → None (빈 결과 []와 구분)
     try:
-        root = ET.fromstring(xml_content)
+        root = _safe_fromstring(xml_content)
     except ET.ParseError:
         return cases
 
@@ -275,7 +276,7 @@ def fetch_cases_for_range(date_range: str) -> list[dict]:
         if not page_xml:
             continue
         try:
-            page_root = ET.fromstring(page_xml)
+            page_root = _safe_fromstring(page_xml)
         except ET.ParseError:
             continue
         items = page_root.findall("prec")
@@ -337,7 +338,7 @@ def _fetch_detc_page(page: int) -> list[dict]:
     if not xml_content:
         return []
     try:
-        root = ET.fromstring(xml_content)
+        root = _safe_fromstring(xml_content)
     except ET.ParseError:
         return []
 
@@ -418,7 +419,7 @@ def _fetch_tax_page(page: int) -> list[dict]:
     if not xml_content:
         return []
     try:
-        root = ET.fromstring(xml_content)
+        root = _safe_fromstring(xml_content)
     except ET.ParseError:
         return []
 

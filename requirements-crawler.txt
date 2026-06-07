@@ -1,2 +1,3 @@
 requests>=2.31
 boto3>=1.34
+defusedxml>=0.7

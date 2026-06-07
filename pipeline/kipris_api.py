@@ -93,7 +93,7 @@ def _try_fetch(url: str, params: dict, retries: int = 3) -> bytes | None:
                 continue
 
             # 그 외 에러
-            log.info(f"❌ [HTTP {response.status_code}] {response.text[:200]}")
+            log.error(f"X [HTTP {response.status_code}] {response.text[:200]}")
             return None
 
         except requests.exceptions.RequestException as e:
@@ -128,7 +128,7 @@ def fetch_kipris_xml(
     """
     key = access_key or KIPRIS_API_KEY
     if not key:
-        log.info("❌ KIPRIS_API_KEY 미설정")
+        log.error("X KIPRIS_API_KEY 미설정")
         return None
 
     # ── 1차: 신규 getAdvancedSearch ──
@@ -154,7 +154,7 @@ def fetch_kipris_xml(
         return result
 
     # ── 3차: 구 서비스 폴백 ──
-    log.error("⚠️ 신규 서비스 실패 → 구 서비스 폴백 시도")
+    log.warning("⚠️ 신규 서비스 실패 → 구 서비스 폴백 시도")
     legacy_params = {
         "ServiceKey": key,
         "trialDecisionDate": f"{start_date}~{end_date}",

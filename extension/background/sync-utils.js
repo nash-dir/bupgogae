@@ -48,7 +48,7 @@
     const maxPerSite = opts.maxPerSite || DEFAULT_MAX_SELECTORS_PER_SITE;
     const maxLen = opts.maxLen || DEFAULT_MAX_SELECTOR_LENGTH;
 
-    if (!config || typeof config.adapters !== 'object') return config;
+    if (!config || config.adapters == null || typeof config.adapters !== 'object') return config;
 
     for (const [siteId, siteConfig] of Object.entries(config.adapters)) {
       if (siteConfig.responseSelectors) {
@@ -106,10 +106,22 @@
       return { ok: false, error: `total(${data.total}) ≠ keys(${keyCount})` };
     }
 
-    // 레코드 구조 샘플 검증 — 랜덤 최대 5건이 [[serial, ...], ...] 형태인지
+    // 레코드 구조 샘플 검증 — 중복 없는 선택으로 탐지율 100% 보장
+    // 키 수가 sampleSize 이하면 전수 검사; 아니면 중복 없는 랜덤 샘플
     const sampleSize = Math.min(5, keyCount);
-    for (let i = 0; i < sampleSize; i++) {
-      const key = keys[Math.floor(Math.random() * keyCount)];
+    let sampleKeys;
+    if (keyCount <= sampleSize) {
+      sampleKeys = keys;
+    } else {
+      // Fisher-Yates 부분 셔플로 중복 없는 sampleSize개 선택
+      const indices = keys.slice();
+      for (let i = 0; i < sampleSize; i++) {
+        const j = i + Math.floor(Math.random() * (keyCount - i));
+        const tmp = indices[i]; indices[i] = indices[j]; indices[j] = tmp;
+      }
+      sampleKeys = indices.slice(0, sampleSize);
+    }
+    for (const key of sampleKeys) {
       const val = data.cases[key];
       if (!Array.isArray(val) || val.length === 0) {
         return { ok: false, error: `cases["${key}"]가 비어있거나 배열이 아님` };

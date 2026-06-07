@@ -192,7 +192,7 @@ def load_failed_dates(data_dir: str) -> list[tuple[str, str]]:
         log.info(f"  🔄 이전 실패 {len(data)}건 재시도 대기열 로드")
         return [(d["start"], d["end"]) for d in data]
     except Exception as e:
-        log.error(f"  ⚠️ 실패 목록 로드 실패: {e}")
+        log.warning(f"  ⚠️ 실패 목록 로드 실패: {e}")
         return []
 
 
@@ -234,9 +234,9 @@ def send_pipeline_alert(source: str, message: str):
         if resp.status_code == 200:
             log.info(f"📨 텔레그램 긴급 알림 전송 ({source})")
         else:
-            log.error(f"⚠️ 텔레그램 전송 실패: {resp.status_code}")
+            log.warning(f"⚠️ 텔레그램 전송 실패: {resp.status_code}")
     except Exception as e:
-        log.error(f"⚠️ 텔레그램 전송 실패: {e}")
+        log.warning(f"⚠️ 텔레그램 전송 실패: {e}")
 
 
 # ════════════════════════════════════════════════════════════
@@ -552,7 +552,7 @@ def main():
         recent_dates = fetch_recent_ruling_dates()
         log.info(f"  Tier 0: {len(recent_dates)}개 선고일 감지")
     except Exception as e:
-        log.error(f"  ⚠️ 최신선고 추출 실패 (Tier 3 폴백): {e}")
+        log.warning(f"  ⚠️ 최신선고 추출 실패 (Tier 3 폴백): {e}")
         recent_dates = set()
 
     # 스캔 계획
@@ -862,9 +862,9 @@ def send_telegram_report(**kwargs):
         if resp.status_code == 200:
             log.info("📨 텔레그램 리포트 전송 완료")
         else:
-            log.error(f"⚠️ 텔레그램 전송 실패: {resp.status_code} {resp.text[:100]}")
+            log.warning(f"⚠️ 텔레그램 전송 실패: {resp.status_code} {resp.text[:100]}")
     except Exception as e:
-        log.error(f"⚠️ 텔레그램 전송 실패: {e}")
+        log.warning(f"⚠️ 텔레그램 전송 실패: {e}")
 
 
 if __name__ == "__main__":

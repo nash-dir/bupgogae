@@ -222,11 +222,14 @@ async function reloadRemoteConfig(adapter) {
  * @returns {{ hostname: string, displayName: string }[]}
  */
 function getSupportedSites() {
-  return Object.entries(ADAPTER_MAP).map(([hostname, name]) => ({
-    hostname,
-    displayName: ADAPTER_DISPLAY_NAMES[name] || name,
-    adapterName: name,
-  }));
+  const seen = new Set();
+  const result = [];
+  for (const [hostname, name] of Object.entries(ADAPTER_MAP)) {
+    if (seen.has(name)) continue;  // 동일 어댑터의 두 번째 호스트 항목 스킵
+    seen.add(name);
+    result.push({ hostname, displayName: ADAPTER_DISPLAY_NAMES[name] || name, adapterName: name });
+  }
+  return result;
 }
 
 // 외부 인터페이스

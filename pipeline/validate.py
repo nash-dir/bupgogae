@@ -25,9 +25,15 @@ MAX_TRIAL_TYPE_LEN = 64
 
 
 def _clip(value, max_len: int) -> str:
-    """None-안전 문자열 변환 + strip + 길이 상한."""
+    """None-안전 문자열 변환 + strip + 길이 상한.
+
+    str / int / float 만 허용. list·dict 등 복합 타입은 None을 반환하여
+    호출부가 garbage 데이터로 DB에 삽입되지 않도록 한다.
+    """
     if value is None:
         return ""
+    if not isinstance(value, (str, int, float)):
+        return None  # type: ignore[return-value]  # 호출부에서 None 체크
     return str(value).strip()[:max_len]
 
 
@@ -45,10 +51,10 @@ def sanitize_raw_case(case: dict) -> dict | None:
         return None
     return {
         "serial": serial,
-        "case_name": _clip(case.get("case_name"), MAX_CASE_NAME_LEN),
-        "case_number": _clip(case.get("case_number"), MAX_CASE_NUMBER_LEN),
-        "date": _clip(case.get("date"), MAX_DATE_LEN),
-        "court": _clip(case.get("court"), MAX_COURT_LEN),
+        "case_name": _clip(case.get("case_name"), MAX_CASE_NAME_LEN) or "",
+        "case_number": _clip(case.get("case_number"), MAX_CASE_NUMBER_LEN) or "",
+        "date": _clip(case.get("date"), MAX_DATE_LEN) or "",
+        "court": _clip(case.get("court"), MAX_COURT_LEN) or "",
     }
 
 
@@ -66,10 +72,10 @@ def sanitize_kipris_item(item: dict) -> dict | None:
         return None
     return {
         "serial": serial,
-        "case_name": _clip(item.get("case_name"), MAX_CASE_NAME_LEN),
-        "case_number": _clip(item.get("case_number"), MAX_CASE_NUMBER_LEN),
-        "decision_date": _clip(item.get("decision_date"), MAX_DATE_LEN),
-        "trial_type": _clip(item.get("trial_type"), MAX_TRIAL_TYPE_LEN),
+        "case_name": _clip(item.get("case_name"), MAX_CASE_NAME_LEN) or "",
+        "case_number": _clip(item.get("case_number"), MAX_CASE_NUMBER_LEN) or "",
+        "decision_date": _clip(item.get("decision_date"), MAX_DATE_LEN) or "",
+        "trial_type": _clip(item.get("trial_type"), MAX_TRIAL_TYPE_LEN) or "",
     }
 
 

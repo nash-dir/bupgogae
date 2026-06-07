@@ -40,9 +40,13 @@ describe('registry SITE_DEFS 파생', () => {
     expect(inst.displayName).toBe('Google Gemini');
   });
 
-  test('getSupportedSites: 호스트별 표시명 반환', () => {
+  test('getSupportedSites: 어댑터별 중복 없이 표시명 반환', () => {
     const sites = adapters.getSupportedSites();
-    expect(sites).toHaveLength(7);
+    // ADAPTER_MAP은 7개 호스트이지만, Perplexity가 2개 → 어댑터 기준 6개
+    expect(sites).toHaveLength(6);
+    // 중복이 없는지 확인
+    const names = sites.map(s => s.adapterName);
+    expect(new Set(names).size).toBe(names.length);
     const chatgpt = sites.find(s => s.hostname === 'chatgpt.com');
     expect(chatgpt).toMatchObject({
       hostname: 'chatgpt.com',

@@ -169,7 +169,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
     # API 키 확인
     api_key = os.environ.get("KIPRIS_API_KEY", "")
     if not api_key:
-        log.info("❌ KIPRIS_API_KEY 미설정")
+        log.error("X KIPRIS_API_KEY 미설정")
         sys.exit(1)
 
     api_calls_made = 0
@@ -193,7 +193,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
                 f"마지막 에러: {last_error_msg}\n"
                 f"API 호출: {api_calls_made}회, 신규: {total_inserted}건"
             )
-            log.info(f"\n🚨 {msg}")
+            log.error(f"\n[Circuit Breaker] {msg}")
             send_kipris_alert(msg)
             break
 

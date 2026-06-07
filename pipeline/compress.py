@@ -239,7 +239,7 @@ class CourtCodeResolver:
 
     def __init__(self, base_map: dict | None = None):
         self._map = dict(base_map if base_map is not None else COURT_CODE_MAP)
-        self._next_branch_code = BRANCH_CODE_START
+        self._next_branch_code = BRANCH_CODE_START - 1  # 첫 resolve() 후 BRANCH_CODE_START(100) 할당
 
     def resolve(self, court_name: str) -> int:
         """법원명을 정수 코드로 변환. 미등록은 동적 할당."""

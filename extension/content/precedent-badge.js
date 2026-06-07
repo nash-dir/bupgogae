@@ -18,6 +18,13 @@
 
 let _styleInjected = false;
 
+/**
+ * 배지 삽입 과정에서 우리가 직접 생성한 텍스트 노드(매칭 앞/뒤 분할 조각) 집합.
+ * MutationObserver가 이 노드들을 "새 콘텐츠"로 오인해 재처리 루프를 도는 것을
+ * 방지하기 위해 추적한다. (자기유발 mutation 차단)
+ */
+const _ownTextNodes = new WeakSet();
+
 function injectBadgeStyles() {
   if (_styleInjected) return;
   _styleInjected = true;
@@ -764,12 +771,17 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   }
 
   // ── DOM 교체 ──
+  // 분할로 생성하는 텍스트 노드는 _ownTextNodes에 등록해 옵저버가 무시하도록 함.
   if (beforeText) {
-    parent.insertBefore(document.createTextNode(beforeText), textNode);
+    const beforeNode = document.createTextNode(beforeText);
+    _ownTextNodes.add(beforeNode);
+    parent.insertBefore(beforeNode, textNode);
   }
   parent.insertBefore(badge, textNode);
   if (afterText) {
-    parent.insertBefore(document.createTextNode(afterText), textNode);
+    const afterNode = document.createTextNode(afterText);
+    _ownTextNodes.add(afterNode);
+    parent.insertBefore(afterNode, textNode);
   }
   parent.removeChild(textNode);
 
@@ -785,6 +797,7 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
 function revertPrecedentBadge(badge, precedentString) {
   if (!badge || !badge.parentNode) return null;
   const textNode = document.createTextNode(precedentString);
+  _ownTextNodes.add(textNode); // 옵저버 자기유발 루프 방지
   badge.parentNode.insertBefore(textNode, badge);
   badge.parentNode.removeChild(badge);
   return textNode;
@@ -818,5 +831,6 @@ if (typeof window !== 'undefined') {
     decodeCourtName,
     buildFullCitation,
     getDecisionType,
+    _ownTextNodes, // 옵저버가 자체 삽입 텍스트 노드를 식별하기 위해 노출
   });
 }

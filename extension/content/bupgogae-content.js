@@ -155,6 +155,11 @@ function startObserver() {
           return true;
         }
         if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+          // 배지 삽입 시 우리가 만든 분할 텍스트 노드는 무시 (자기유발 루프 방지)
+          if (window.bupgogae && window.bupgogae._ownTextNodes &&
+              window.bupgogae._ownTextNodes.has(node)) {
+            continue;
+          }
           return true;
         }
       }

@@ -326,6 +326,15 @@ function bindEvents() {
     }
   });
 
+  // Intelligent Document Reader 진입 버튼
+  const $openReaderBtn = document.getElementById('openReaderBtn');
+  if ($openReaderBtn) {
+    $openReaderBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('viewer/viewer.html') });
+      window.close(); // 팝업 닫기
+    });
+  }
+
 }
 
 /**

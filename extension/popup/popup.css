@@ -364,3 +364,69 @@ body {
 .popup-dlc-delete-btn:hover {
   background: rgba(239, 68, 68, 0.2);
 }
+
+/* --- Offline Reader Entry Button --- */
+.popup-reader-section {
+  padding: 8px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.popup-reader-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(85, 136, 255, 0.08), rgba(85, 136, 255, 0.04));
+  border: 1px solid rgba(85, 136, 255, 0.15);
+  border-radius: 10px;
+  color: #e0e0e0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  gap: 10px;
+}
+
+.popup-reader-btn:hover {
+  background: linear-gradient(135deg, rgba(85, 136, 255, 0.15), rgba(85, 136, 255, 0.08));
+  border-color: rgba(85, 136, 255, 0.3);
+  box-shadow: 0 2px 12px rgba(85, 136, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.popup-reader-btn:active {
+  transform: translateY(0);
+}
+
+.popup-reader-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.popup-reader-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  text-align: left;
+}
+
+.popup-reader-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c0c0e0;
+}
+
+.popup-reader-desc {
+  font-size: 10px;
+  color: #7777aa;
+}
+
+.popup-reader-arrow {
+  font-size: 14px;
+  color: #5588ff;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.popup-reader-btn:hover .popup-reader-arrow {
+  transform: translateX(3px);
+}

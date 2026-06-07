@@ -73,6 +73,8 @@ def fetch_recent_ruling_dates() -> set[str]:
         xml_content = fetch_xml_safe(
             target="prec", query="*", page=page, sort="ddes",
         )
+        if xml_content is None:
+            raise ConnectionError("법제처 API 호출 실패 (네트워크 연결 끊김 또는 차단)")
         if not xml_content:
             break
         try:
@@ -551,6 +553,10 @@ def main():
     try:
         recent_dates = fetch_recent_ruling_dates()
         log.info(f"  Tier 0: {len(recent_dates)}개 선고일 감지")
+    except ConnectionError as e:
+        log.error(f"❌ 초기 네트워크 연결 실패: {e}")
+        send_pipeline_alert("Network Failure", f"초기 네트워크 연결 실패 — 파이프라인 즉시 종료\n오류: {e}")
+        sys.exit(1)
     except Exception as e:
         log.warning(f"  ⚠️ 최신선고 추출 실패 (Tier 3 폴백): {e}")
         recent_dates = set()
@@ -669,6 +675,11 @@ def main():
     after_prec = db.count()
     prec_delta = after_prec - before
     log.info(f"\n📊 Master DB (판례): {after_prec:,}건 (Δ {prec_delta:+,})")
+
+    if circuit_broken:
+        log.error("❌ 서킷 브레이커가 발동되어 후속 크롤러(헌재, 조세) 실행 및 R2 업로드를 스킵하고 파이프라인을 조기 종료합니다.")
+        db.close()
+        sys.exit(1)
 
     # 헌재결정례 크롤링 — 최초 실행 감지
     has_detc = db.conn.execute(

@@ -16,60 +16,41 @@
  */
 
 // ============================================================
-// 인라인 어댑터 클래스 (L-7: 6개 파일 → 1개 통합)
+// 사이트 정의 — 단일 소스(SSOT)
+//   adapterName/siteId/displayName/hosts를 여기서 한 번만 정의하고,
+//   어댑터 클래스 / ADAPTER_MAP(host→class) / ADAPTER_DISPLAY_NAMES를
+//   모두 이 배열에서 파생한다. (L-7: 6개 클래스 인라인 → 1개 테이블)
+//
+//   새 사이트 추가: 이 배열에 한 줄 + adapters.json hosts/adapters에 셀렉터 추가.
+//   (manifest.json matches/host_permissions는 Chrome 요구상 별도 정적 선언)
 // ============================================================
 
-class GeminiAdapter extends window.bupgogaeAdapters.SiteAdapter {
-  get siteId() { return 'gemini'; }
-  get displayName() { return 'Google Gemini'; }
+const SITE_DEFS = [
+  { adapterName: 'GeminiAdapter',     siteId: 'gemini',     displayName: 'Google Gemini',    hosts: ['gemini.google.com'] },
+  { adapterName: 'ChatGPTAdapter',    siteId: 'chatgpt',    displayName: 'ChatGPT',          hosts: ['chatgpt.com'] },
+  { adapterName: 'ClaudeAdapter',     siteId: 'claude',     displayName: 'Claude',           hosts: ['claude.ai'] },
+  { adapterName: 'CopilotAdapter',    siteId: 'copilot',    displayName: 'Copilot (실험적)', hosts: ['copilot.microsoft.com'] },
+  { adapterName: 'PerplexityAdapter', siteId: 'perplexity', displayName: 'Perplexity',       hosts: ['www.perplexity.ai', 'perplexity.ai'] },
+  { adapterName: 'GrokAdapter',       siteId: 'grok',       displayName: 'Grok (실험적)',    hosts: ['grok.com'] },
+];
+
+// 호스트명 → 어댑터 클래스명. SITE_DEFS에서 파생.
+const ADAPTER_MAP = {};
+// 어댑터 클래스명 → 표시명. SITE_DEFS에서 파생 (불필요한 인스턴스 생성 회피용).
+const ADAPTER_DISPLAY_NAMES = {};
+
+for (const def of SITE_DEFS) {
+  // 각 어댑터는 siteId/displayName getter만 다른 빈 껍데기이므로 동적 생성.
+  const AdapterClass = class extends window.bupgogaeAdapters.SiteAdapter {
+    get siteId() { return def.siteId; }
+    get displayName() { return def.displayName; }
+  };
+  window.bupgogaeAdapters[def.adapterName] = AdapterClass;
+  ADAPTER_DISPLAY_NAMES[def.adapterName] = def.displayName;
+  for (const host of def.hosts) {
+    ADAPTER_MAP[host] = def.adapterName;
+  }
 }
-
-class ChatGPTAdapter extends window.bupgogaeAdapters.SiteAdapter {
-  get siteId() { return 'chatgpt'; }
-  get displayName() { return 'ChatGPT'; }
-}
-
-class ClaudeAdapter extends window.bupgogaeAdapters.SiteAdapter {
-  get siteId() { return 'claude'; }
-  get displayName() { return 'Claude'; }
-}
-
-class CopilotAdapter extends window.bupgogaeAdapters.SiteAdapter {
-  get siteId() { return 'copilot'; }
-  get displayName() { return 'Copilot (실험적)'; }
-}
-
-class PerplexityAdapter extends window.bupgogaeAdapters.SiteAdapter {
-  get siteId() { return 'perplexity'; }
-  get displayName() { return 'Perplexity'; }
-}
-
-class GrokAdapter extends window.bupgogaeAdapters.SiteAdapter {
-  get siteId() { return 'grok'; }
-  get displayName() { return 'Grok (실험적)'; }
-}
-
-// 레지스트리에 등록
-window.bupgogaeAdapters.GeminiAdapter = GeminiAdapter;
-window.bupgogaeAdapters.ChatGPTAdapter = ChatGPTAdapter;
-window.bupgogaeAdapters.ClaudeAdapter = ClaudeAdapter;
-window.bupgogaeAdapters.CopilotAdapter = CopilotAdapter;
-window.bupgogaeAdapters.PerplexityAdapter = PerplexityAdapter;
-window.bupgogaeAdapters.GrokAdapter = GrokAdapter;
-
-/**
- * 호스트명 → 어댑터 클래스 매핑.
- * 새 사이트 추가 시 여기에 한 줄 추가 + adapters.json hosts에도 추가.
- */
-const ADAPTER_MAP = {
-  'gemini.google.com':     'GeminiAdapter',
-  'chatgpt.com':           'ChatGPTAdapter',
-  'claude.ai':             'ClaudeAdapter',
-  'copilot.microsoft.com': 'CopilotAdapter',
-  'www.perplexity.ai':     'PerplexityAdapter',
-  'perplexity.ai':         'PerplexityAdapter',
-  'grok.com':              'GrokAdapter',
-};
 
 /**
  * 캐시된 Remote Config (세션 중 재사용).
@@ -235,18 +216,6 @@ async function reloadRemoteConfig(adapter) {
     adapter.setRemoteConfig(config);
   }
 }
-
-/**
- * 어댑터 클래스명 → 표시명 정적 매핑 (M-2: 불필요한 인스턴스 생성 제거).
- */
-const ADAPTER_DISPLAY_NAMES = {
-  GeminiAdapter: 'Google Gemini',
-  ChatGPTAdapter: 'ChatGPT',
-  ClaudeAdapter: 'Claude',
-  CopilotAdapter: 'Copilot (실험적)',
-  PerplexityAdapter: 'Perplexity',
-  GrokAdapter: 'Grok (실험적)',
-};
 
 /**
  * 지원 사이트 목록 반환 (팝업 UI 등에서 사용).

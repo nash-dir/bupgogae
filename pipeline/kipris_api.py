@@ -26,6 +26,10 @@ from defusedxml.ElementTree import fromstring as _safe_fromstring  # XXE 방어 
 
 import requests
 
+from log_setup import get_logger  # noqa: E402
+
+log = get_logger(__name__)
+
 # 환경변수에서 API 키 로드
 KIPRIS_API_KEY = os.getenv("KIPRIS_API_KEY", "")
 
@@ -82,18 +86,18 @@ def _try_fetch(url: str, params: dict, retries: int = 3) -> bytes | None:
             # 429 Too Many Requests / 500 / 504 → 재시도
             if response.status_code in (429, 500, 504):
                 wait = 5 * (2 ** attempt)
-                print(f"⚠️ [HTTP {response.status_code}] "
+                log.warning(f"⚠️ [HTTP {response.status_code}] "
                       f"{wait}초 대기 후 재시도 ({attempt + 1}/{retries})...")
                 time.sleep(wait)
                 continue
 
             # 그 외 에러
-            print(f"❌ [HTTP {response.status_code}] {response.text[:200]}")
+            log.info(f"❌ [HTTP {response.status_code}] {response.text[:200]}")
             return None
 
         except requests.exceptions.RequestException as e:
             wait = 5 * (2 ** attempt)
-            print(f"❌ [Network Error] {e}. {wait}초 후 재시도...")
+            log.error(f"❌ [Network Error] {e}. {wait}초 후 재시도...")
             time.sleep(wait)
 
     return None
@@ -123,7 +127,7 @@ def fetch_kipris_xml(
     """
     key = access_key or KIPRIS_API_KEY
     if not key:
-        print("❌ KIPRIS_API_KEY 미설정")
+        log.info("❌ KIPRIS_API_KEY 미설정")
         return None
 
     # ── 1차: 신규 getAdvancedSearch ──
@@ -149,7 +153,7 @@ def fetch_kipris_xml(
         return result
 
     # ── 3차: 구 서비스 폴백 ──
-    print("⚠️ 신규 서비스 실패 → 구 서비스 폴백 시도")
+    log.error("⚠️ 신규 서비스 실패 → 구 서비스 폴백 시도")
     legacy_params = {
         "ServiceKey": key,
         "trialDecisionDate": f"{start_date}~{end_date}",
@@ -255,29 +259,29 @@ def _get_text(element: ET.Element, tag: str) -> str:
 if __name__ == "__main__":
     key = KIPRIS_API_KEY
     if not key:
-        print("❌ KIPRIS_API_KEY 환경변수를 설정해주세요.")
-        print("   예: set KIPRIS_API_KEY=your_key_here")
+        log.error("❌ KIPRIS_API_KEY 환경변수를 설정해주세요.")
+        log.info("   예: set KIPRIS_API_KEY=your_key_here")
     else:
-        print(f"🔑 API Key: {key[:8]}...{key[-4:]}")
+        log.info(f"🔑 API Key: {key[:8]}...{key[-4:]}")
 
         # 신규 엔드포인트 직접 테스트
-        print(f"\n📡 [신규] judgmentInfoSearchService 테스트...")
-        print(f"   URL: {BASE_URL}")
+        log.info(f"\n📡 [신규] judgmentInfoSearchService 테스트...")
+        log.info(f"   URL: {BASE_URL}")
         xml = fetch_kipris_xml("20240101", "20240131", page_no=1)
         if xml:
             items, total, err = parse_kipris_items(xml)
             if err:
-                print(f"   ❌ API 에러: {err}")
+                log.error(f"   ❌ API 에러: {err}")
             else:
-                print(f"   ✅ totalCount={total}, items={len(items)}")
+                log.info(f"   ✅ totalCount={total}, items={len(items)}")
                 if items:
-                    print(f"   📄 첫번째: {items[0]}")
+                    log.info(f"   📄 첫번째: {items[0]}")
         else:
-            print("   ❌ API 호출 실패 (폴백 포함)")
+            log.error("   ❌ API 호출 실패 (폴백 포함)")
 
         # 구 엔드포인트 직접 테스트
-        print(f"\n📡 [구] trialInfoSearchService 테스트...")
-        print(f"   URL: {LEGACY_BASE_URL}")
+        log.info(f"\n📡 [구] trialInfoSearchService 테스트...")
+        log.info(f"   URL: {LEGACY_BASE_URL}")
         legacy_params = {
             "ServiceKey": key,
             "trialDecisionDate": "20240101~20240131",
@@ -288,8 +292,8 @@ if __name__ == "__main__":
         if result:
             items2, total2, err2 = parse_kipris_items(result)
             if err2:
-                print(f"   ❌ API 에러: {err2}")
+                log.error(f"   ❌ API 에러: {err2}")
             else:
-                print(f"   ✅ totalCount={total2}, items={len(items2)}")
+                log.info(f"   ✅ totalCount={total2}, items={len(items2)}")
         else:
-            print("   ❌ 구 서비스도 실패")
+            log.error("   ❌ 구 서비스도 실패")

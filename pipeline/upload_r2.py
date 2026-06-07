@@ -20,6 +20,10 @@ import sys
 
 import boto3
 
+from log_setup import get_logger
+
+log = get_logger(__name__)
+
 R2_KEY = "bupgogae/db.json.gz"
 
 
@@ -37,21 +41,21 @@ def get_r2_client():
 def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None):
     """db.json.gz를 R2에 업로드."""
     if not os.path.exists(gz_path):
-        print(f"❌ 파일 없음: {gz_path}")
+        log.error(f"❌ 파일 없음: {gz_path}")
         sys.exit(1)
 
     key = r2_key or R2_KEY
     size_mb = os.path.getsize(gz_path) / (1024 * 1024)
     bucket = os.environ["R2_BUCKET"]
 
-    print(f"\n{'─'*50}")
-    print(f"  📤 R2 Upload")
-    print(f"     파일: {gz_path} ({size_mb:.2f} MB)")
-    print(f"     버킷: {bucket}/{key}")
-    print(f"{'─'*50}")
+    log.info(f"\n{'─'*50}")
+    log.info(f"  📤 R2 Upload")
+    log.info(f"     파일: {gz_path} ({size_mb:.2f} MB)")
+    log.info(f"     버킷: {bucket}/{key}")
+    log.info(f"{'─'*50}")
 
     if dry:
-        print("  [DRY-RUN] 업로드 스킵")
+        log.info("  [DRY-RUN] 업로드 스킵")
         return
 
     client = get_r2_client()
@@ -65,7 +69,7 @@ def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None):
         },
     )
 
-    print(f"  ✅ 업로드 완료: {key}")
+    log.info(f"  ✅ 업로드 완료: {key}")
 
 
 def ensure_cors():
@@ -84,9 +88,9 @@ def ensure_cors():
                 }]
             },
         )
-        print("  ✅ CORS 설정 완료")
+        log.info("  ✅ CORS 설정 완료")
     except Exception as e:
-        print(f"  ⚠️ CORS 설정 실패 (무시): {e}")
+        log.warning(f"  ⚠️ CORS 설정 실패 (무시): {e}")
 
 
 if __name__ == "__main__":

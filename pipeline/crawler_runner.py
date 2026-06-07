@@ -38,6 +38,9 @@ from pathlib import Path
 # 의존성 (같은 디렉토리)
 from api import fetch_xml_safe, get_text, get_network_stats, reset_network_stats  # noqa: E402
 from master_db import MasterDB  # noqa: E402
+from log_setup import get_logger  # noqa: E402
+
+log = get_logger(__name__)
 
 # ── 설정 ──
 DELAY_MIN, DELAY_MAX = 0.8, 1.0
@@ -187,10 +190,10 @@ def load_failed_dates(data_dir: str) -> list[tuple[str, str]]:
         with open(path, "r") as f:
             data = json.load(f)
         os.remove(path)
-        print(f"  🔄 이전 실패 {len(data)}건 재시도 대기열 로드")
+        log.info(f"  🔄 이전 실패 {len(data)}건 재시도 대기열 로드")
         return [(d["start"], d["end"]) for d in data]
     except Exception as e:
-        print(f"  ⚠️ 실패 목록 로드 실패: {e}")
+        log.error(f"  ⚠️ 실패 목록 로드 실패: {e}")
         return []
 
 
@@ -202,7 +205,7 @@ def save_failed_dates(data_dir: str, failed: list[tuple[str, str]]):
     data = [{"start": s, "end": e} for s, e in failed]
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
-    print(f"  💾 실패 {len(failed)}건 저장 → 다음 실행 시 재시도")
+    log.warning(f"  💾 실패 {len(failed)}건 저장 → 다음 실행 시 재시도")
 
 
 # ════════════════════════════════════════════════════════════
@@ -215,7 +218,7 @@ def send_pipeline_alert(source: str, message: str):
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
 
     if not bot_token or not chat_id:
-        print(f"⚠️ Telegram 미설정 — {source} 알림 스킵")
+        log.warning(f"⚠️ Telegram 미설정 — {source} 알림 스킵")
         return
 
     text = (
@@ -230,11 +233,11 @@ def send_pipeline_alert(source: str, message: str):
             timeout=10,
         )
         if resp.status_code == 200:
-            print(f"📨 텔레그램 긴급 알림 전송 ({source})")
+            log.info(f"📨 텔레그램 긴급 알림 전송 ({source})")
         else:
-            print(f"⚠️ 텔레그램 전송 실패: {resp.status_code}")
+            log.error(f"⚠️ 텔레그램 전송 실패: {resp.status_code}")
     except Exception as e:
-        print(f"⚠️ 텔레그램 전송 실패: {e}")
+        log.error(f"⚠️ 텔레그램 전송 실패: {e}")
 
 
 # ════════════════════════════════════════════════════════════
@@ -379,7 +382,7 @@ def crawl_detc_full() -> list[dict]:
             break
         cases.extend(page_cases)
         if page % 50 == 0:
-            print(f"  [detc] {page}페이지, {len(cases):,}건")
+            log.info(f"  [detc] {page}페이지, {len(cases):,}건")
         page += 1
         time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
     return cases
@@ -459,7 +462,7 @@ def crawl_tax_full() -> list[dict]:
             break
         cases.extend(page_cases)
         if page % 100 == 0:
-            print(f"  [tax] {page}페이지, {len(cases):,}건")
+            log.info(f"  [tax] {page}페이지, {len(cases):,}건")
         page += 1
         time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
     return cases
@@ -485,7 +488,7 @@ def _write_gzipped_json(payload: dict, output_path: str) -> float:
 
     gz_mb = os.path.getsize(gz_path) / (1024 * 1024)
     raw_mb = os.path.getsize(raw_path) / (1024 * 1024)
-    print(f"  📄 {os.path.basename(raw_path)} ({raw_mb:.2f} MB raw, {gz_mb:.2f} MB gzip)")
+    log.info(f"  📄 {os.path.basename(raw_path)} ({raw_mb:.2f} MB raw, {gz_mb:.2f} MB gzip)")
     return gz_mb
 
 
@@ -521,7 +524,7 @@ def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float, i
         "court_code_map": court_map,
     }, os.path.join(data_dir, "db_tax.json"))
 
-    print(f"  └ Core: {len(core_data):,}건, DLC(Tax): {len(tax_data):,}건 (⛔{tax_skip} skip), "
+    log.info(f"  └ Core: {len(core_data):,}건, DLC(Tax): {len(tax_data):,}건 (⛔{tax_skip} skip), "
           f"법원: {len(court_map)}개")
     return core_mb, tax_mb, tax_skip
 
@@ -545,12 +548,12 @@ def main():
     today = date.today()
 
     # 최신 선고 날짜 추출 (Tier 0)
-    print("🔍 최신선고판결 날짜 추출 중...")
+    log.info("🔍 최신선고판결 날짜 추출 중...")
     try:
         recent_dates = fetch_recent_ruling_dates()
-        print(f"  Tier 0: {len(recent_dates)}개 선고일 감지")
+        log.info(f"  Tier 0: {len(recent_dates)}개 선고일 감지")
     except Exception as e:
-        print(f"  ⚠️ 최신선고 추출 실패 (Tier 3 폴백): {e}")
+        log.error(f"  ⚠️ 최신선고 추출 실패 (Tier 3 폴백): {e}")
         recent_dates = set()
 
     # 스캔 계획
@@ -561,34 +564,34 @@ def main():
     detc_pages = get_detc_pages_for_today(today)
     tax_pages = get_tax_pages_for_today(today)
 
-    print("=" * 55)
-    print(f"  🚀 Crawler Runner (Range-Modulus)")
-    print(f"     날짜: {today}")
-    print(f"     Serial: {date_serial(today)}")
-    print(f"     판례: {summary['total']:,}건"
+    log.info("=" * 55)
+    log.info(f"  🚀 Crawler Runner (Range-Modulus)")
+    log.info(f"     날짜: {today}")
+    log.info(f"     Serial: {date_serial(today)}")
+    log.info(f"     판례: {summary['total']:,}건"
           f" (T0:{summary['tier0']} T1:{summary['tier1']} T2:{summary['tier2']} T3:{summary['tier3']})")
-    print(f"     헌재: {len(detc_pages)}페이지 (mod {DETC_MOD})")
-    print(f"     조세: {len(tax_pages)}페이지 (mod {TAX_MOD})")
-    print(f"     예상: ~{summary['est_minutes']}분")
-    print("=" * 55)
+    log.info(f"     헌재: {len(detc_pages)}페이지 (mod {DETC_MOD})")
+    log.info(f"     조세: {len(tax_pages)}페이지 (mod {TAX_MOD})")
+    log.info(f"     예상: ~{summary['est_minutes']}분")
+    log.info("=" * 55)
 
     if args.plan:
-        print(f"\n📋 판례 스캔 계획 ({len(scan_ranges)}건):")
+        log.info(f"\n📋 판례 스캔 계획 ({len(scan_ranges)}건):")
         for i, (s, e) in enumerate(scan_ranges[:20]):
             if s == e:
-                print(f"  {i+1:4d}. {s[:4]}-{s[4:6]}-{s[6:]}")
+                log.info(f"  {i+1:4d}. {s[:4]}-{s[4:6]}-{s[6:]}")
             else:
-                print(f"  {i+1:4d}. {s[:4]}-{s[4:6]}-{s[6:]} ~ {e[:4]}-{e[4:6]}-{e[6:]}")
+                log.info(f"  {i+1:4d}. {s[:4]}-{s[4:6]}-{s[6:]} ~ {e[:4]}-{e[4:6]}-{e[6:]}")
         if len(scan_ranges) > 20:
-            print(f"  ... ({len(scan_ranges) - 20}건 생략)")
-        print(f"\n📜 헌재 스캔: {len(detc_pages)}페이지 {detc_pages[:5]}...")
-        print(f"💰 조세 스캔: {len(tax_pages)}페이지 {tax_pages[:5]}...")
+            log.info(f"  ... ({len(scan_ranges) - 20}건 생략)")
+        log.info(f"\n📜 헌재 스캔: {len(detc_pages)}페이지 {detc_pages[:5]}...")
+        log.info(f"💰 조세 스캔: {len(tax_pages)}페이지 {tax_pages[:5]}...")
         return
 
     # 환경변수 검증
     api_key = os.environ.get("BUPGOGAE_API_KEY", "")
     if not api_key or api_key == "test":
-        print("❌ BUPGOGAE_API_KEY 미설정")
+        log.error("❌ BUPGOGAE_API_KEY 미설정")
         sys.exit(1)
 
     # 이전 실행에서 실패한 날짜 재시도
@@ -604,7 +607,7 @@ def main():
     # Master DB 열기
     db = MasterDB(master_db_path)
     before = db.count()
-    print(f"\n📊 Master DB: {before:,}건")
+    log.info(f"\n📊 Master DB: {before:,}건")
 
     # 크롤링
     total_ins, total_upd, total_skip, errors = 0, 0, 0, 0
@@ -620,7 +623,7 @@ def main():
         pct = (i + 1) / len(scan_ranges) * 100
 
         if (i + 1) % 50 == 0 or i == 0:
-            print(f"  [{i+1:4d}/{len(scan_ranges)}] {display} ({pct:.0f}%)")
+            log.info(f"  [{i+1:4d}/{len(scan_ranges)}] {display} ({pct:.0f}%)")
 
         try:
             date_param = start_date if start_date == end_date else f"{start_date}~{end_date}"
@@ -636,7 +639,7 @@ def main():
                 total_skip += skp
                 consecutive_failures = 0
                 if ins > 0:
-                    print(f"  [{i+1:4d}/{len(scan_ranges)}] {display}"
+                    log.info(f"  [{i+1:4d}/{len(scan_ranges)}] {display}"
                           f"  +{ins} 신규, ={upd} 갱신, -{skp} 스킵")
             else:
                 # 빈 결과 [] — 해당 날짜에 판례 없음 (정상)
@@ -645,13 +648,13 @@ def main():
             errors += 1
             consecutive_failures += 1
             failed_ranges.append((start_date, end_date))
-            print(f"  [{i+1:4d}/{len(scan_ranges)}] {display}  ❌ {e}")
+            log.error(f"  [{i+1:4d}/{len(scan_ranges)}] {display}  ❌ {e}")
 
         # Circuit Breaker: 연속 실패 임계값 초과 시 중단
         if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
             remaining = len(scan_ranges) - i - 1
             failed_ranges.extend(scan_ranges[i + 1:])
-            print(f"\n  🔌 Circuit Breaker 발동! 연속 {consecutive_failures}건 실패"
+            log.error(f"\n  🔌 Circuit Breaker 발동! 연속 {consecutive_failures}건 실패"
                   f" — 잔여 {remaining}건 스킵")
             send_pipeline_alert("Circuit Breaker",
                 f"연속 {consecutive_failures}건 실패 — 법제처 서버 장애 의심\n"
@@ -666,7 +669,7 @@ def main():
 
     after_prec = db.count()
     prec_delta = after_prec - before
-    print(f"\n📊 Master DB (판례): {after_prec:,}건 (Δ {prec_delta:+,})")
+    log.info(f"\n📊 Master DB (판례): {after_prec:,}건 (Δ {prec_delta:+,})")
 
     # 헌재결정례 크롤링 — 최초 실행 감지
     has_detc = db.conn.execute(
@@ -674,16 +677,16 @@ def main():
     ).fetchone()
 
     if not has_detc:
-        print(f"\n📜 헌재결정례 최초 실행 — 전량 크롤링")
+        log.info(f"\n📜 헌재결정례 최초 실행 — 전량 크롤링")
         detc_cases = crawl_detc_full()
     else:
-        print(f"\n📜 헌재결정례 스캔 ({len(detc_pages)}페이지, mod {DETC_MOD})")
+        log.info(f"\n📜 헌재결정례 스캔 ({len(detc_pages)}페이지, mod {DETC_MOD})")
         detc_cases = crawl_detc_pages(detc_pages)
 
     detc_ins, detc_upd, detc_skip = 0, 0, 0
     if detc_cases:
         detc_ins, detc_upd, detc_skip = db.upsert_raw(detc_cases)
-        print(f"  헌재: {len(detc_cases):,}건 수집"
+        log.info(f"  헌재: {len(detc_cases):,}건 수집"
               f" → +{detc_ins} 신규, ={detc_upd} 갱신, ⛔{detc_skip} 스킵")
 
     # 조세심판원 크롤링 — 최초 실행 감지
@@ -692,23 +695,23 @@ def main():
     ).fetchone()
 
     if not has_tax:
-        print(f"\n💰 조세심판원 최초 실행 — 전량 크롤링")
+        log.info(f"\n💰 조세심판원 최초 실행 — 전량 크롤링")
         tax_cases = crawl_tax_full()
     else:
-        print(f"\n💰 조세심판원 스캔 ({len(tax_pages)}페이지, mod {TAX_MOD})")
+        log.info(f"\n💰 조세심판원 스캔 ({len(tax_pages)}페이지, mod {TAX_MOD})")
         tax_cases = crawl_tax_pages(tax_pages)
 
     tax_ins, tax_upd, tax_skip = 0, 0, 0
     if tax_cases:
         tax_ins, tax_upd, tax_skip = db.upsert_raw(tax_cases)
-        print(f"  조세: {len(tax_cases):,}건 수집"
+        log.info(f"  조세: {len(tax_cases):,}건 수집"
               f" → +{tax_ins} 신규, ={tax_upd} 갱신, ⛔{tax_skip} 스킵")
     after = db.count()
     delta = after - before
-    print(f"\n📊 Master DB (통합): {after:,}건 (Δ {delta:+,})")
+    log.info(f"\n📊 Master DB (통합): {after:,}건 (Δ {delta:+,})")
 
     # 풀 DB 덤프 (Core + DLC 분리)
-    print(f"\n📦 DB 덤프 (Core + DLC)")
+    log.info(f"\n📦 DB 덤프 (Core + DLC)")
     core_mb, tax_mb, tax_skipped = export_split_db(db, data_dir)
     db.close()
 
@@ -718,7 +721,7 @@ def main():
     missing_r2 = [v for v in r2_vars if not os.environ.get(v)]
 
     if missing_r2:
-        print(f"\n⚠️ R2 변수 누락 ({', '.join(missing_r2)}) — 업로드 스킵")
+        log.warning(f"\n⚠️ R2 변수 누락 ({', '.join(missing_r2)}) — 업로드 스킵")
     else:
         from upload_r2 import upload_db_to_r2, ensure_cors  # noqa: E402
         ensure_cors()
@@ -730,11 +733,11 @@ def main():
     minutes = int(elapsed // 60)
     seconds = int(elapsed % 60)
 
-    print(f"\n{'=' * 55}")
-    print(f"  🏁 완료 ({minutes}분 {seconds}초)")
-    print(f"     DB: {after:,}건 (Δ {delta:+,})")
-    print(f"     Core: {core_mb:.2f} MB | DLC(Tax): {tax_mb:.2f} MB")
-    print(f"{'=' * 55}")
+    log.info(f"\n{'=' * 55}")
+    log.info(f"  🏁 완료 ({minutes}분 {seconds}초)")
+    log.info(f"     DB: {after:,}건 (Δ {delta:+,})")
+    log.info(f"     Core: {core_mb:.2f} MB | DLC(Tax): {tax_mb:.2f} MB")
+    log.info(f"{'=' * 55}")
 
     # 텔레그램 리포트
     net_stats = get_network_stats()
@@ -773,7 +776,7 @@ def send_telegram_report(**kwargs):
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
 
     if not bot_token or not chat_id:
-        print("⚠️ Telegram 미설정 — 리포트 스킵")
+        log.warning("⚠️ Telegram 미설정 — 리포트 스킵")
         return
 
     today = kwargs.get("today", date.today())
@@ -858,11 +861,11 @@ def send_telegram_report(**kwargs):
             "parse_mode": "Markdown",
         }, timeout=10)
         if resp.status_code == 200:
-            print("📨 텔레그램 리포트 전송 완료")
+            log.info("📨 텔레그램 리포트 전송 완료")
         else:
-            print(f"⚠️ 텔레그램 전송 실패: {resp.status_code} {resp.text[:100]}")
+            log.error(f"⚠️ 텔레그램 전송 실패: {resp.status_code} {resp.text[:100]}")
     except Exception as e:
-        print(f"⚠️ 텔레그램 전송 실패: {e}")
+        log.error(f"⚠️ 텔레그램 전송 실패: {e}")
 
 
 if __name__ == "__main__":

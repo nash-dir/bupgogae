@@ -11,6 +11,10 @@
 serial이 비어 있으면 None을 반환하여 호출부가 스킵하도록 한다.
 """
 
+from log_setup import get_logger
+
+log = get_logger(__name__)
+
 # 필드 길이 상한 — 실제 데이터보다 넉넉하되 폭주를 막는 방어적 한도
 MAX_SERIAL_LEN = 32
 MAX_CASE_NAME_LEN = 500
@@ -101,4 +105,4 @@ if __name__ == "__main__":
     })
     assert k["serial"] == "2023당1", k
 
-    print("✅ validate.py self-test passed")
+    log.info("✅ validate.py self-test passed")

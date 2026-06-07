@@ -32,6 +32,9 @@ from compress import (  # noqa: E402
 )
 from api import clean_case_number  # noqa: E402
 from validate import sanitize_raw_case, sanitize_kipris_item  # noqa: E402
+from log_setup import get_logger  # noqa: E402
+
+log = get_logger(__name__)
 
 
 class MasterDB:
@@ -422,12 +425,12 @@ if __name__ == "__main__":
         ]
 
         ins, upd, skp = db.upsert_raw(test_cases)
-        print(f"Inserted: {ins}, Updated: {upd}, Skipped: {skp}")
-        print(f"Stats: {db.stats()}")
+        log.info(f"Inserted: {ins}, Updated: {upd}, Skipped: {skp}")
+        log.info(f"Stats: {db.stats()}")
 
         compressed, skipped = db.export_all()
-        print(f"Compressed keys: {len(compressed)}, Skipped: {skipped}")
-        print(json.dumps(compressed, ensure_ascii=False, indent=2))
+        log.info(f"Compressed keys: {len(compressed)}, Skipped: {skipped}")
+        log.info(json.dumps(compressed, ensure_ascii=False, indent=2))
 
         # KIPRIS 테이블 테스트
         test_kipris = [
@@ -439,15 +442,15 @@ if __name__ == "__main__":
              "trial_type": "무효"},
         ]
         k_ins, k_upd = db.upsert_kipris(test_kipris)
-        print(f"KIPRIS Inserted: {k_ins}, Updated: {k_upd}")
-        print(f"KIPRIS Count: {db.kipris_count()}")
+        log.info(f"KIPRIS Inserted: {k_ins}, Updated: {k_upd}")
+        log.info(f"KIPRIS Count: {db.kipris_count()}")
 
         k_data, k_skip = db.export_kipris()
-        print(f"KIPRIS Compressed keys: {len(k_data)}, Skipped: {k_skip}")
-        print(json.dumps(k_data, ensure_ascii=False, indent=2))
+        log.info(f"KIPRIS Compressed keys: {len(k_data)}, Skipped: {k_skip}")
+        log.info(json.dumps(k_data, ensure_ascii=False, indent=2))
 
         db.close()
         os.remove(test_db)
-        print("✅ Test passed")
+        log.info("✅ Test passed")
 
     _test()

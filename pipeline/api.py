@@ -20,6 +20,10 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from log_setup import get_logger
+
+log = get_logger(__name__)
+
 # 환경변수에서 API 키 로드
 API_KEY = os.getenv("BUPGOGAE_API_KEY", "test")
 
@@ -133,14 +137,14 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
 
             _stats["retries"] += 1
             backoff = min(5 * (2 ** i), 60)  # 5, 10, 20, 40, 60초
-            print(f"⚠️ [HTTP {response.status_code}] "
+            log.warning(f"⚠️ [HTTP {response.status_code}] "
                   f"대기 {backoff}초 후 재시도 ({i + 1}/{retries})...")
             time.sleep(backoff)
 
         except requests.exceptions.RequestException as e:
             _stats["retries"] += 1
             backoff = min(5 * (2 ** i), 60)
-            print(f"❌ [Network Error] {e}. "
+            log.error(f"❌ [Network Error] {e}. "
                   f"대기 {backoff}초 후 재시도 ({i + 1}/{retries})...")
             time.sleep(backoff)
 

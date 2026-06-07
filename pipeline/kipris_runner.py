@@ -31,6 +31,9 @@ import requests as _requests
 # 같은 디렉토리 의존성
 from kipris_api import fetch_kipris_xml, parse_kipris_items, PAGE_SIZE  # noqa: E402
 from master_db import MasterDB  # noqa: E402
+from log_setup import get_logger  # noqa: E402
+
+log = get_logger(__name__)
 
 # ── 설정 ──
 DAILY_QUOTA = 33            # 1일 최대 API HTTP 요청 횟수
@@ -93,7 +96,7 @@ def send_kipris_alert(message: str):
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
 
     if not bot_token or not chat_id:
-        print("⚠️ Telegram 미설정 — 알림 스킵")
+        log.warning("⚠️ Telegram 미설정 — 알림 스킵")
         return
 
     text = f"🚨 *KIPRIS Circuit Breaker*\n`{date.today()}`\n\n{message}"
@@ -105,11 +108,11 @@ def send_kipris_alert(message: str):
             timeout=10,
         )
         if resp.status_code == 200:
-            print("📨 텔레그램 긴급 알림 전송 완료")
+            log.info("📨 텔레그램 긴급 알림 전송 완료")
         else:
-            print(f"⚠️ 텔레그램 전송 실패: {resp.status_code}")
+            log.error(f"⚠️ 텔레그램 전송 실패: {resp.status_code}")
     except Exception as e:
-        print(f"⚠️ 텔레그램 전송 실패: {e}")
+        log.error(f"⚠️ 텔레그램 전송 실패: {e}")
 
 
 # ════════════════════════════════════════════════════════════
@@ -138,30 +141,30 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
     # 미완료 청크 필터링
     pending = [(s, e) for s, e in all_chunks if (s, e) not in completed]
 
-    print(f"\n📊 백필 상태:")
-    print(f"   전체 청크: {total_chunks}")
-    print(f"   완료:     {len(completed)}")
-    print(f"   미완료:   {len(pending)}")
-    print(f"   진행률:   {len(completed) / total_chunks * 100:.1f}%")
+    log.info(f"\n📊 백필 상태:")
+    log.info(f"   전체 청크: {total_chunks}")
+    log.info(f"   완료:     {len(completed)}")
+    log.info(f"   미완료:   {len(pending)}")
+    log.info(f"   진행률:   {len(completed) / total_chunks * 100:.1f}%")
 
     if not pending:
-        print("\n🎉 모든 청크 완료! 백필이 끝났습니다.")
+        log.info("\n🎉 모든 청크 완료! 백필이 끝났습니다.")
         return
 
     if dry_run:
-        print(f"\n📋 다음 실행 시 처리할 청크 (최대 {DAILY_QUOTA}건):")
+        log.info(f"\n📋 다음 실행 시 처리할 청크 (최대 {DAILY_QUOTA}건):")
         for i, (s, e) in enumerate(pending[:10]):
-            print(f"  {i+1}. {s[:4]}-{s[4:6]}-{s[6:]} ~ {e[:4]}-{e[4:6]}-{e[6:]}")
+            log.info(f"  {i+1}. {s[:4]}-{s[4:6]}-{s[6:]} ~ {e[:4]}-{e[4:6]}-{e[6:]}")
         if len(pending) > 10:
-            print(f"  ... ({len(pending) - 10}개 추가)")
+            log.info(f"  ... ({len(pending) - 10}개 추가)")
         est_days = math.ceil(len(pending) / DAILY_QUOTA)
-        print(f"\n⏰ 예상 완료: ~{est_days}일 ({est_days / 30:.1f}개월)")
+        log.info(f"\n⏰ 예상 완료: ~{est_days}일 ({est_days / 30:.1f}개월)")
         return
 
     # API 키 확인
     api_key = os.environ.get("KIPRIS_API_KEY", "")
     if not api_key:
-        print("❌ KIPRIS_API_KEY 미설정")
+        log.info("❌ KIPRIS_API_KEY 미설정")
         sys.exit(1)
 
     api_calls_made = 0
@@ -171,8 +174,8 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
     api_errors = 0           # API 에러 누적 카운터
     last_error_msg = ""      # 마지막 에러 메시지
 
-    print(f"\n🚀 백필 시작 (일일 쿼터: {DAILY_QUOTA}, 에러 임계치: {API_ERROR_THRESHOLD})")
-    print("=" * 55)
+    log.info(f"\n🚀 백필 시작 (일일 쿼터: {DAILY_QUOTA}, 에러 임계치: {API_ERROR_THRESHOLD})")
+    log.info("=" * 55)
 
     for chunk_idx, (start_date, end_date) in enumerate(pending):
         if api_calls_made >= DAILY_QUOTA:
@@ -185,7 +188,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
                 f"마지막 에러: {last_error_msg}\n"
                 f"API 호출: {api_calls_made}회, 신규: {total_inserted}건"
             )
-            print(f"\n🚨 {msg}")
+            log.info(f"\n🚨 {msg}")
             send_kipris_alert(msg)
             break
 
@@ -216,7 +219,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
         if not xml:
             api_errors += 1
             last_error_msg = "HTTP 응답 없음 (None)"
-            print(f"  ⚠️ [{display}] 빈 응답 (API 에러 {api_errors}/{API_ERROR_THRESHOLD})")
+            log.error(f"  ⚠️ [{display}] 빈 응답 (API 에러 {api_errors}/{API_ERROR_THRESHOLD})")
             continue
 
         items, total_cnt, err_msg = parse_kipris_items(xml)
@@ -225,11 +228,11 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
         if err_msg:
             # EMPTY_RESPONSE: 구독 미활성 등으로 빈 <response/> → 미완료 유지
             if err_msg == "EMPTY_RESPONSE":
-                print(f"  ⚠️ [{display}] 빈 응답(EMPTY_RESPONSE) — 미완료 유지")
+                log.warning(f"  ⚠️ [{display}] 빈 응답(EMPTY_RESPONSE) — 미완료 유지")
                 continue
             api_errors += 1
             last_error_msg = err_msg
-            print(f"  ❌ [{display}] API 에러: {err_msg} "
+            log.error(f"  ❌ [{display}] API 에러: {err_msg} "
                   f"({api_errors}/{API_ERROR_THRESHOLD})")
             continue
 
@@ -243,7 +246,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
             )
             db.conn.commit()
             chunks_completed += 1
-            print(f"  [{display}] 0건 — 완료")
+            log.info(f"  [{display}] 0건 — 완료")
             continue
 
         # DB에 삽입
@@ -255,7 +258,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
         total_pages = math.ceil(total_cnt / PAGE_SIZE)
         pages_done = current_page
 
-        print(f"  [{display}] p{current_page}/{total_pages} "
+        log.info(f"  [{display}] p{current_page}/{total_pages} "
               f"총{total_cnt}건, {len(items)}건 수집 "
               f"(API: {api_calls_made}/{DAILY_QUOTA})")
 
@@ -270,7 +273,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
                     (start_date, end_date, total_cnt, pages_done),
                 )
                 db.conn.commit()
-                print(f"  ⏸️ [{display}] 쿼터 소진 — {pages_done}/{total_pages} 저장")
+                log.info(f"  ⏸️ [{display}] 쿼터 소진 — {pages_done}/{total_pages} 저장")
                 break
 
             time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
@@ -289,7 +292,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
             if page_err:
                 api_errors += 1
                 last_error_msg = page_err
-                print(f"  ❌ [{display}] p{next_page} API 에러: {page_err}")
+                log.error(f"  ❌ [{display}] p{next_page} API 에러: {page_err}")
                 if api_errors >= API_ERROR_THRESHOLD:
                     break
                 continue
@@ -301,7 +304,7 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
             total_inserted += ins
             total_updated += upd
 
-            print(f"  [{display}] p{next_page}/{total_pages} "
+            log.info(f"  [{display}] p{next_page}/{total_pages} "
                   f"+{len(page_items)}건 (API: {api_calls_made}/{DAILY_QUOTA})")
         else:
             # 모든 페이지 완료
@@ -319,15 +322,15 @@ def run_backfill(db: MasterDB, dry_run: bool = False):
     completed_now = len(completed) + chunks_completed
     progress = completed_now / total_chunks * 100
 
-    print(f"\n{'=' * 55}")
-    print(f"  🏁 백필 결과")
-    print(f"     API 호출:  {api_calls_made}/{DAILY_QUOTA}")
-    print(f"     신규 삽입: {total_inserted:,}건")
-    print(f"     갱신:      {total_updated:,}건")
-    print(f"     청크 완료: {chunks_completed}개 (이번 실행)")
-    print(f"     총 진행률: {progress:.1f}% ({completed_now}/{total_chunks})")
-    print(f"     KIPRIS DB: {kipris_total:,}건")
-    print(f"{'=' * 55}")
+    log.info(f"\n{'=' * 55}")
+    log.info(f"  🏁 백필 결과")
+    log.info(f"     API 호출:  {api_calls_made}/{DAILY_QUOTA}")
+    log.info(f"     신규 삽입: {total_inserted:,}건")
+    log.info(f"     갱신:      {total_updated:,}건")
+    log.info(f"     청크 완료: {chunks_completed}개 (이번 실행)")
+    log.info(f"     총 진행률: {progress:.1f}% ({completed_now}/{total_chunks})")
+    log.info(f"     KIPRIS DB: {kipris_total:,}건")
+    log.info(f"{'=' * 55}")
 
 
 # ════════════════════════════════════════════════════════════
@@ -347,12 +350,12 @@ def main():
     data_dir = args.data_dir
     master_db_path = os.path.join(data_dir, "master.db")
 
-    print("=" * 55)
-    print("  🔬 KIPRIS Slow Grazing Runner")
-    print(f"     날짜: {date.today()}")
-    print(f"     일일 쿼터: {DAILY_QUOTA}")
-    print(f"     DB: {master_db_path}")
-    print("=" * 55)
+    log.info("=" * 55)
+    log.info("  🔬 KIPRIS Slow Grazing Runner")
+    log.info(f"     날짜: {date.today()}")
+    log.info(f"     일일 쿼터: {DAILY_QUOTA}")
+    log.info(f"     DB: {master_db_path}")
+    log.info("=" * 55)
 
     # Master DB 열기
     db = MasterDB(master_db_path)

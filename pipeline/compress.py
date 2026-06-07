@@ -29,6 +29,10 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 
+from log_setup import get_logger
+
+log = get_logger(__name__)
+
 
 # ============================================================
 # 1. 사건부호 한글→영문 매핑 테이블 (159개 사건부호 커버)
@@ -517,33 +521,33 @@ if __name__ == "__main__":
     _args = _parser.parse_args()
 
     if _args.mock:
-        print("=" * 60)
-        print("  [MOCK MODE] 테스트 데이터로 변환 파이프라인 검증")
-        print("=" * 60)
+        log.info("=" * 60)
+        log.info("  [MOCK MODE] 테스트 데이터로 변환 파이프라인 검증")
+        log.info("=" * 60)
         data, stats, court_map = build_from_mock()
         output_dir = _args.out or os.path.join(os.path.dirname(__file__), "output")
     else:
         db_path = _args.db or os.path.join("/app", "data", "master.db")
         if not os.path.exists(db_path):
-            print(f"❌ DB 파일을 찾을 수 없습니다: {db_path}")
+            log.error(f"❌ DB 파일을 찾을 수 없습니다: {db_path}")
             sys.exit(1)
-        print("=" * 60)
-        print(f"  [PRODUCTION] {db_path}")
-        print("=" * 60)
+        log.info("=" * 60)
+        log.info(f"  [PRODUCTION] {db_path}")
+        log.info("=" * 60)
         data, stats, court_map = build_from_sqlite(db_path)
         output_dir = _args.out or os.path.join(os.path.dirname(__file__), "output")
 
     size_mb = save_output(data, stats, output_dir, court_map)
 
-    print(f"\n📊 변환 통계:")
-    print(f"   총 레코드:       {stats['total']:,}")
-    print(f"   고유 키:         {len(data):,}")
-    print(f"   건너뛴 레코드:   {stats['skipped']:,}")
-    print(f"   키 충돌(1:N):    {stats['collisions']:,}")
-    print(f"   출력 파일 크기:  {size_mb:.2f} MB")
-    print(f"   출력 경로:       {output_dir}")
+    log.info(f"\n📊 변환 통계:")
+    log.info(f"   총 레코드:       {stats['total']:,}")
+    log.info(f"   고유 키:         {len(data):,}")
+    log.info(f"   건너뛴 레코드:   {stats['skipped']:,}")
+    log.info(f"   키 충돌(1:N):    {stats['collisions']:,}")
+    log.info(f"   출력 파일 크기:  {size_mb:.2f} MB")
+    log.info(f"   출력 경로:       {output_dir}")
 
     if _args.mock:
         # Mock 결과 상세 출력
-        print("\n📋 변환 결과 (Mock):")
-        print(json.dumps(data, ensure_ascii=False, indent=2))
+        log.info("\n📋 변환 결과 (Mock):")
+        log.info(json.dumps(data, ensure_ascii=False, indent=2))

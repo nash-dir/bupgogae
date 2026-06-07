@@ -19,6 +19,10 @@ import sys
 import boto3
 from botocore.exceptions import ClientError
 
+from log_setup import get_logger
+
+log = get_logger(__name__)
+
 R2_STATE_KEY = "bupgogae/state/master.db"
 
 
@@ -26,7 +30,7 @@ def get_r2_client():
     """Cloudflare R2 S3 호환 클라이언트 반환."""
     account_id = os.environ.get("CF_ACCOUNT_ID")
     if not account_id:
-        print("❌ CF_ACCOUNT_ID 환경변수가 설정되지 않았습니다.")
+        log.error("❌ CF_ACCOUNT_ID 환경변수가 설정되지 않았습니다.")
         sys.exit(1)
 
     return boto3.client(
@@ -44,23 +48,23 @@ def download_state(data_dir: str):
     bucket = os.environ.get("R2_BUCKET")
 
     if not bucket:
-        print("❌ R2_BUCKET 환경변수가 설정되지 않았습니다.")
+        log.error("❌ R2_BUCKET 환경변수가 설정되지 않았습니다.")
         sys.exit(1)
 
-    print(f"📥 다운로드 시작: R2({bucket}/{R2_STATE_KEY}) -> Local({db_path})")
+    log.info(f"📥 다운로드 시작: R2({bucket}/{R2_STATE_KEY}) -> Local({db_path})")
     client = get_r2_client()
 
     try:
         client.download_file(bucket, R2_STATE_KEY, db_path)
-        print("✅ 상태 파일 다운로드 완료.")
+        log.info("✅ 상태 파일 다운로드 완료.")
     except ClientError as e:
         if e.response['Error']['Code'] == "404" or e.response['Error']['Code'] == "NoSuchKey":
-            print("⚠️ 상태 파일(master.db)이 R2에 존재하지 않습니다. 초기 상태로 새로 생성합니다.")
+            log.warning("⚠️ 상태 파일(master.db)이 R2에 존재하지 않습니다. 초기 상태로 새로 생성합니다.")
         else:
-            print(f"❌ R2 다운로드 오류 발생: {e}")
+            log.error(f"❌ R2 다운로드 오류 발생: {e}")
             sys.exit(1)
     except Exception as e:
-        print(f"❌ R2 다운로드 알 수 없는 오류: {e}")
+        log.error(f"❌ R2 다운로드 알 수 없는 오류: {e}")
         sys.exit(1)
 
 
@@ -69,16 +73,16 @@ def upload_state(data_dir: str):
     db_path = os.path.join(data_dir, "master.db")
 
     if not os.path.exists(db_path):
-        print(f"❌ 업로드할 로컬 상태 파일이 없습니다: {db_path}")
+        log.error(f"❌ 업로드할 로컬 상태 파일이 없습니다: {db_path}")
         sys.exit(1)
 
     bucket = os.environ.get("R2_BUCKET")
     if not bucket:
-        print("❌ R2_BUCKET 환경변수가 설정되지 않았습니다.")
+        log.error("❌ R2_BUCKET 환경변수가 설정되지 않았습니다.")
         sys.exit(1)
 
     size_mb = os.path.getsize(db_path) / (1024 * 1024)
-    print(f"📤 업로드 시작: Local({db_path}, {size_mb:.2f}MB) -> R2({bucket}/{R2_STATE_KEY})")
+    log.info(f"📤 업로드 시작: Local({db_path}, {size_mb:.2f}MB) -> R2({bucket}/{R2_STATE_KEY})")
     
     # [Code Audit Fix] WAL 체크포인트 강제 실행 (동기화 누락 방지)
     # MasterDB는 PRAGMA journal_mode=WAL 을 사용하므로, 크래시 등으로 인해 
@@ -89,16 +93,16 @@ def upload_state(data_dir: str):
         conn = sqlite3.connect(db_path)
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
         conn.close()
-        print("  ✅ 로컬 SQLite WAL Checkpoint (TRUNCATE) 완료")
+        log.info("  ✅ 로컬 SQLite WAL Checkpoint (TRUNCATE) 완료")
     except Exception as e:
-        print(f"  ⚠️ SQLite WAL Checkpoint 실패 (무시됨): {e}")
+        log.warning(f"  ⚠️ SQLite WAL Checkpoint 실패 (무시됨): {e}")
 
     client = get_r2_client()
     try:
         client.upload_file(db_path, bucket, R2_STATE_KEY)
-        print("✅ 상태 파일 업로드 완료.")
+        log.info("✅ 상태 파일 업로드 완료.")
     except Exception as e:
-        print(f"❌ R2 업로드 중 오류 발생: {e}")
+        log.error(f"❌ R2 업로드 중 오류 발생: {e}")
         sys.exit(1)
 
 

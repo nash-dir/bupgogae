@@ -26,6 +26,7 @@ const DB_URL = 'https://api.bup.live/bupgogae/db.json.gz';
 const DB_TAX_URL = 'https://api.bup.live/bupgogae/db_tax.json.gz';  // DLC: 조세심판
 
 const ADAPTERS_URL = 'https://api.bup.live/bupgogae/adapters.json'; // 원격 어댑터 셀렉터 설정
+const MANIFEST_URL = 'https://api.bup.live/bupgogae/manifest.json'; // Drift 안전망 정답지
 const BUNDLED_DB_URL = 'data/db.json'; // 로컬 디버깅용 폴백
 const DB_NAME = 'bupgogae';
 const DB_VERSION = 1;
@@ -43,6 +44,21 @@ const MAX_SELECTOR_LENGTH = 150;     // 선택자 하나당 최대 길이 (문�
 const MIN_KEYS_CORE = 100_000;       // Core DB 최소 키 수 (미달 시 파이프라인 장애 판정)
 const MIN_KEYS_TAX_DLC = 30_000;     // 조세 DLC 최소 키 수
 const VERSION_REGEX = /^\d{8}$/;     // version 형식: YYYYMMDD
+
+// [동기화 견고성 상수] — 0.8.0 "DB 2달 정체" 사고 재발 방지
+const WATCHDOG_MS = 48 * 3600 * 1000;   // 마지막 성공 후 48h 초과 시 ETag 불신
+const FETCH_TIMEOUT_MS = 60_000;        // DB fetch 행(hang) 방지 타임아웃
+const SYNC_LEDGER_KEY = 'bupgogae_sync_ledger'; // 동기화 시도 원장 (storage.local)
+const SYNC_LEDGER_MAX = 20;             // 원장 보존 개수 (최신순)
+
+// [Drift 안전망 상수] — manifest 정답지 대조 → 캐시버스터 치유
+const DRIFT = {
+  GRACE_MS: 2 * 3600 * 1000,            // 갓 게시된 manifest는 CDN 전파 대기
+  CHECK_MIN_INTERVAL_MS: 4 * 3600 * 1000, // force 아닐 때 검사 최소 간격
+  MAX_STRIKES: 3,                       // 연속 치유 실패 한도 (폭주 방지)
+  MANIFEST_TIMEOUT_MS: 10_000,          // manifest fetch 타임아웃
+};
+const DRIFT_STATE_KEY = 'bupgogae_drift_state'; // {lastCheckAt, strikes, lastResult}
 
 // isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity는
 // sync-utils.js(importScripts)에서 전역으로 제공됨.
@@ -129,33 +145,33 @@ function dbClear(db, storeName) {
 /**
  * Core 데이터만 삭제 (DLC 키 TX*, KP*는 보존).
  * syncDatabase에서 dbClear 대신 사용하여 DLC 데이터 소실 방지.
+ *
+ * 키 범위 일괄 삭제 3건으로 처리한다 — 커서로 1건씩 지우면 20만건 기준
+ * 수십 초가 걸려 동기화 응답을 지연시킨다 (E2E 타임아웃의 원인이기도 했다).
+ * 문자열 정렬상 'KP*'는 ['KP','KQ'), 'TX*'는 ['TX','TY') 구간이므로
+ * 그 바깥 3개 범위를 지우면 DLC만 정확히 남는다.
+ * (cases 키는 JSON 객체 속성명에서 오므로 항상 문자열이다)
+ *
  * @param {IDBDatabase} db
  * @param {string} storeName
  * @returns {Promise<number>} 삭제된 레코드 수
  */
-function dbClearCoreOnly(db, storeName) {
-  return new Promise((resolve, reject) => {
+async function dbClearCoreOnly(db, storeName) {
+  const deleted = await countCoreKeys(db).catch(() => 0);
+
+  await new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite');
     const store = tx.objectStore(storeName);
-    const req = store.openCursor();
-    let deleted = 0;
 
-    req.onsuccess = (e) => {
-      const cursor = e.target.result;
-      if (!cursor) return; // cursor 소진 — tx.oncomplete 대기
-      // DLC 키(TX, KP prefix)는 보존
-      if (typeof cursor.key === 'string' &&
-          !cursor.key.startsWith('TX') &&
-          !cursor.key.startsWith('KP')) {
-        cursor.delete();
-        deleted++;
-      }
-      cursor.continue();
-    };
+    store.delete(IDBKeyRange.bound('', 'KP', false, true));   // < 'KP'
+    store.delete(IDBKeyRange.bound('KQ', 'TX', false, true)); // ['KQ', 'TX')
+    store.delete(IDBKeyRange.lowerBound('TY'));               // >= 'TY'
 
-    tx.oncomplete = () => resolve(deleted);
+    tx.oncomplete = () => resolve();
     tx.onerror = () => reject(new Error(`dbClearCoreOnly failed: ${tx.error}`));
   });
+
+  return deleted;
 }
 
 /**
@@ -209,7 +225,8 @@ async function dbBulkInsert(db, storeName, data, chunkSize = 10000) {
  *
  * @param {string} url
  * @param {string|null} cachedETag - 이전 ETag (null이면 무조건 다운로드)
- * @returns {Promise<{data: Object|null, etag: string|null, notModified: boolean}>}
+ * @returns {Promise<{data: Object|null, etag: string|null, notModified: boolean, contentHash: string|null}>}
+ *   contentHash: 수신 바이트(비압축)의 SHA-256 hex — drift 대조의 기준값
  */
 async function fetchDB(url, cachedETag = null) {
   const headers = { 'Accept': 'application/json' };
@@ -219,10 +236,11 @@ async function fetchDB(url, cachedETag = null) {
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const res = await fetch(url, { headers });
+      // 행(hang) 방지: 0.8.0 사고에서 응답 없는 fetch가 동기화를 무기한 정지시킴
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 
       if (res.status === 304) {
-        return { data: null, etag: cachedETag, notModified: true };
+        return { data: null, etag: cachedETag, notModified: true, contentHash: null };
       }
 
       if (!res.ok) {
@@ -262,8 +280,13 @@ async function fetchDB(url, cachedETag = null) {
       const text = new TextDecoder('utf-8').decode(chunksAll);
       const data = JSON.parse(text);
 
+      // 수신 바이트 SHA-256 — manifest(비압축 바이트 해시)와 직접 대조 가능
+      const hashBuffer = await crypto.subtle.digest('SHA-256', chunksAll);
+      const contentHash = Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+
       const etag = res.headers.get('ETag') || null;
-      return { data, etag, notModified: false };
+      return { data, etag, notModified: false, contentHash };
     } catch (err) {
       console.warn(`[bupgogae] fetch 실패 (${attempt}/3):`, err.message);
       if (attempt === 3) throw err;
@@ -277,71 +300,233 @@ async function fetchDB(url, cachedETag = null) {
 // ============================================================
 
 /**
- * 메인 동기화 함수.
- * R2에서 db.json.gz를 fetch → ETag 비교 → 변경 시 IndexedDB 교체.
+ * Core 키 수 조회 — 전체 count에서 DLC 키(TX*, KP*)를 제외.
+ * buildFetchPlan/shouldLoadBundled/evaluateDrift의 건강 판정 기준값.
+ * @param {IDBDatabase} db
+ * @returns {Promise<number>}
  */
-async function syncDatabase() {
-  console.log('[bupgogae] 동기화 시작...');
+function countCoreKeys(db) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_CASES, 'readonly');
+    const store = tx.objectStore(STORE_CASES);
+    let total = 0, taxCount = 0, patentCount = 0;
+    const RANGE_END = String.fromCharCode(0xFFFF); // 'TX'~'TX￿' 키 범위 상한
 
-  try {
-    // ── Step 1: 저장된 ETag 조회 ──
-    const { bupgogae_etag: cachedETag = null } =
-      await chrome.storage.local.get('bupgogae_etag');
+    const reqTotal = store.count();
+    reqTotal.onsuccess = () => { total = reqTotal.result; };
+    const reqTax = store.count(IDBKeyRange.bound('TX', 'TX' + RANGE_END));
+    reqTax.onsuccess = () => { taxCount = reqTax.result; };
+    const reqPatent = store.count(IDBKeyRange.bound('KP', 'KP' + RANGE_END));
+    reqPatent.onsuccess = () => { patentCount = reqPatent.result; };
 
-    // ── Step 2: R2에서 fetch (ETag 비교) ──
-    const { data, etag, notModified } = await fetchDB(DB_URL, cachedETag);
+    tx.oncomplete = () => resolve(total - taxCount - patentCount);
+    tx.onerror = () => reject(new Error(`countCoreKeys failed: ${tx.error}`));
+  });
+}
 
-    if (notModified) {
-      console.log('[bupgogae] DB 변경 없음 (304). 동기화 스킵.');
-      return;
-    }
+/**
+ * 동기화/드리프트 판정에 필요한 로컬 상태 스냅샷.
+ * @returns {Promise<{localVer, contentHash, lastSuccessAt, coreCount}>}
+ */
+async function readLocalSyncState() {
+  const db = await getCachedDB();
+  const [localVer, contentHash, lastSuccessAt, coreCount] = await Promise.all([
+    dbGet(db, STORE_META, 'local_ver').catch(() => null),
+    dbGet(db, STORE_META, 'content_hash').catch(() => null),
+    dbGet(db, STORE_META, 'last_success_at').catch(() => null),
+    countCoreKeys(db).catch(() => 0),
+  ]);
+  return {
+    localVer: localVer ?? null,
+    contentHash: contentHash ?? null,
+    lastSuccessAt: lastSuccessAt ?? null,
+    coreCount,
+  };
+}
 
-    if (!data || !data.cases) {
-      console.warn('[bupgogae] 유효하지 않은 응답. 동기화 중단.');
-      return;
-    }
+// 원장 쓰기 직렬화 큐 — 동시 동기화(설치+수동 등)의 read-modify-write 유실 방지
+let _ledgerWriteQueue = Promise.resolve();
 
-    // ── 무결성 게이트 (sync-utils.validateDbIntegrity) ──
-    const integrity = validateDbIntegrity(data, {
-      minKeys: MIN_KEYS_CORE,
-      versionRegex: VERSION_REGEX,
+/**
+ * 동기화 시도를 storage 원장에 기록 (최신순 SYNC_LEDGER_MAX개).
+ * 실패해도 동기화 결과에 영향을 주지 않는다.
+ * @param {{ts, trigger, outcome, reason?, version?, durationMs}} entry
+ */
+function recordSyncAttempt(entry) {
+  _ledgerWriteQueue = _ledgerWriteQueue.then(async () => {
+    const { [SYNC_LEDGER_KEY]: ledger } = await chrome.storage.local.get(SYNC_LEDGER_KEY);
+    await chrome.storage.local.set({
+      [SYNC_LEDGER_KEY]: appendLedger(ledger, entry, SYNC_LEDGER_MAX),
     });
-    if (!integrity.ok) {
-      throw new Error(`DB 무결성 검증 실패: ${integrity.error}`);
-    }
-    const keyCount = integrity.keyCount;
-    console.log(`[bupgogae] 무결성 검증 통과: ${keyCount.toLocaleString()}건, ver=${data.version}`);
+  }).catch(err => {
+    console.warn('[bupgogae] 원장 기록 실패:', err?.message);
+  });
+  return _ledgerWriteQueue;
+}
 
-    // ── Step 3: IndexedDB 교체 (DLC 키 보존) ──
-    const db = await getCachedDB();
-    const cleared = await dbClearCoreOnly(db, STORE_CASES);
-    const count = await dbBulkInsert(db, STORE_CASES, data.cases);
-    console.log(`[bupgogae] Core DB 교체: ${cleared}건 삭제 → ${count}건 삽입 (DLC 보존)`);
+/**
+ * 메인 동기화 함수 — 절대 reject하지 않는다.
+ * R2에서 db.json.gz를 fetch → 변경 시 IndexedDB 교체, 모든 시도를 원장에 기록.
+ *
+ * @param {{trigger?: string, force?: boolean, cacheBuster?: string}} [opts]
+ *   trigger: install|startup|alarm|force|drift (원장 라벨)
+ *   force: If-None-Match 생략 (드리프트 치유용)
+ *   cacheBuster: force일 때 URL에 ?cb=<값> 부착 — 낡은 CDN 캐시 우회
+ * @returns {Promise<{success: boolean, outcome: string, reason?: string, version?: string}>}
+ *   outcome: replaced|not_modified|fetch_failed|invalid_payload|integrity_failed|db_error
+ */
+async function syncDatabase(opts = {}) {
+  const trigger = opts.trigger || 'manual';
+  const force = opts.force === true;
+  const cacheBuster = opts.cacheBuster ?? null;
+  const startedAt = Date.now();
 
-    // ── Step 4: 메타데이터 + ETag 저장 ──
-    const version = data.version || new Date().toISOString().slice(0, 10);
-    await updateMetadata(db, version, data.total || count);
-    await chrome.storage.local.set({ bupgogae_etag: etag });
+  console.log(`[bupgogae] 동기화 시작 (trigger=${trigger}${force ? ', force' : ''})...`);
 
-    // ── Step 5: court_code_map 저장 (DB 페이로드에 포함된 경우) ──
-    if (data.court_code_map) {
-      await chrome.storage.local.set({ bupgogae_court_map: data.court_code_map });
-      console.log(`[bupgogae] court_code_map 저장: ${Object.keys(data.court_code_map).length}개 법원`);
-    }
-
-    console.log(`[bupgogae] ✅ 동기화 완료: ${count}건 교체, ver=${version}`);
-
+  let result;
+  try {
+    result = await doSyncDatabase({ force, cacheBuster });
   } catch (err) {
-    console.error('[bupgogae] ❌ R2 동기화 실패:', err);
-    // R2 실패 시 로컬 번들 DB 폴백
-    await loadBundledDB();
+    // doSyncDatabase가 모든 오류를 분류하지만, 만에 하나를 대비한 최후 방어선
+    console.error('[bupgogae] ❌ 동기화 중 미분류 오류:', err);
+    result = { success: false, outcome: 'db_error', reason: err?.message || String(err) };
+  }
+
+  // ── 원장 기록 (정직한 관측성 — 실패도 시도로 남긴다) ──
+  await recordSyncAttempt({
+    ts: startedAt,
+    trigger,
+    outcome: result.outcome,
+    ...(result.reason ? { reason: result.reason } : {}),
+    ...(result.version ? { version: result.version } : {}),
+    durationMs: Date.now() - startedAt,
+  });
+
+  // ── 실패 시 번들 폴백 (shouldLoadBundled 게이트 — 다운그레이드 금지) ──
+  if (!result.success) {
+    try { await maybeLoadBundledDB(); } catch {}
   }
 
   // ── 어댑터 원격 설정 동기화 (DB 동기화와 독립적으로 실행) ──
   try { await fetchAdaptersConfig(); } catch {}
 
   // ── DLC 동기화 (조세심판) ──
-  await syncTaxDLCIfEnabled();
+  try { await syncTaxDLCIfEnabled(); } catch {}
+
+  // ── post-sync 드리프트 자동 검증 (drift 트리거 자신은 제외 — 재귀 방지) ──
+  if (trigger !== 'drift' &&
+      (result.outcome === 'replaced' || result.outcome === 'not_modified')) {
+    verifyDbFreshness('post_sync', { force: false }).catch(() => {});
+  }
+
+  return result;
+}
+
+/**
+ * 동기화 핵심 로직 — fetch 계획 수립 → fetch → 검증 → 교체.
+ * 결과를 outcome으로 분류해 반환한다 (번들 폴백/원장은 syncDatabase 담당).
+ */
+async function doSyncDatabase({ force, cacheBuster }) {
+  // ── Step 1: 로컬 상태 + ETag → fetch 계획 (304 가드 + 워치독) ──
+  let local;
+  try {
+    local = await readLocalSyncState();
+  } catch (err) {
+    // 로컬 상태를 알 수 없으면 가장 보수적인 가정 → 무조건 전체 fetch
+    local = { localVer: null, contentHash: null, lastSuccessAt: null, coreCount: 0 };
+  }
+
+  let cachedETag = null;
+  try {
+    ({ bupgogae_etag: cachedETag = null } =
+      await chrome.storage.local.get('bupgogae_etag'));
+  } catch {}
+
+  let conditional = false;
+  if (!force) {
+    const plan = buildFetchPlan(
+      {
+        etag: cachedETag,
+        lastSuccessAt: local.lastSuccessAt,
+        localVer: local.localVer,
+        coreCount: local.coreCount,
+      },
+      Date.now(),
+      { watchdogMs: WATCHDOG_MS, minCoreKeys: MIN_KEYS_CORE },
+    );
+    conditional = plan.conditional;
+    if (!conditional && plan.reasons.length > 0) {
+      console.log(`[bupgogae] 조건부 요청 생략 → 전체 fetch (${plan.reasons.join(', ')})`);
+    }
+  }
+
+  const url = (force && cacheBuster != null)
+    ? `${DB_URL}?cb=${encodeURIComponent(cacheBuster)}`
+    : DB_URL;
+
+  // ── Step 2: R2에서 fetch ──
+  let fetched;
+  try {
+    fetched = await fetchDB(url, conditional ? cachedETag : null);
+  } catch (err) {
+    console.error('[bupgogae] ❌ R2 동기화 실패:', err);
+    return { success: false, outcome: 'fetch_failed', reason: err?.message || String(err) };
+  }
+
+  const { data, etag, notModified, contentHash } = fetched;
+
+  if (notModified) {
+    console.log('[bupgogae] DB 변경 없음 (304). 동기화 스킵.');
+    return {
+      success: true,
+      outcome: 'not_modified',
+      ...(local.localVer ? { version: local.localVer } : {}),
+    };
+  }
+
+  if (!data || !data.cases) {
+    console.warn('[bupgogae] 유효하지 않은 응답. 동기화 중단.');
+    return { success: false, outcome: 'invalid_payload', reason: 'cases 없음' };
+  }
+
+  // ── 무결성 게이트 (sync-utils.validateDbIntegrity) ──
+  const integrity = validateDbIntegrity(data, {
+    minKeys: MIN_KEYS_CORE,
+    versionRegex: VERSION_REGEX,
+  });
+  if (!integrity.ok) {
+    console.error(`[bupgogae] DB 무결성 검증 실패: ${integrity.error}`);
+    return { success: false, outcome: 'integrity_failed', reason: integrity.error };
+  }
+  const keyCount = integrity.keyCount;
+  console.log(`[bupgogae] 무결성 검증 통과: ${keyCount.toLocaleString()}건, ver=${data.version}`);
+
+  // ── Step 3~5: IndexedDB 교체 + 메타/ETag 저장 ──
+  try {
+    const db = await getCachedDB();
+    const cleared = await dbClearCoreOnly(db, STORE_CASES);
+    const count = await dbBulkInsert(db, STORE_CASES, data.cases);
+    console.log(`[bupgogae] Core DB 교체: ${cleared}건 삭제 → ${count}건 삽입 (DLC 보존)`);
+
+    const version = data.version || new Date().toISOString().slice(0, 10);
+    await updateMetadata(db, version, data.total || count, {
+      contentHash,
+      lastSuccessAt: Date.now(),
+    });
+    await chrome.storage.local.set({ bupgogae_etag: etag });
+
+    if (data.court_code_map) {
+      await chrome.storage.local.set({ bupgogae_court_map: data.court_code_map });
+      console.log(`[bupgogae] court_code_map 저장: ${Object.keys(data.court_code_map).length}개 법원`);
+    }
+
+    console.log(`[bupgogae] ✅ 동기화 완료: ${count}건 교체, ver=${version}`);
+    return { success: true, outcome: 'replaced', version };
+  } catch (err) {
+    console.error('[bupgogae] ❌ IndexedDB 교체 실패:', err);
+    _cachedDB = null; // 커넥션 오류 가능성 — 캐시 무효화
+    return { success: false, outcome: 'db_error', reason: err?.message || String(err) };
+  }
 }
 
 // ============================================================
@@ -371,6 +556,8 @@ async function fetchAdaptersConfig() {
   try {
     const res = await fetch(ADAPTERS_URL, {
       headers: { 'Accept': 'application/json' },
+      // 행 방지: 응답 없는 원격 설정이 동기화 응답 전체를 막지 않도록
+      signal: AbortSignal.timeout(DRIFT.MANIFEST_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -402,11 +589,24 @@ async function fetchAdaptersConfig() {
 }
 
 /**
- * 번들 DB 로드 — R2 동기화 실패 시 로컬 폴백.
- * extension/data/db.json을 IndexedDB에 삽입.
+ * 번들 DB 폴백 — R2 동기화 실패 시 shouldLoadBundled 게이트 통과 시에만 로드.
+ * 게이트가 다운그레이드를 차단한다: 0.8.0 사고에서 동기화 실패가 최신 로컬 DB를
+ * 구버전 번들(version=20260321)로 무조건 덮어쓰던 결함의 수정.
+ * 로드 시 bupgogae_etag를 삭제해 번들 내용이 R2 ETag와 어긋난 채
+ * 304에 갇히는 2차 트랩을 막는다.
  */
-async function loadBundledDB() {
-  console.log('[bupgogae] 📦 번들 DB 폴백 시도...');
+// 번들 로드 중복 제거 — 동시 동기화 실패(설치+수동 등)가 같은 번들을
+// 두 번 삽입하며 응답을 수십 초 지연시키는 것을 방지
+let _bundledLoadInFlight = null;
+
+function maybeLoadBundledDB() {
+  if (_bundledLoadInFlight) return _bundledLoadInFlight;
+  _bundledLoadInFlight = doMaybeLoadBundledDB()
+    .finally(() => { _bundledLoadInFlight = null; });
+  return _bundledLoadInFlight;
+}
+
+async function doMaybeLoadBundledDB() {
   try {
     const url = chrome.runtime.getURL(BUNDLED_DB_URL);
     const res = await fetch(url);
@@ -420,11 +620,34 @@ async function loadBundledDB() {
       return;
     }
 
+    // ── 다운그레이드 금지 게이트 ──
+    let local;
+    try {
+      local = await readLocalSyncState();
+    } catch {
+      local = { localVer: null, coreCount: 0 };
+    }
+    const gate = shouldLoadBundled(String(data.version || 'bundled'), {
+      localVer: local.localVer,
+      coreCount: local.coreCount,
+    });
+    if (!gate.load) {
+      console.log(`[bupgogae] 번들 폴백 게이트 차단 (${gate.reason}) — 로컬 DB 보존`);
+      return;
+    }
+    console.log(`[bupgogae] 📦 번들 DB 폴백 시도 (${gate.reason})...`);
+
     const db = await getCachedDB();
     await dbClearCoreOnly(db, STORE_CASES);
     const count = await dbBulkInsert(db, STORE_CASES, data.cases);
     const version = data.version || 'bundled';
-    await updateMetadata(db, version, data.total || count);
+    // 번들은 R2 동기화 성공이 아니므로 content_hash/last_success_at은 제거
+    await updateMetadata(db, version, data.total || count, {
+      contentHash: null,
+      lastSuccessAt: null,
+    });
+    // 번들 내용은 저장된 ETag와 무관 — 이후 동기화가 304에 갇히지 않도록 정리
+    await chrome.storage.local.remove('bupgogae_etag');
 
     console.log(`[bupgogae] ✅ 번들 DB 로드 완료: ${count}건, ver=${version}`);
   } catch (bundledErr) {
@@ -437,8 +660,11 @@ async function loadBundledDB() {
  * @param {IDBDatabase} db
  * @param {string} version - DB 버전 (YYYYMMDD)
  * @param {number} [totalCount] - 전체 판례 수
+ * @param {{contentHash?: string|null, lastSuccessAt?: number|null}} [extras]
+ *   contentHash: 수신 바이트 SHA-256 (null이면 삭제 — 번들 폴백 등 비동기화 경로)
+ *   lastSuccessAt: 성공 시각 epoch ms (null이면 삭제)
  */
-async function updateMetadata(db, version, totalCount) {
+async function updateMetadata(db, version, totalCount, extras = {}) {
   const tx = db.transaction(STORE_META, 'readwrite');
   const store = tx.objectStore(STORE_META);
 
@@ -447,6 +673,14 @@ async function updateMetadata(db, version, totalCount) {
   if (totalCount != null) {
     store.put(totalCount, 'total_count');
   }
+  if ('contentHash' in extras) {
+    if (extras.contentHash == null) store.delete('content_hash');
+    else store.put(extras.contentHash, 'content_hash');
+  }
+  if ('lastSuccessAt' in extras) {
+    if (extras.lastSuccessAt == null) store.delete('last_success_at');
+    else store.put(extras.lastSuccessAt, 'last_success_at');
+  }
 
   await new Promise((resolve, reject) => {
     tx.oncomplete = resolve;
@@ -454,6 +688,118 @@ async function updateMetadata(db, version, totalCount) {
   });
 
   console.log(`[bupgogae] 메타데이터 갱신: ver=${version}, total=${totalCount ?? '?'}`);
+}
+
+// ============================================================
+// 3-2. Drift 안전망 — manifest 정답지 대조 → 캐시버스터 치유
+// ============================================================
+
+/**
+ * 로컬 DB 신선도 검증 + 자가치유.
+ * R2의 manifest.json(정답지)과 로컬 상태(버전/해시/건수)를 대조해
+ * 뒤처짐이 확정되면 캐시 버스터로 강제 재동기화한다.
+ *
+ * fail-open 원칙: manifest 미게시(404)/파싱 실패/스키마 불량 시 아무 행동도
+ * 하지 않는다 — 안전망 자신이 사고를 만들면 안 된다.
+ *
+ * @param {string} trigger - content|post_sync|message 등 (관측 라벨)
+ * @param {{force?: boolean}} [opts] - force=true면 4h 스로틀 무시
+ * @returns {Promise<{checked: boolean, skipped?: string, drift: boolean,
+ *                    action: string, reasons: string[], healed?: boolean}>}
+ */
+async function verifyDbFreshness(trigger, opts = {}) {
+  const force = opts.force === true;
+  const now = Date.now();
+
+  try {
+    // ── 스로틀 (force 아닐 때 4h 최소 간격) ──
+    let state = {};
+    try {
+      ({ [DRIFT_STATE_KEY]: state = {} } =
+        await chrome.storage.local.get(DRIFT_STATE_KEY));
+    } catch {}
+    if (!force && state.lastCheckAt &&
+        now - state.lastCheckAt < DRIFT.CHECK_MIN_INTERVAL_MS) {
+      return { checked: false, skipped: 'throttled', drift: false, action: 'none', reasons: [] };
+    }
+
+    // ── manifest fetch (no-store + 타임아웃, 실패 시 fail-open) ──
+    let manifest;
+    try {
+      const res = await fetch(MANIFEST_URL, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(DRIFT.MANIFEST_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      manifest = await res.json();
+    } catch (err) {
+      console.log(`[bupgogae] drift 검사 스킵 — manifest 사용 불가 (${err?.message})`);
+      return { checked: false, skipped: 'manifest_unavailable', drift: false, action: 'none', reasons: [] };
+    }
+
+    const validation = validateManifest(manifest);
+    if (!validation.ok) {
+      console.warn(`[bupgogae] drift 검사 스킵 — manifest 스키마 불량: ${validation.error}`);
+      return { checked: false, skipped: 'manifest_invalid', drift: false, action: 'none', reasons: [] };
+    }
+
+    // ── 드리프트 판정 ──
+    const strikes = state.strikes || 0;
+    const local = await readLocalSyncState();
+    const verdict = evaluateDrift(
+      manifest,
+      { ...local, strikes },
+      now,
+      { graceMs: DRIFT.GRACE_MS, maxStrikes: DRIFT.MAX_STRIKES },
+    );
+
+    const result = {
+      checked: true,
+      drift: verdict.action !== 'none',
+      action: verdict.action,
+      reasons: verdict.reasons,
+    };
+    let nextStrikes = strikes;
+
+    if (verdict.action === 'none') {
+      nextStrikes = 0; // 정합 확인 — strike 청산
+    } else if (verdict.action === 'force_sync') {
+      // ── 치유: 캐시 버스터 강제 재동기화 → 동일 manifest로 재평가 ──
+      console.warn(`[bupgogae] 🚑 drift 감지 (${verdict.reasons.join(', ')}) → 강제 재동기화`);
+      await syncDatabase({
+        trigger: 'drift',
+        force: true,
+        cacheBuster: manifest.core.version,
+      });
+      const localAfter = await readLocalSyncState();
+      const reVerdict = evaluateDrift(
+        manifest,
+        { ...localAfter, strikes: 0 },
+        Date.now(),
+        { graceMs: DRIFT.GRACE_MS, maxStrikes: DRIFT.MAX_STRIKES },
+      );
+      result.healed = reVerdict.action === 'none';
+      nextStrikes = result.healed ? 0 : strikes + 1;
+      console.log(`[bupgogae] drift 치유 ${result.healed ? '성공' : `실패 (strikes=${nextStrikes})`}`);
+    }
+    // defer/backoff: 행동 없음 — strikes 유지
+
+    try {
+      await chrome.storage.local.set({
+        [DRIFT_STATE_KEY]: {
+          lastCheckAt: now,
+          strikes: nextStrikes,
+          lastResult: { ts: now, trigger, ...result },
+        },
+      });
+    } catch {}
+
+    return result;
+  } catch (err) {
+    // 안전망은 절대 reject하지 않는다
+    console.warn('[bupgogae] drift 검사 오류 (fail-open):', err?.message);
+    return { checked: false, skipped: 'error', drift: false, action: 'none', reasons: [] };
+  }
 }
 
 // ============================================================
@@ -597,7 +943,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   ]);
 
   // 설치/업데이트 시 R2에서 동기화 시도
-  await syncDatabase();
+  await syncDatabase({ trigger: 'install' });
 
   // 동기화 실패 시 빈 DB로 시작 — 다음 알람(1분 후)에서 재시도
   try {
@@ -626,7 +972,7 @@ chrome.runtime.onStartup.addListener(async () => {
   }
 
   // 시작 시 동기화 시도
-  await syncDatabase();
+  await syncDatabase({ trigger: 'startup' });
 });
 
 /**
@@ -635,7 +981,7 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === ALARM_NAME) {
     console.log('[bupgogae] 알람 트리거 → 동기화 실행');
-    await syncDatabase();
+    await syncDatabase({ trigger: 'alarm' });
   }
 });
 
@@ -672,9 +1018,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'FORCE_SYNC') {
     // 수동 동기화: DB + 어댑터 설정 모두 동기화 (syncDatabase 내부에서 fetchAdaptersConfig 호출)
-    syncDatabase()
-      .then(() => sendResponse({ success: true }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+    // 정직한 결과 보고: 실패를 success:true로 가장하지 않는다 (0.8.0 사고의 직접 원인)
+    syncDatabase({ trigger: 'force' })
+      .then(result => sendResponse({
+        success: result.success,
+        outcome: result.outcome,
+        ...(result.reason ? { error: result.reason } : {}),
+      }))
+      .catch(err => sendResponse({ success: false, outcome: 'db_error', error: err.message }));
+    return true;
+  }
+
+  // ── DB 신선도 검증 (Drift 안전망) — content script 진입/수동 트리거 ──
+  if (message.type === 'VERIFY_DB_FRESHNESS') {
+    verifyDbFreshness(message.trigger || 'message', { force: message.force === true })
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({
+        checked: false, skipped: 'error', drift: false,
+        action: 'none', reasons: [], error: err.message,
+      }));
     return true;
   }
 

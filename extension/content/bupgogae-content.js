@@ -55,6 +55,16 @@ let _categoryFilters = {         // 카테고리별 필터 (기본값)
 async function init() {
   console.log('[bupgogae] Content Script 초기화 시작');
 
+  // ── DB 신선도 검사 발화 (fire-and-forget) ──
+  // 지원 사이트 진입 = 사용자가 곧 판례 검증을 쓴다는 신호.
+  // SW가 manifest 정답지와 대조해 뒤처진 DB를 자가치유한다 (응답 불요).
+  try {
+    chrome.runtime.sendMessage(
+      { type: 'VERIFY_DB_FRESHNESS', trigger: 'content' },
+      () => void chrome.runtime.lastError,
+    );
+  } catch { /* SW 컨텍스트 무효화 등 — 신선도 검사 실패가 본 기능을 막으면 안 됨 */ }
+
   // ── 어댑터 자동 감지 (Remote Config 비동기 로드 포함) ──
   if (window.bupgogaeAdapters && window.bupgogaeAdapters.initAdapters) {
     _adapter = await window.bupgogaeAdapters.initAdapters();

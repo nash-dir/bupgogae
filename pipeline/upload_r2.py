@@ -38,8 +38,15 @@ def get_r2_client():
     )
 
 
-def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None):
-    """db.json.gz를 R2에 업로드."""
+def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None,
+                    cache_control: str = "public, max-age=3600",
+                    content_encoding: str = "gzip"):
+    """파일을 R2에 업로드 (기본값은 gzip DB 업로드 동작 그대로).
+
+    cache_control / content_encoding을 덮어써 manifest.json처럼
+    비압축·no-cache로 게시해야 하는 파일도 같은 경로로 업로드한다.
+    content_encoding=None이면 ContentEncoding 헤더를 생략한다.
+    """
     if not os.path.exists(gz_path):
         log.error(f"❌ 파일 없음: {gz_path}")
         sys.exit(1)
@@ -60,14 +67,14 @@ def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None):
 
     client = get_r2_client()
 
-    client.upload_file(
-        gz_path, bucket, key,
-        ExtraArgs={
-            "ContentType": "application/json",
-            "ContentEncoding": "gzip",
-            "CacheControl": "public, max-age=3600",
-        },
-    )
+    extra_args = {
+        "ContentType": "application/json",
+        "CacheControl": cache_control,
+    }
+    if content_encoding:
+        extra_args["ContentEncoding"] = content_encoding
+
+    client.upload_file(gz_path, bucket, key, ExtraArgs=extra_args)
 
     log.info(f"  ✅ 업로드 완료: {key}")
 

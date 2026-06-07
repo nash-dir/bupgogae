@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git status)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git branch)",
+      "Bash(npm test)",
+      "Bash(npm run test:*)",
+      "Bash(npx jest *)",
+      "Bash(npx playwright test *)",
+      "Bash(python -m unittest *)",
+      "PowerShell(git status *)",
+      "PowerShell(git status)",
+      "PowerShell(git log *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git show *)",
+      "PowerShell(git branch)",
+      "PowerShell(npm test)",
+      "PowerShell(npm run test:*)",
+      "PowerShell(npx jest *)",
+      "PowerShell(npx playwright test *)",
+      "PowerShell(python -m unittest *)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(npm publish *)",
+      "PowerShell(git push *)",
+      "PowerShell(git reset --hard *)",
+      "PowerShell(npm publish *)"
+    ]
+  }
+}

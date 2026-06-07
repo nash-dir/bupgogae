@@ -728,6 +728,22 @@ def main():
         upload_db_to_r2(os.path.join(data_dir, "db_tax.json.gz"),
                         r2_key="bupgogae/db_tax.json.gz")
 
+        # Drift 안전망 manifest — 반드시 DB 업로드가 모두 끝난 뒤 마지막에
+        # 게시해야 "manifest는 최신인데 DB는 구버전"인 역전 레이스가 없다.
+        # 해시 대상 = 클라이언트가 받는 비압축 바이트 (_write_gzipped_json이
+        # 기록한 raw db.json / db_tax.json).
+        from manifest import build_manifest, write_manifest  # noqa: E402
+        with open(os.path.join(data_dir, "db.json"), "rb") as f:
+            core_bytes = f.read()
+        with open(os.path.join(data_dir, "db_tax.json"), "rb") as f:
+            tax_bytes = f.read()
+        manifest_path = os.path.join(data_dir, "manifest.json")
+        write_manifest(build_manifest(core_bytes, tax_bytes=tax_bytes),
+                       manifest_path)
+        upload_db_to_r2(manifest_path, r2_key="bupgogae/manifest.json",
+                        cache_control="no-cache, max-age=0",
+                        content_encoding=None)
+
     elapsed = (datetime.now() - now).total_seconds()
     minutes = int(elapsed // 60)
     seconds = int(elapsed % 60)

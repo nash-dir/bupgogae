@@ -9,6 +9,14 @@
  *   isValidCssSelector(s, maxLen)            → boolean
  *   sanitizeAdaptersConfig(config, opts)     → config (in-place 정제)
  *   validateDbIntegrity(data, opts)          → { ok, error?, keyCount? }
+ *
+ * 동기화 정책 함수 (0.8.0 "DB 2달 정체" 사고 재발 방지 — 명세는
+ * __tests__/sync-policy.test.js 헤더가 SSOT):
+ *   buildFetchPlan(local, nowMs, opts)       → { conditional, reasons }
+ *   shouldLoadBundled(bundledVersion, local) → { load, reason }
+ *   validateManifest(m)                      → { ok, error? }
+ *   evaluateDrift(manifest, local, nowMs, opts) → { action, reasons }
+ *   appendLedger(ledger, entry, max)         → 새 배열 (최신순, 불변)
  */
 (function (root) {
   'use strict';
@@ -136,7 +144,182 @@
     return { ok: true, keyCount };
   }
 
-  const api = { isValidCssSelector, sanitizeAdaptersConfig, validateDbIntegrity };
+  // ============================================================
+  // 동기화 정책 함수 (순수 판정 — db-sync.js는 결과만 따른다)
+  // ============================================================
+
+  const SHA256_HEX_REGEX = /^[0-9a-f]{64}$/;
+  const MAX_MANIFEST_TOTAL = 10_000_000; // 원격 manifest total 상한 (비정상 값 차단)
+
+  /**
+   * 조건부 요청(If-None-Match) 허용 여부 판정 — 304 가드 + 워치독.
+   * "로컬이 건강하고 최근 성공 이력이 있을 때"만 ETag를 신뢰한다.
+   * (etag↔IndexedDB 상태 불일치 시 304에 갇혀 빈 DB가 방치되는 트랩 방지)
+   *
+   * @param {{etag, lastSuccessAt, localVer, coreCount}} local
+   * @param {number} nowMs
+   * @param {{watchdogMs: number, minCoreKeys: number}} opts
+   * @returns {{conditional: boolean, reasons: string[]}}
+   */
+  function buildFetchPlan(local, nowMs, opts) {
+    const reasons = [];
+
+    if (!local || !local.etag) reasons.push('no_etag');
+    if (!local || !local.localVer) reasons.push('no_local_version');
+    if (!local || typeof local.coreCount !== 'number' || local.coreCount < opts.minCoreKeys) {
+      reasons.push('local_db_unhealthy');
+    }
+    if (!local || local.lastSuccessAt == null) {
+      reasons.push('no_success_record');
+    } else if (nowMs - local.lastSuccessAt >= opts.watchdogMs) {
+      reasons.push('watchdog_expired');
+    }
+
+    return { conditional: reasons.length === 0, reasons };
+  }
+
+  /**
+   * 번들 DB 폴백 허용 여부 판정 — 다운그레이드 절대 금지.
+   * "빈 DB를 채우거나 더 최신일 때"만 로드한다.
+   *
+   * @param {string} bundledVersion - 번들 DB의 version (YYYYMMDD 기대)
+   * @param {{localVer, coreCount}} local
+   * @returns {{load: boolean, reason: string}}
+   */
+  function shouldLoadBundled(bundledVersion, local) {
+    const coreCount = (local && typeof local.coreCount === 'number') ? local.coreCount : 0;
+    const localVer = local ? local.localVer : null;
+
+    if (coreCount <= 0) return { load: true, reason: 'local_empty' };
+    if (!localVer) return { load: true, reason: 'no_local_version' };
+
+    // YYYYMMDD 형식끼리만 비교 가능 — 형식 불량이면 "더 최신" 입증 불가 → 금지
+    if (!DEFAULT_VERSION_REGEX.test(String(bundledVersion)) ||
+        !DEFAULT_VERSION_REGEX.test(String(localVer))) {
+      return { load: false, reason: 'bundled_not_newer' };
+    }
+
+    return String(bundledVersion) > String(localVer)
+      ? { load: true, reason: 'bundled_newer' }
+      : { load: false, reason: 'bundled_not_newer' };
+  }
+
+  /**
+   * manifest 엔트리(core/tax 공용) 검증.
+   * @returns {string|null} 오류 메시지 (정상이면 null)
+   */
+  function validateManifestEntry(entry, label) {
+    if (!entry || typeof entry !== 'object') return `${label} 누락`;
+    if (typeof entry.version !== 'string' || !DEFAULT_VERSION_REGEX.test(entry.version)) {
+      return `${label}.version 형식 오류`;
+    }
+    if (typeof entry.sha256 !== 'string' || !SHA256_HEX_REGEX.test(entry.sha256)) {
+      return `${label}.sha256 형식 오류`;
+    }
+    if (!Number.isInteger(entry.total) || entry.total <= 0 || entry.total > MAX_MANIFEST_TOTAL) {
+      return `${label}.total 범위 오류`;
+    }
+    return null;
+  }
+
+  /**
+   * 원격 manifest 엄격 스키마 검증.
+   * 검증 실패한 manifest는 어떤 행동도 유발하면 안 된다 (fail-open).
+   *
+   * @param {Object} m
+   * @returns {{ok: boolean, error?: string}}
+   */
+  function validateManifest(m) {
+    if (!m || typeof m !== 'object') return { ok: false, error: 'manifest 없음' };
+    if (m.schema !== 1) return { ok: false, error: `지원하지 않는 schema: ${m.schema}` };
+    if (typeof m.built_at !== 'string' || !Number.isFinite(Date.parse(m.built_at))) {
+      return { ok: false, error: 'built_at 파싱 불가' };
+    }
+
+    const coreError = validateManifestEntry(m.core, 'core');
+    if (coreError) return { ok: false, error: coreError };
+
+    if (m.tax !== undefined) {
+      const taxError = validateManifestEntry(m.tax, 'tax');
+      if (taxError) return { ok: false, error: taxError };
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * 로컬 DB와 manifest 정답지의 드리프트 판정 + 자가치유 폭주 방지.
+   * 우선순위: backoff(strike 초과) > defer(grace window/미래 built_at)
+   *           > force_sync > none (local_ahead 포함 — 다운그레이드 동기화 금지).
+   *
+   * @param {Object} manifest - validateManifest를 통과한 manifest
+   * @param {{localVer, contentHash, coreCount, strikes}} local
+   * @param {number} nowMs
+   * @param {{graceMs: number, maxStrikes: number}} opts
+   * @returns {{action: 'none'|'defer'|'backoff'|'force_sync', reasons: string[]}}
+   */
+  function evaluateDrift(manifest, local, nowMs, opts) {
+    const remote = manifest.core;
+    const reasons = [];
+
+    const localVer = local && local.localVer ? String(local.localVer) : null;
+    if (!localVer) {
+      reasons.push('no_local_version');
+    } else if (localVer < remote.version) {
+      reasons.push('version_behind');
+    } else if (localVer > remote.version) {
+      // 게시 레이스: 클라이언트가 더 최신이면 절대 강제 동기화 금지
+      return { action: 'none', reasons: ['local_ahead'] };
+    } else {
+      // 같은 버전 — 내용물 대조 (해시 미기록이면 해시 검사 스킵)
+      if (local.contentHash && local.contentHash !== remote.sha256) {
+        reasons.push('hash_mismatch');
+      }
+      if (typeof local.coreCount === 'number' && local.coreCount !== remote.total) {
+        reasons.push('count_mismatch');
+      }
+    }
+
+    if (reasons.length === 0) return { action: 'none', reasons: [] };
+
+    // 드리프트가 있어도 strike 한도에 도달하면 자가치유 중단 (폭주 방지)
+    if (((local && local.strikes) || 0) >= opts.maxStrikes) {
+      return { action: 'backoff', reasons };
+    }
+
+    // 갓 게시된 manifest는 CDN 전파 대기, 미래 built_at은 시계 스큐 의심
+    const builtAtMs = Date.parse(manifest.built_at);
+    if (Number.isFinite(builtAtMs)) {
+      if (builtAtMs > nowMs) return { action: 'defer', reasons: [...reasons, 'built_at_future'] };
+      if (nowMs - builtAtMs < opts.graceMs) return { action: 'defer', reasons: [...reasons, 'grace_window'] };
+    }
+
+    return { action: 'force_sync', reasons };
+  }
+
+  /**
+   * 동기화 시도 원장에 엔트리 추가 (최신순, max 초과분 절삭, 입력 불변).
+   *
+   * @param {Array|undefined} ledger - 기존 원장 (비배열이면 빈 원장 취급)
+   * @param {Object} entry
+   * @param {number} max
+   * @returns {Array} 새 배열
+   */
+  function appendLedger(ledger, entry, max) {
+    const base = Array.isArray(ledger) ? ledger : [];
+    return [entry, ...base].slice(0, max);
+  }
+
+  const api = {
+    isValidCssSelector,
+    sanitizeAdaptersConfig,
+    validateDbIntegrity,
+    buildFetchPlan,
+    shouldLoadBundled,
+    validateManifest,
+    evaluateDrift,
+    appendLedger,
+  };
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;          // 단위 테스트 (Node)

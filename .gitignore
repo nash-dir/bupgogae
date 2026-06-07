@@ -45,6 +45,10 @@ report/
 
 # ===== 테스트 스냅샷 및 캐시 =====
 test/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
 .pytest_cache/
 .coverage
 htmlcov/
@@ -80,3 +84,5 @@ build/
 # ===== 에이전트 설정 =====
 AGENTS.md
 .agents/*
+# Claude Code 개인 로컬 설정 (공용 .claude/settings.json은 추적)
+.claude/settings.local.json

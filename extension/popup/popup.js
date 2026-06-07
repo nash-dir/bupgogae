@@ -286,10 +286,15 @@ function bindEvents() {
     $dbRefreshBtn.classList.add('spinning');
     chrome.runtime.sendMessage({ type: 'FORCE_SYNC' }, async (response) => {
       $dbRefreshBtn.classList.remove('spinning');
+      // SW 응답 채널 오류 (SW 미기동/메시지 유실 등) — 침묵하지 않고 알린다
+      if (chrome.runtime.lastError) {
+        alert('동기화 실패: ' + chrome.runtime.lastError.message);
+        return;
+      }
       if (response && response.success) {
         await loadSyncDate(); // UI 갱신 (DB 날짜/건수)
       } else {
-        alert('동기화 실패: ' + (response?.error || '알 수 없는 오류'));
+        alert('동기화 실패: ' + (response?.outcome || response?.error || '알 수 없는 오류'));
       }
     });
   });

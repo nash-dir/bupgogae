@@ -15,6 +15,10 @@
  *   4. 동기화 실패 시 빈 DB로 시작, 다음 알람에서 재시도
  */
 
+// 순수 검증·정제 유틸 로드 (테스트 가능한 무부수효과 로직).
+// isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity를 전역에 제공.
+importScripts('sync-utils.js');
+
 // ============================================================
 // 상수
 // ============================================================
@@ -40,26 +44,8 @@ const MIN_KEYS_CORE = 100_000;       // Core DB 최소 키 수 (미달 시 파�
 const MIN_KEYS_TAX_DLC = 30_000;     // 조세 DLC 최소 키 수
 const VERSION_REGEX = /^\d{8}$/;     // version 형식: YYYYMMDD
 
-/**
- * CSS 셀렉터 화이트리스트 검증.
- * 원격 어댑터 설정(adapters.json)에서 받은 셀렉터가
- * querySelectorAll()에 안전한지 검증한다.
- *
- * 블랙리스트만으로는 우회 벡터가 다수 존재하므로,
- * 금지 패턴 차단 + 허용 문자 화이트리스트를 조합.
- *
- * @param {string} s - 검증할 CSS 셀렉터 문자열
- * @returns {boolean} 안전하면 true
- */
-function isValidCssSelector(s) {
-  if (typeof s !== 'string' || s.length === 0 || s.length > MAX_SELECTOR_LENGTH) return false;
-  // 금지 패턴 차단
-  const DANGEROUS = [':has(', 'url(', '@import', 'expression(', 'javascript:'];
-  const lower = s.toLowerCase();
-  if (DANGEROUS.some(p => lower.includes(p))) return false;
-  // 허용 문자만 통과 (CSS 셀렉터에 사용되는 안전한 문자 집합)
-  return /^[a-zA-Z0-9\-_.*#>+~:=\[\]"\\,\s()]+$/.test(s);
-}
+// isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity는
+// sync-utils.js(importScripts)에서 전역으로 제공됨.
 
 // ============================================================
 // 1. IndexedDB Promise 래퍼
@@ -315,36 +301,15 @@ async function syncDatabase() {
       return;
     }
 
-    // ── 무결성 게이트 ──
-    // 1. 키 수 하한선
-    const keyCount = Object.keys(data.cases).length;
-    if (keyCount < MIN_KEYS_CORE) {
-      throw new Error(`DB 무결성 검증 실패: 키 수 ${keyCount.toLocaleString()} < 하한 ${MIN_KEYS_CORE.toLocaleString()}`);
+    // ── 무결성 게이트 (sync-utils.validateDbIntegrity) ──
+    const integrity = validateDbIntegrity(data, {
+      minKeys: MIN_KEYS_CORE,
+      versionRegex: VERSION_REGEX,
+    });
+    if (!integrity.ok) {
+      throw new Error(`DB 무결성 검증 실패: ${integrity.error}`);
     }
-    // 2. version 형식 (YYYYMMDD)
-    if (data.version && !VERSION_REGEX.test(String(data.version))) {
-      throw new Error(`DB 무결성 검증 실패: version 형식 오류 '${data.version}'`);
-    }
-    // 3. total 필드 정합성 (존재하면 키 수와 일치해야 함)
-    if (data.total && data.total !== keyCount) {
-      throw new Error(`DB 무결성 검증 실패: total(${data.total}) ≠ keys(${keyCount})`);
-    }
-    // 4. 레코드 구조 샘플 검증 — 랜덤 5건이 [[serial, ...], ...] 형태인지
-    const sampleKeys = Object.keys(data.cases);
-    const sampleSize = Math.min(5, sampleKeys.length);
-    for (let i = 0; i < sampleSize; i++) {
-      const idx = Math.floor(Math.random() * sampleKeys.length);
-      const key = sampleKeys[idx];
-      const val = data.cases[key];
-      if (!Array.isArray(val) || val.length === 0) {
-        throw new Error(`DB 스키마 검증 실패: cases["${key}"]가 비어있거나 배열이 아님`);
-      }
-      for (const entry of val) {
-        if (!Array.isArray(entry) || entry.length < 1) {
-          throw new Error(`DB 스키마 검증 실패: cases["${key}"] 엔트리 형식 불량`);
-        }
-      }
-    }
+    const keyCount = integrity.keyCount;
     console.log(`[bupgogae] 무결성 검증 통과: ${keyCount.toLocaleString()}건, ver=${data.version}`);
 
     // ── Step 3: IndexedDB 교체 (DLC 키 보존) ──
@@ -421,42 +386,11 @@ async function fetchAdaptersConfig() {
       return;
     }
 
-    // 🚨 보안 검증 (Sanitization) — 화이트리스트 기반
-    for (const [siteId, siteConfig] of Object.entries(config.adapters)) {
-      if (siteConfig.responseSelectors) {
-        let selectors = siteConfig.responseSelectors;
-        if (Array.isArray(selectors)) {
-          // 1. 배열 크기 제한
-          selectors = selectors.slice(0, MAX_SELECTORS_PER_SITE);
-          
-          // 2. 화이트리스트 검증
-          selectors = selectors.filter(s => isValidCssSelector(s));
-
-          config.adapters[siteId].responseSelectors = selectors;
-        } else {
-          console.warn(`[bupgogae] ${siteId}: responseSelectors가 배열이 아님 — 무시`);
-          delete config.adapters[siteId].responseSelectors;
-        }
-      }
-
-      // streamingIndicator 검증 (화이트리스트 동일 적용)
-      if (siteConfig.streamingIndicator) {
-        if (!isValidCssSelector(siteConfig.streamingIndicator)) {
-          delete config.adapters[siteId].streamingIndicator;
-        }
-      }
-    }
-
-    // scraping_adapters 검증
-    if (config.scraping_adapters && typeof config.scraping_adapters === 'object') {
-      for (const [siteId, selObj] of Object.entries(config.scraping_adapters)) {
-        for (const [key, val] of Object.entries(selObj)) {
-          if (!isValidCssSelector(val)) {
-             delete selObj[key];
-          }
-        }
-      }
-    }
+    // 🚨 보안 검증 (Sanitization) — 화이트리스트 기반 (sync-utils)
+    sanitizeAdaptersConfig(config, {
+      maxPerSite: MAX_SELECTORS_PER_SITE,
+      maxLen: MAX_SELECTOR_LENGTH,
+    });
 
     await chrome.storage.local.set({ bupgogae_remote_adapters: config });
     console.log(`[bupgogae] ✅ 어댑터 원격 설정 저장 완료 (ver=${config.version || '?'})`);

@@ -3,15 +3,17 @@
  * ========================================================
  * MV3 확장프로그램 테스트를 위한 픽스쳐 모음.
  *
- *   context     — 확장프로그램이 강제 로드된 Persistent Context.
- *                 외부 네트워크(R2 동기화, 법제처)는 기본적으로 모킹되어
- *                 테스트가 인터넷 없이도(hermetic) 돌아간다.
- *   extensionId — 백그라운드 Service Worker URL에서 동적으로 추출한 확장 ID.
- *   viewerPage  — chrome-extension://<ID>/viewer/viewer.html 로 이동을 마친 Page.
+ *   context       — 확장프로그램이 강제 로드된 Persistent Context.
+ *                   외부 네트워크(R2 동기화, 법제처)는 기본적으로 모킹되어
+ *                   테스트가 인터넷 없이도(hermetic) 돌아간다.
+ *   extensionId   — 백그라운드 Service Worker URL에서 동적으로 추출한 확장 ID.
+ *   extensionPage — 확장 오리진의 정적 페이지(privacy.html)로 이동을 마친 Page.
+ *                   chrome.runtime 메시지를 SW로 보내는 구동용 (페이지 자체
+ *                   스크립트가 없어 부수효과 없이 깨끗하다).
  *
  * 사용 예:
  *   const { test, expect } = require('./fixtures');
- *   test('...', async ({ viewerPage }) => { ... });
+ *   test('...', async ({ extensionPage }) => { ... });
  */
 
 // Service Worker가 보내는 fetch를 context.route()로 가로채기 위한 실험 플래그.
@@ -32,7 +34,7 @@ const EXTENSION_PATH = path.resolve(__dirname, '..', 'extension');
 
 /**
  * 판례 검색 결과 페이지 모의 HTML.
- * viewer.js의 fetchCaseDetail()이 파싱하는 셀렉터(.contsList .conts_list_title a)와
+ * 법제처 검색 결과를 파싱하는 클라이언트 셀렉터(.contsList .conts_list_title a)와
  * href 패턴(javascript:showPrec('NNNN'))을 그대로 재현한다.
  * @param {string} precSeq - 판례 일련번호
  * @param {string} title   - 검색 결과 제목
@@ -49,7 +51,7 @@ function buildSearchResultHtml(precSeq = '235282', title = '대법원 판결') {
 
 /**
  * 판례 상세 페이지 모의 HTML.
- * viewer.js의 fetchRealCaseDetail()이 파싱하는 #conScroll 컨테이너를 재현.
+ * 법제처 상세 페이지의 #conScroll 컨테이너 구조를 재현.
  * @param {string} bodyText - 판례 본문 텍스트
  */
 function buildPrecDetailHtml(bodyText = '모의 판례 본문입니다.') {
@@ -137,11 +139,13 @@ const test = base.extend({
   },
 
   /**
-   * Intelligent Document Reader(viewer.html)로 이동을 마친 Page.
+   * 확장 오리진의 정적 페이지로 이동을 마친 Page.
+   * SW에 chrome.runtime.sendMessage를 보내는 구동용 — privacy.html은
+   * 자체 스크립트가 없어 테스트에 부수효과를 만들지 않는다.
    */
-  viewerPage: async ({ context, extensionId }, use) => {
+  extensionPage: async ({ context, extensionId }, use) => {
     const page = await context.newPage();
-    await page.goto(`chrome-extension://${extensionId}/viewer/viewer.html`);
+    await page.goto(`chrome-extension://${extensionId}/privacy.html`);
     await page.waitForLoadState('domcontentloaded');
     await use(page);
   },

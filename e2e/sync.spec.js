@@ -162,7 +162,7 @@ function verifyFreshness(page, opts = {}) {
 // S1-1. 304 가드 — ETag↔IndexedDB 상태 불일치 자가 복구
 // ============================================================
 
-test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구한다', async ({ context, viewerPage }) => {
+test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구한다', async ({ context, extensionPage }) => {
   await mockBupApi(context, {
     // 조건부 요청이면 304 (서버 입장에선 "etag 기준 변경 없음"이 사실)
     onDb: (route, req) => {
@@ -179,7 +179,7 @@ test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구�
   const sw = await getBackground(context);
 
   // ── 1차 동기화: 정상 수신 → etag 저장 ──
-  await forceSync(viewerPage);
+  await forceSync(extensionPage);
   let state = await readLocalState(sw);
   expect(state.localVer).toBe(VER_V1);
   expect(state.caseCount).toBeGreaterThanOrEqual(100_000);
@@ -190,7 +190,7 @@ test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구�
   expect((await readLocalState(sw)).caseCount).toBe(0);
 
   // ── 2차 동기화: 현재 구현은 etag→304→스킵으로 빈 DB 방치, 목표 구현은 전체 복구 ──
-  await forceSync(viewerPage);
+  await forceSync(extensionPage);
   state = await readLocalState(sw);
   expect(state.caseCount).toBeGreaterThanOrEqual(100_000);
   expect(state.localVer).toBe(VER_V1);
@@ -200,7 +200,7 @@ test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구�
 // S1-2. 워치독 — 48시간 무성공 시 ETag 무시
 // ============================================================
 
-test('S1-2: 마지막 성공이 48시간을 넘기면 ETag를 무시하고 최신 DB를 받는다', async ({ context, viewerPage }) => {
+test('S1-2: 마지막 성공이 48시간을 넘기면 ETag를 무시하고 최신 DB를 받는다', async ({ context, extensionPage }) => {
   const served = { version: VER_V1, body: PAYLOAD_V1 };
   await mockBupApi(context, {
     // "낡은 엣지 캐시" 시뮬레이션: 조건부 요청에는 영원히 304
@@ -218,7 +218,7 @@ test('S1-2: 마지막 성공이 48시간을 넘기면 ETag를 무시하고 최�
   const sw = await getBackground(context);
 
   // 1차 동기화 성공 (v1)
-  await forceSync(viewerPage);
+  await forceSync(extensionPage);
   expect((await readLocalState(sw)).localVer).toBe(VER_V1);
 
   // 마지막 성공을 3일 전으로 조작 + 서버는 v2로 갱신됨
@@ -227,7 +227,7 @@ test('S1-2: 마지막 성공이 48시간을 넘기면 ETag를 무시하고 최�
   served.body = PAYLOAD_V2;
 
   // 2차 동기화: 현재 구현은 etag 동봉→304→정체, 목표 구현은 워치독이 무조건 fetch
-  await forceSync(viewerPage);
+  await forceSync(extensionPage);
   expect((await readLocalState(sw)).localVer).toBe(VER_V2);
 });
 
@@ -235,7 +235,7 @@ test('S1-2: 마지막 성공이 48시간을 넘기면 ETag를 무시하고 최�
 // S1-3. 번들 폴백 다운그레이드 금지
 // ============================================================
 
-test('S1-3: 동기화 실패가 최신 로컬 DB를 구버전 번들로 롤백하지 않는다', async ({ context, viewerPage }) => {
+test('S1-3: 동기화 실패가 최신 로컬 DB를 구버전 번들로 롤백하지 않는다', async ({ context, extensionPage }) => {
   const mode = { fail: false };
   await mockBupApi(context, {
     onDb: (route) => {
@@ -250,12 +250,12 @@ test('S1-3: 동기화 실패가 최신 로컬 DB를 구버전 번들로 롤백�
   const sw = await getBackground(context);
 
   // 1차 동기화 성공: 로컬은 VER_V1(2099년) — 번들 DB보다 항상 최신
-  await forceSync(viewerPage);
+  await forceSync(extensionPage);
   expect((await readLocalState(sw)).localVer).toBe(VER_V1);
 
   // 서버 장애 시작 → 동기화 실패
   mode.fail = true;
-  await forceSync(viewerPage);
+  await forceSync(extensionPage);
 
   // 현재 구현: 번들 폴백이 local_ver를 20260321로 롤백 + 데이터 92k건으로 격하
   // 목표 구현: 실패는 실패로 남기고 로컬 데이터는 보존
@@ -268,13 +268,13 @@ test('S1-3: 동기화 실패가 최신 로컬 DB를 구버전 번들로 롤백�
 // S1-4 + S1-5. 정직한 실패 보고 + 동기화 원장
 // ============================================================
 
-test('S1-4/5: FORCE_SYNC 실패는 success:false와 원장 기록을 남긴다', async ({ context, viewerPage }) => {
+test('S1-4/5: FORCE_SYNC 실패는 success:false와 원장 기록을 남긴다', async ({ context, extensionPage }) => {
   await mockBupApi(context, {
     onDb: (route) => route.fulfill({ status: 500, body: 'server error' }),
   });
   const sw = await getBackground(context);
 
-  const response = await forceSync(viewerPage);
+  const response = await forceSync(extensionPage);
 
   // 현재 구현은 어떤 실패든 {success:true}로 보고한다 — 이 침묵이 사고를 숨겼다
   expect(response).not.toBeNull();
@@ -338,7 +338,7 @@ test('S1-5b: 팝업의 동기화 이력 섹션이 원장을 렌더링한다', as
 // S1-6. 수신 바이트 해시 + 성공 시각 기록 (drift 대조의 기준값)
 // ============================================================
 
-test('S1-6: 동기화 성공 시 수신 바이트의 SHA-256과 성공 시각을 기록한다', async ({ context, viewerPage }) => {
+test('S1-6: 동기화 성공 시 수신 바이트의 SHA-256과 성공 시각을 기록한다', async ({ context, extensionPage }) => {
   await mockBupApi(context, {
     onDb: (route) => route.fulfill({
       contentType: 'application/json',
@@ -349,7 +349,7 @@ test('S1-6: 동기화 성공 시 수신 바이트의 SHA-256과 성공 시각을
   const sw = await getBackground(context);
 
   const before = Date.now();
-  await forceSync(viewerPage);
+  await forceSync(extensionPage);
 
   const state = await readLocalState(sw);
   expect(state.contentHash).toBe(sha256(PAYLOAD_V1));
@@ -361,7 +361,7 @@ test('S1-6: 동기화 성공 시 수신 바이트의 SHA-256과 성공 시각을
 // S2-1. Drift 안전망 — manifest 대조 → 캐시 버스터 강제 치유
 // ============================================================
 
-test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동기화해 치유한다', async ({ context, viewerPage }) => {
+test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동기화해 치유한다', async ({ context, extensionPage }) => {
   const dbRequests = [];
   const manifestState = { body: null };
 
@@ -394,7 +394,7 @@ test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동
   const sw = await getBackground(context);
 
   // 1차 동기화: v1 (etag 저장됨)
-  await forceSync(viewerPage);
+  await forceSync(extensionPage);
   expect((await readLocalState(sw)).localVer).toBe(VER_V1);
 
   // 서버에 v2 manifest 게시 (built_at은 grace window를 지난 24시간 전)
@@ -405,7 +405,7 @@ test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동
   });
 
   // 신선도 검사 발화 — 현재 구현은 이 메시지 타입 자체가 없다
-  const result = await verifyFreshness(viewerPage, { force: true });
+  const result = await verifyFreshness(extensionPage, { force: true });
   expect(result).not.toBeNull();
   expect(result.checked).toBe(true);
   expect(result.drift).toBe(true);

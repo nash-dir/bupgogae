@@ -1,15 +1,18 @@
 # 법고개 E2E 테스트 (Playwright)
 
 Chrome Extension(MV3) 전체를 실제 Chromium에 로드하여
-Intelligent Document Reader(`viewer.html`)의 핵심 플로우를 검증한다.
+DB 동기화 견고성·Drift 안전망의 핵심 플로우를 검증한다.
 
 ## 구성
 
 | 파일 | 역할 |
 | --- | --- |
 | `playwright.config.js` (루트) | E2E 전용 설정 — SW 네트워크 인터셉트 플래그, 워커 1개 고정, CI에서만 headless |
-| `e2e/fixtures.js` | 커스텀 픽스쳐: 확장 로드된 Persistent Context / 동적 `extensionId` / `viewerPage` + 법제처·R2 모킹 |
-| `e2e/viewer.spec.js` | 시나리오 6종 (초기 렌더링, 업로드·파싱, 드래그&드롭, 칩 클릭→법제처 조회, 초기화) |
+| `e2e/fixtures.js` | 커스텀 픽스쳐: 확장 로드된 Persistent Context / 동적 `extensionId` / `extensionPage` + 법제처·R2 모킹 |
+| `e2e/sync.spec.js` | 동기화 견고성 + drift 안전망 시나리오 9종 (304 가드, 워치독, 다운그레이드 금지, 정직한 결과, 원장, 해시 기록, 드리프트 치유, 진입 트리거) |
+
+> Intelligent Document Reader(viewer)와 그 스펙(`viewer.spec.js`)은 0.9.0으로
+> 보류됨 — 복원은 보류 커밋의 `git revert`로 한다.
 
 ## 설치 (최초 1회)
 
@@ -42,11 +45,11 @@ npx playwright test --grep "칩 클릭"   # 특정 테스트만 실행
    (구 headless는 미지원). 로컬 기본은 headed, `CI` 환경변수 설정 시 headless.
 3. **동적 확장 ID** — MV3에는 `backgroundPage`가 없으므로 `context.serviceWorkers()` /
    `waitForEvent('serviceworker')`로 백그라운드 SW를 찾아 URL에서 ID를 추출한다.
-4. **Service Worker 네트워크 모킹** — 법제처 조회(`FETCH_LAW_HTML`)는 viewer가 아니라
+4. **Service Worker 네트워크 모킹** — 법제처 조회(`FETCH_LAW_HTML`)와 R2 동기화는
    백그라운드 SW(`db-sync.js`)가 fetch한다. SW의 요청을 `context.route()`로 가로채려면
    `PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS=1`이 필요하며, 이는
    `playwright.config.js` / `fixtures.js`가 자동 설정한다. `page.route()`는 SW 요청을 잡지 못한다.
-5. **Hermetic 기본 모킹** — 픽스쳐가 기본으로 `api.bup.live`(R2 동기화)는 abort,
+5. **Hermetic 기본 모킹** — 픽스쳐가 기본으로 `api.bup.live`(R2 동기화)는 영구 보류(hold),
    `www.law.go.kr`는 모의 검색/상세 HTML로 fulfill한다. 테스트에서 `context.route()`를
    다시 등록하면 그 핸들러가 우선한다(나중 등록 우선) — 칩 클릭 테스트가 이 방식으로
    요청 URL 감시 + 지연 응답을 구현한다.
@@ -57,5 +60,5 @@ npx playwright test --grep "칩 클릭"   # 특정 테스트만 실행
   빠져나갈 수 있다. 테스트는 동기화 결과(verified/unverified 칩 색상)에 의존하지 않도록 작성되어 있다.
 - 새 테스트에서 법제처 응답을 커스텀하려면 `fixtures.js`의
   `buildSearchResultHtml()` / `buildPrecDetailHtml()` 빌더를 재사용할 것 —
-  viewer가 파싱하는 셀렉터(`.contsList .conts_list_title a`, `#conScroll`)를 보장한다.
+  클라이언트가 파싱하는 셀렉터(`.contsList .conts_list_title a`, `#conScroll`)를 보장한다.
 - 실패 시 `playwright-report/`에 트레이스·스크린샷이 남는다 (`npm run test:e2e:report`).

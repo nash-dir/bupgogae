@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 법고개(Bupgogae) — DB 동기화 견고성 & Drift 안전망 E2E 명세 (SDD/TDD)
  * ========================================================================
  * 0.8.0 "DB 2달 정체" 사고(재설치만으로 복구, 새로고침 무력)의 재발 방지 명세.
@@ -41,8 +41,13 @@ function buildDbPayload(version, keyCount = 100_500) {
 
 const sha256 = (s) => createHash('sha256').update(s, 'utf-8').digest('hex');
 
-const PAYLOAD_V1 = buildDbPayload('20260601');
-const PAYLOAD_V2 = buildDbPayload('20260607');
+// 모의 버전은 번들 DB(extension/data/db.json — 릴리스마다 갱신됨)보다 항상
+// 미래여야 한다. S1-3의 "로컬이 번들보다 최신" 전제가 번들 갱신으로 무너지면
+// 테스트가 시간이 지나며 거짓 실패하므로 먼 미래(2099년)로 고정한다.
+const VER_V1 = '20990601';
+const VER_V2 = '20990607';
+const PAYLOAD_V1 = buildDbPayload(VER_V1);
+const PAYLOAD_V2 = buildDbPayload(VER_V2);
 
 /**
  * api.bup.live 모의 라우트 설치.
@@ -176,7 +181,7 @@ test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구�
   // ── 1차 동기화: 정상 수신 → etag 저장 ──
   await forceSync(viewerPage);
   let state = await readLocalState(sw);
-  expect(state.localVer).toBe('20260601');
+  expect(state.localVer).toBe(VER_V1);
   expect(state.caseCount).toBeGreaterThanOrEqual(100_000);
   expect(state.etag).toBe('"sync-e1"');
 
@@ -188,7 +193,7 @@ test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구�
   await forceSync(viewerPage);
   state = await readLocalState(sw);
   expect(state.caseCount).toBeGreaterThanOrEqual(100_000);
-  expect(state.localVer).toBe('20260601');
+  expect(state.localVer).toBe(VER_V1);
 });
 
 // ============================================================
@@ -196,7 +201,7 @@ test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구�
 // ============================================================
 
 test('S1-2: 마지막 성공이 48시간을 넘기면 ETag를 무시하고 최신 DB를 받는다', async ({ context, viewerPage }) => {
-  const served = { version: '20260601', body: PAYLOAD_V1 };
+  const served = { version: VER_V1, body: PAYLOAD_V1 };
   await mockBupApi(context, {
     // "낡은 엣지 캐시" 시뮬레이션: 조건부 요청에는 영원히 304
     onDb: (route, req) => {
@@ -214,16 +219,16 @@ test('S1-2: 마지막 성공이 48시간을 넘기면 ETag를 무시하고 최�
 
   // 1차 동기화 성공 (v1)
   await forceSync(viewerPage);
-  expect((await readLocalState(sw)).localVer).toBe('20260601');
+  expect((await readLocalState(sw)).localVer).toBe(VER_V1);
 
   // 마지막 성공을 3일 전으로 조작 + 서버는 v2로 갱신됨
   await backdateLastSuccess(sw, Date.now() - 72 * 3600 * 1000);
-  served.version = '20260607';
+  served.version = VER_V2;
   served.body = PAYLOAD_V2;
 
   // 2차 동기화: 현재 구현은 etag 동봉→304→정체, 목표 구현은 워치독이 무조건 fetch
   await forceSync(viewerPage);
-  expect((await readLocalState(sw)).localVer).toBe('20260607');
+  expect((await readLocalState(sw)).localVer).toBe(VER_V2);
 });
 
 // ============================================================
@@ -244,9 +249,9 @@ test('S1-3: 동기화 실패가 최신 로컬 DB를 구버전 번들로 롤백�
   });
   const sw = await getBackground(context);
 
-  // 1차 동기화 성공: 로컬은 20260601 (번들 20260321보다 최신)
+  // 1차 동기화 성공: 로컬은 VER_V1(2099년) — 번들 DB보다 항상 최신
   await forceSync(viewerPage);
-  expect((await readLocalState(sw)).localVer).toBe('20260601');
+  expect((await readLocalState(sw)).localVer).toBe(VER_V1);
 
   // 서버 장애 시작 → 동기화 실패
   mode.fail = true;
@@ -255,7 +260,7 @@ test('S1-3: 동기화 실패가 최신 로컬 DB를 구버전 번들로 롤백�
   // 현재 구현: 번들 폴백이 local_ver를 20260321로 롤백 + 데이터 92k건으로 격하
   // 목표 구현: 실패는 실패로 남기고 로컬 데이터는 보존
   const state = await readLocalState(sw);
-  expect(state.localVer).toBe('20260601');
+  expect(state.localVer).toBe(VER_V1);
   expect(state.caseCount).toBeGreaterThanOrEqual(100_000);
 });
 
@@ -298,6 +303,35 @@ test('S1-4: 팝업 새로고침 버튼은 동기화 실패를 사용자에게 �
   const dialog = await dialogPromise; // 현재 구현: success:true → alert 없음 → 타임아웃
   expect(dialog.message()).toContain('동기화 실패');
   await dialog.dismiss();
+});
+
+// ============================================================
+// S1-5b. 팝업 동기화 이력 — 원장 가시화 (현장 진단용 UI)
+// ============================================================
+
+test('S1-5b: 팝업의 동기화 이력 섹션이 원장을 렌더링한다', async ({ context, extensionId }) => {
+  // mockBupApi를 등록하지 않는다 — fixture의 hold가 설치 동기화를 잠재워
+  // 시드한 원장에 실제 동기화 엔트리가 끼어드는 레이스를 차단한다.
+  const sw = await getBackground(context);
+
+  // 원장 시드 (렌더링 검증이 목적 — 기록 자체의 정확성은 S1-4/5가 검증)
+  await sw.evaluate(() => chrome.storage.local.set({
+    bupgogae_sync_ledger: [
+      { ts: Date.now(), trigger: 'force', outcome: 'fetch_failed', reason: 'HTTP 500', durationMs: 6500 },
+      { ts: Date.now() - 3600_000, trigger: 'alarm', outcome: 'replaced', version: '20990601', durationMs: 4200 },
+    ],
+  }));
+
+  const popupPage = await context.newPage();
+  await popupPage.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+
+  await popupPage.locator('#ledgerToggleBtn').click();
+  const rows = popupPage.locator('#ledgerList li');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('force');
+  await expect(rows.nth(0)).toContainText('다운로드 실패');
+  await expect(rows.nth(1)).toContainText('alarm');
+  await expect(rows.nth(1)).toContainText('교체 완료');
 });
 
 // ============================================================
@@ -361,13 +395,13 @@ test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동
 
   // 1차 동기화: v1 (etag 저장됨)
   await forceSync(viewerPage);
-  expect((await readLocalState(sw)).localVer).toBe('20260601');
+  expect((await readLocalState(sw)).localVer).toBe(VER_V1);
 
   // 서버에 v2 manifest 게시 (built_at은 grace window를 지난 24시간 전)
   manifestState.body = JSON.stringify({
     schema: 1,
     built_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-    core: { version: '20260607', sha256: sha256(PAYLOAD_V2), total: 100_500 },
+    core: { version: VER_V2, sha256: sha256(PAYLOAD_V2), total: 100_500 },
   });
 
   // 신선도 검사 발화 — 현재 구현은 이 메시지 타입 자체가 없다
@@ -380,7 +414,7 @@ test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동
 
   // 치유 결과: 최신 버전 + 해시 일치
   const state = await readLocalState(sw);
-  expect(state.localVer).toBe('20260607');
+  expect(state.localVer).toBe(VER_V2);
   expect(state.contentHash).toBe(sha256(PAYLOAD_V2));
 
   // 치유 fetch는 캐시 버스터를 사용했어야 한다

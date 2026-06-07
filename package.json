@@ -1,6 +1,6 @@
 {
   "name": "bupgogae-extension",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Bupgogae Extension Tests",
   "scripts": {
     "test": "jest",

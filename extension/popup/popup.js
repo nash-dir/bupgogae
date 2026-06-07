@@ -31,6 +31,12 @@ const $dlcBody = document.getElementById('dlcBody');
 const $taxDlcToggle = document.getElementById('taxDlcToggle');
 const $taxDlcDesc = document.getElementById('taxDlcDesc');
 
+// 동기화 이력 (ledger)
+const $ledgerToggleBtn = document.getElementById('ledgerToggleBtn');
+const $ledgerArrow = document.getElementById('ledgerArrow');
+const $ledgerBody = document.getElementById('ledgerBody');
+const $ledgerList = document.getElementById('ledgerList');
+
 const $courtFilterToggle = document.getElementById('courtFilterToggle');
 const $courtFilterDesc = document.getElementById('courtFilterDesc');
 const $constitutionalFilterToggle = document.getElementById('constitutionalFilterToggle');
@@ -305,6 +311,14 @@ function bindEvents() {
     $dlcArrow.classList.toggle('open');
   });
 
+  // 동기화 이력 accordion — 펼칠 때마다 최신 원장으로 갱신
+  $ledgerToggleBtn.addEventListener('click', async () => {
+    const opening = !$ledgerBody.classList.contains('open');
+    $ledgerBody.classList.toggle('open');
+    $ledgerArrow.classList.toggle('open');
+    if (opening) await renderSyncLedger();
+  });
+
   // 법원 필터 토글
   $courtFilterToggle.addEventListener('change', async () => {
     _filterCourt = $courtFilterToggle.checked;
@@ -385,6 +399,74 @@ async function onGlobalToggle() {
   updateStatusText();
   await updateIconBadge();
   await notifyContentScript();
+}
+
+// ============================================================
+// 5-1. 동기화 이력 (sync ledger) 렌더링
+// ============================================================
+
+/** outcome → 한국어 라벨 + 성공/실패 분류 */
+const LEDGER_OUTCOME_LABELS = {
+  replaced:         { label: '교체 완료',   ok: true },
+  not_modified:     { label: '변경 없음',   ok: true },
+  fetch_failed:     { label: '다운로드 실패', ok: false },
+  invalid_payload:  { label: '응답 불량',   ok: false },
+  integrity_failed: { label: '무결성 실패', ok: false },
+  db_error:         { label: 'DB 오류',     ok: false },
+};
+
+/**
+ * storage의 bupgogae_sync_ledger를 읽어 목록으로 렌더링.
+ * 현장 진단용: 사용자 스크린샷 한 장으로 최근 동기화 20회의 흐름을 파악한다.
+ */
+async function renderSyncLedger() {
+  let ledger = [];
+  try {
+    const data = await chrome.storage.local.get('bupgogae_sync_ledger');
+    if (Array.isArray(data.bupgogae_sync_ledger)) {
+      ledger = data.bupgogae_sync_ledger;
+    }
+  } catch (err) {
+    console.warn('[popup] 동기화 이력 로드 실패:', err);
+  }
+
+  $ledgerList.textContent = ''; // 기존 행 제거 (innerHTML 미사용 — CSP 위생)
+
+  if (ledger.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'popup-ledger-empty';
+    li.textContent = '기록 없음';
+    $ledgerList.appendChild(li);
+    return;
+  }
+
+  for (const entry of ledger) {
+    const li = document.createElement('li');
+
+    const time = document.createElement('span');
+    time.className = 'popup-ledger-time';
+    const d = new Date(entry.ts);
+    time.textContent = `${d.getMonth() + 1}/${d.getDate()} ` +
+      `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+    const trigger = document.createElement('span');
+    trigger.className = 'popup-ledger-trigger';
+    trigger.textContent = entry.trigger || '?';
+
+    const outcome = document.createElement('span');
+    const meta = LEDGER_OUTCOME_LABELS[entry.outcome] || { label: entry.outcome || '?', ok: false };
+    outcome.className = `popup-ledger-outcome ${meta.ok ? 'ok' : 'fail'}`;
+    outcome.textContent = meta.label;
+
+    const duration = document.createElement('span');
+    duration.className = 'popup-ledger-duration';
+    duration.textContent = typeof entry.durationMs === 'number'
+      ? `${(entry.durationMs / 1000).toFixed(1)}s`
+      : '';
+
+    li.append(time, trigger, outcome, duration);
+    $ledgerList.appendChild(li);
+  }
 }
 
 // ============================================================

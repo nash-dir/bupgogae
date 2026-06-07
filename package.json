@@ -4,6 +4,7 @@
   "description": "Bupgogae Extension Tests",
   "scripts": {
     "test": "jest",
+    "package": "python scripts/package.py",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",

@@ -1,0 +1,18 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 의존성만 먼저 복사 (캐시 레이어)
+COPY requirements-crawler.txt .
+RUN pip install --no-cache-dir -r requirements-crawler.txt
+
+# 소스 복사
+COPY pipeline/ ./pipeline/
+
+# 볼륨: 체크포인트 / 출력 영속
+VOLUME /app/data
+
+ENV PYTHONUNBUFFERED=1
+ENV TZ=Asia/Seoul
+
+ENTRYPOINT ["python", "/app/pipeline/nas_runner.py"]

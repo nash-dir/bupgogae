@@ -1,0 +1,24 @@
+services:
+  crawler:
+    image: bupgogae-crawler:latest
+    container_name: bupgogae-nas-crawler
+    build:
+      context: .
+      dockerfile: Dockerfile.crawler
+    # PC에서 빌드 후 .tar로 NAS에 동기화:
+    #   docker build -f Dockerfile.crawler -t bupgogae-crawler .
+    #   docker save bupgogae-crawler -o bupgogae-crawler.tar
+    # NAS Container Manager → 이미지 → 파일에서 추가 → bupgogae-crawler.tar
+    environment:
+      - BUPGOGAE_API_KEY=${BUPGOGAE_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - R2_BUCKET=${R2_BUCKET}
+      - CF_ACCOUNT_ID=${CF_ACCOUNT_ID}
+      - KIPRIS_API_KEY=${KIPRIS_API_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    volumes:
+      # NAS 동기화 폴더 내 data/ (master.db, db.json 영속)
+      - /volume1/docker/bupgogae/data:/app/data
+    restart: "no"

@@ -1,19 +1,32 @@
 # ===== Docker (크롤러 인프라 경로 포함) =====
 docker-compose*.yml
 Dockerfile*
+# 예외 설정: 공용으로 공유해야 하는 크롤러 설정은 추적 허용
+!Dockerfile.crawler
+!docker-compose.crawler.yml
 
 # ===== 개발 환경 =====
 venv/
 __pycache__/
 .env
 .env.*
+# 예외 설정: 환경변수 템플릿 파일은 추적 허용
+!.env.example
 .DS_Store
 Thumbs.db
+desktop.ini
 *.pyc
+*.pyo
+*.pyd
+
+# ===== IDE & Editors =====
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # ===== Node =====
 node_modules/
-package-lock.json
 
 # ===== 스크랩/실험 (전체 제외) =====
 scrap/
@@ -30,8 +43,12 @@ pipeline/output/
 # ===== 내부 문서/리포트 =====
 report/
 
-# ===== 테스트 스냅샷 =====
+# ===== 테스트 스냅샷 및 캐시 =====
 test/
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
 
 # ===== 민감 파일 =====
 *.pem
@@ -60,7 +77,6 @@ build/
 *.tmp
 *.txt
 
-
-# ===== 임시 파일 =====
+# ===== 에이전트 설정 =====
 AGENTS.md
 .agents/*

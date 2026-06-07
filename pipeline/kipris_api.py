@@ -27,6 +27,12 @@ from defusedxml.ElementTree import fromstring as _safe_fromstring  # XXE 방어 
 import requests
 
 from log_setup import get_logger  # noqa: E402
+from config import (  # noqa: E402
+    KIPRIS_DELAY_MIN as DELAY_MIN,
+    KIPRIS_DELAY_MAX as DELAY_MAX,
+    KIPRIS_TIMEOUT,
+    KIPRIS_PAGE_SIZE as PAGE_SIZE,
+)
 
 log = get_logger(__name__)
 
@@ -44,12 +50,7 @@ BASE_URL = f"{_SVC_NEW}/getAdvancedSearch"
 BASE_URL_ALT = f"{_SVC_NEW}/trialdecisionDateSearchInfo"
 LEGACY_BASE_URL = f"{_SVC_OLD}/trialdecisionDateSearchInfo"
 
-# 페이지당 최대 출력 건수 (API 파라미터명과 무관한 범용 상수)
-PAGE_SIZE = 500
-
-# 요청 딜레이 (초)
-DELAY_MIN = 0.8
-DELAY_MAX = 1.5
+# PAGE_SIZE/DELAY_MIN/DELAY_MAX/KIPRIS_TIMEOUT는 config에서 로드 (env 조정 가능)
 
 # 봇 탐지 회피용 헤더
 HEADERS = {
@@ -71,7 +72,7 @@ def _try_fetch(url: str, params: dict, retries: int = 3) -> bytes | None:
     for attempt in range(retries):
         try:
             response = requests.get(
-                url, params=params, headers=HEADERS, timeout=30,
+                url, params=params, headers=HEADERS, timeout=KIPRIS_TIMEOUT,
             )
 
             if response.status_code == 200:

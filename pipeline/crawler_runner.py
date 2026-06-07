@@ -39,11 +39,15 @@ from pathlib import Path
 from api import fetch_xml_safe, get_text, get_network_stats, reset_network_stats  # noqa: E402
 from master_db import MasterDB  # noqa: E402
 from log_setup import get_logger  # noqa: E402
+from config import (  # noqa: E402
+    CRAWLER_DELAY_MIN as DELAY_MIN,
+    CRAWLER_DELAY_MAX as DELAY_MAX,
+    TIER1_MOD, TIER2_MOD, RECENT_SCAN_PAGES, CIRCUIT_BREAKER_THRESHOLD,
+)
 
 log = get_logger(__name__)
 
-# ── 설정 ──
-DELAY_MIN, DELAY_MAX = 0.8, 1.0
+# ── 설정 ── (DELAY/MOD/RECENT_SCAN_PAGES/CIRCUIT_BREAKER는 config.py, env 조정 가능)
 
 # Date Serial: 1900-01-01 = 1 (Excel 호환)
 SERIAL_EPOCH = date(1900, 1, 1)
@@ -51,17 +55,12 @@ SERIAL_EPOCH = date(1900, 1, 1)
 # Tier 경계
 TIER1_START = date(1948, 8, 15)  # 정부수립일
 TIER1_END   = date(1999, 12, 31)
-TIER1_MOD   = 56
 
 TIER2_START = date(2000, 1, 1)
 # TIER2_END = 작년 12/31 (동적)
-TIER2_MOD   = 15
-
 # TIER3_START = 올해 1/1 (동적)
-
-RECENT_SCAN_PAGES = 3  # 최근 300건 (100건/page × 3)
-
-CIRCUIT_BREAKER_THRESHOLD = 20  # 연속 N건 실패 시 크롤링 중단
+# RECENT_SCAN_PAGES: 최근 N페이지 (100건/page)
+# CIRCUIT_BREAKER_THRESHOLD: 연속 N건 실패 시 크롤링 중단
 
 # ════════════════════════════════════════════════════════════
 # Date-Modulus 스케줄러

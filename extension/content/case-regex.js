@@ -101,6 +101,14 @@ const CASE_PARTS_REGEX = /^((?:19|20)\d{2}|\d{2})([가-힣]{1,4})(\d{1,7})$/;
  */
 const TAX_CASE_REGEX = /조심\s*(\d{2,4})([가-힣])(\d{1,5})/g;
 
+/**
+ * 2자리 연도 → 4자리 변환 기준 피벗.
+ * 이 값 이상이면 19xx, 미만이면 20xx로 해석한다.
+ * (예: 30 → "30"~"99"는 1930~1999, "00"~"29"는 2000~2029)
+ * 전자판례 데이터가 2자리 연도를 거의 쓰지 않는 구간(1930~)에 맞춰 30으로 설정.
+ */
+const TWO_DIGIT_YEAR_PIVOT = 30;
+
 
 
 
@@ -196,8 +204,8 @@ function validateCaseNumber(parsed) {
   let fullYear;
   if (parsed.year.length === 2) {
     const twoDigit = parseInt(parsed.year, 10);
-    // 30~99 → 1930~1999, 00~29 → 2000~2029
-    fullYear = twoDigit >= 30 ? 1900 + twoDigit : 2000 + twoDigit;
+    // TWO_DIGIT_YEAR_PIVOT 이상 → 19xx, 미만 → 20xx
+    fullYear = twoDigit >= TWO_DIGIT_YEAR_PIVOT ? 1900 + twoDigit : 2000 + twoDigit;
   } else {
     fullYear = parseInt(parsed.year, 10);
   }

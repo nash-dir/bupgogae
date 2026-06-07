@@ -32,13 +32,18 @@ import requests as _requests
 from kipris_api import fetch_kipris_xml, parse_kipris_items, PAGE_SIZE  # noqa: E402
 from master_db import MasterDB  # noqa: E402
 from log_setup import get_logger  # noqa: E402
+from config import (  # noqa: E402
+    KIPRIS_DAILY_QUOTA as DAILY_QUOTA,
+    KIPRIS_DELAY_MIN as DELAY_MIN,
+    KIPRIS_DELAY_MAX as DELAY_MAX,
+    KIPRIS_API_ERROR_THRESHOLD as API_ERROR_THRESHOLD,
+)
 
 log = get_logger(__name__)
 
-# ── 설정 ──
-DAILY_QUOTA = 33            # 1일 최대 API HTTP 요청 횟수
-DELAY_MIN, DELAY_MAX = 0.8, 1.5
-API_ERROR_THRESHOLD = 3     # API 에러 누적 임계치 (초과 시 KIPRIS 단계 스킵)
+# ── 설정 (config.py, env 조정 가능) ──
+# DAILY_QUOTA: 1일 최대 API HTTP 요청 횟수
+# API_ERROR_THRESHOLD: API 에러 누적 임계치 (초과 시 KIPRIS 단계 스킵)
 
 
 # ════════════════════════════════════════════════════════════

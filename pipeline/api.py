@@ -21,15 +21,12 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from log_setup import get_logger
+from config import LAW_DELAY_MIN as DELAY_MIN, LAW_DELAY_MAX as DELAY_MAX, LAW_TIMEOUT
 
 log = get_logger(__name__)
 
 # 환경변수에서 API 키 로드
 API_KEY = os.getenv("BUPGOGAE_API_KEY", "test")
-
-# 요청 딜레이 (초)
-DELAY_MIN = 0.8
-DELAY_MAX = 1.0
 
 # 봇 탐지 회피용 헤더
 HEADERS = {
@@ -129,7 +126,7 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
     for i in range(retries):
         try:
             response = session.get(
-                base_url, params=params, timeout=20,
+                base_url, params=params, timeout=LAW_TIMEOUT,
             )
             if response.status_code == 200:
                 _stats["success"] += 1

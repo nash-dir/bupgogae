@@ -324,12 +324,11 @@ class BupgogaeSidebar {
 
   showLoading() {
     this.headerTitle.textContent = '원문 불러오는 중...';
-    this.contentArea.innerHTML = ` // safe: 정적인 로딩 UI
-      <div class="bgae-loader-container">
+    this.contentArea.innerHTML = // safe: 정적인 로딩 UI
+      `<div class="bgae-loader-container">
         <div class="bgae-spinner"></div>
         <span>국가법령정보센터 연결 중...</span>
-      </div>
-    `;
+      </div>`;
   }
 
   initResizer() {
@@ -425,12 +424,11 @@ class BupgogaeSidebar {
     // H-1 fix: msg를 escape하고, url을 sanitize하여 XSS 차단
     const safeMsg = this._escapeHtml(msg);
     const safeUrl = this._escapeHtml(url);
-    this.contentArea.innerHTML = ` // safe: safeMsg와 safeUrl은 _escapeHtml로 sanitize 완료
-      <div class="bgae-error-msg">
+    this.contentArea.innerHTML = // safe: safeMsg와 safeUrl은 _escapeHtml로 sanitize 완료
+      `<div class="bgae-error-msg">
         ${safeMsg}
       </div>
-      <a href="${safeUrl}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 직접 열기 ↗</a>
-    `;
+      <a href="${safeUrl}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 직접 열기 ↗</a>`;
   }
 
   /**
@@ -540,10 +538,9 @@ class BupgogaeSidebar {
       this.headerTitle.textContent = titleStr.replace(/<[^>]+>/g, ''); // 혹시 모를 태그 제거
       
       const safeFooterUrl = this._escapeHtml(url);
-      this.contentArea.innerHTML = ` // safe: detailsHtml 내부 데이터는 _escapeHtml 처리를 보장함
-        ${detailsHtml}
-        <a href="${safeFooterUrl}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 더 넓게 보기 ↗</a>
-      `;
+      this.contentArea.innerHTML = // safe: detailsHtml 내부 데이터는 _escapeHtml 처리를 보장함
+        `${detailsHtml}
+        <a href="${safeFooterUrl}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 더 넓게 보기 ↗</a>`;
 
     } catch (err) {
       console.error('[bupgogae sidebar] Fetch error:', err);

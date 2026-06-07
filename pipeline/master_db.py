@@ -31,6 +31,7 @@ from compress import (  # noqa: E402
     compress_case_name, compress_date, CourtCodeResolver,
 )
 from api import clean_case_number  # noqa: E402
+from validate import sanitize_raw_case, sanitize_kipris_item  # noqa: E402
 
 
 class MasterDB:
@@ -112,10 +113,13 @@ class MasterDB:
         updated = 0
         skipped = 0
 
-        for case in raw_cases:
-            serial = case.get("serial", "")
-            if not serial:
+        for raw in raw_cases:
+            # 입력 검증/정제 (길이 상한·None 안전). serial 없으면 스킵.
+            case = sanitize_raw_case(raw)
+            if case is None:
+                skipped += 1
                 continue
+            serial = case["serial"]
 
             # 블랙리스트 체크
             try:
@@ -125,7 +129,7 @@ class MasterDB:
             except ValueError:
                 pass
 
-            case_number_clean = clean_case_number(case.get("case_number", ""))
+            case_number_clean = clean_case_number(case["case_number"])
 
             # 존재 여부 확인
             existing = cur.execute(
@@ -139,11 +143,11 @@ class MasterDB:
                         date = ?, court = ?
                     WHERE serial = ?
                 """, (
-                    case.get("case_name", ""),
-                    case.get("case_number", ""),
+                    case["case_name"],
+                    case["case_number"],
                     case_number_clean,
-                    case.get("date", ""),
-                    case.get("court", ""),
+                    case["date"],
+                    case["court"],
                     serial,
                 ))
                 updated += 1
@@ -154,11 +158,11 @@ class MasterDB:
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (
                     serial,
-                    case.get("case_name", ""),
-                    case.get("case_number", ""),
+                    case["case_name"],
+                    case["case_number"],
                     case_number_clean,
-                    case.get("date", ""),
-                    case.get("court", ""),
+                    case["date"],
+                    case["court"],
                 ))
                 inserted += 1
 
@@ -291,10 +295,12 @@ class MasterDB:
         inserted = 0
         updated = 0
 
-        for item in items:
-            serial = item.get("serial", "")
-            if not serial:
+        for raw in items:
+            # 입력 검증/정제. serial 없으면 스킵.
+            item = sanitize_kipris_item(raw)
+            if item is None:
                 continue
+            serial = item["serial"]
 
             existing = cur.execute(
                 "SELECT serial FROM kipris_cases WHERE serial = ?",
@@ -308,10 +314,10 @@ class MasterDB:
                         decision_date = ?, trial_type = ?
                     WHERE serial = ?
                 """, (
-                    item.get("case_name", ""),
-                    item.get("case_number", ""),
-                    item.get("decision_date", ""),
-                    item.get("trial_type", ""),
+                    item["case_name"],
+                    item["case_number"],
+                    item["decision_date"],
+                    item["trial_type"],
                     serial,
                 ))
                 updated += 1
@@ -323,10 +329,10 @@ class MasterDB:
                     VALUES (?, ?, ?, ?, ?)
                 """, (
                     serial,
-                    item.get("case_name", ""),
-                    item.get("case_number", ""),
-                    item.get("decision_date", ""),
-                    item.get("trial_type", ""),
+                    item["case_name"],
+                    item["case_number"],
+                    item["decision_date"],
+                    item["trial_type"],
                 ))
                 inserted += 1
 

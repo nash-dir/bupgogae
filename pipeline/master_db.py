@@ -28,7 +28,7 @@ from datetime import datetime
 
 from compress import (  # noqa: E402
     compress_case_number, compress_tax_case_number,
-    compress_case_name, compress_date, get_court_code,
+    compress_case_name, compress_date, CourtCodeResolver,
 )
 from api import clean_case_number  # noqa: E402
 
@@ -81,6 +81,10 @@ class MasterDB:
         self.conn.executescript(self.SCHEMA)
         self.conn.executescript(self.KIPRIS_SCHEMA)
         self.conn.commit()
+
+        # 법원코드 변환기 — 인스턴스 로컬 상태(미등록 법원 동적 할당).
+        # 전역 변이 없이 export 후 court_resolver.code_map으로 최종 맵 조회.
+        self.court_resolver = CourtCodeResolver()
 
         # 블랙리스트 로드 (잘못된 레이블 serial)
         bl_path = os.path.join(os.path.dirname(__file__), "blacklist.json")
@@ -199,8 +203,7 @@ class MasterDB:
     # 압축 JSON 변환
     # ════════════════════════════════════════════════
 
-    @staticmethod
-    def compress_rows(rows) -> dict:
+    def compress_rows(self, rows) -> dict:
         """sqlite3.Row 리스트 → 압축 JSON dict."""
         compressed = defaultdict(list)
         skipped = 0
@@ -214,7 +217,7 @@ class MasterDB:
             # serial: 숫자만이면 int, D/T prefix면 string 유지
             raw_serial = row["serial"] or "0"
             serial = int(raw_serial) if raw_serial.isdigit() else raw_serial
-            court_code = get_court_code(row["court"])
+            court_code = self.court_resolver.resolve(row["court"])
             date_int = compress_date(row["date"])
             name_raw = compress_case_name(row["case_name"] or "")
 
@@ -252,8 +255,7 @@ class MasterDB:
         self.conn.row_factory = None
         return self.compress_rows_tax(rows)
 
-    @staticmethod
-    def compress_rows_tax(rows) -> tuple[dict, int]:
+    def compress_rows_tax(self, rows) -> tuple[dict, int]:
         """조세심판 전용 압축 — TX prefix + 한글 부호 보장."""
         compressed = defaultdict(list)
         skipped = 0
@@ -266,7 +268,7 @@ class MasterDB:
 
             raw_serial = row["serial"] or "0"
             serial = int(raw_serial) if raw_serial.isdigit() else raw_serial
-            court_code = get_court_code(row["court"])
+            court_code = self.court_resolver.resolve(row["court"])
             date_int = compress_date(row["date"])
             name_raw = compress_case_name(row["case_name"] or "")
 

@@ -37,7 +37,6 @@ from pathlib import Path
 
 # 의존성 (같은 디렉토리)
 from api import fetch_xml_safe, get_text, get_network_stats, reset_network_stats  # noqa: E402
-from compress import COURT_CODE_MAP  # noqa: E402
 from master_db import MasterDB  # noqa: E402
 
 # ── 설정 ──
@@ -504,7 +503,7 @@ def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float, i
     tax_data, tax_skip = db.export_tax()
 
     # 압축 후 확정된 court_code_map (auto-assigned 포함)
-    court_map = dict(COURT_CODE_MAP)  # name → code
+    court_map = db.court_resolver.code_map  # name → code
 
     core_mb = _write_gzipped_json({
         "version": version,

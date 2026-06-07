@@ -217,21 +217,54 @@ COURT_CODE_MAP = {
     # 미등록 법원은 0 (unknown)
 }
 
-# 지원(branch) 법원은 본원 코드 + 100~199 범위에서 자동 할당
-_branch_auto_code = 100
+# 미등록(지원 등) 법원에 자동 부여하는 코드 시작값
+BRANCH_CODE_START = 100
 
 
-def get_court_code(court_name: str) -> int:
-    """법원명을 정수 코드로 변환. 미등록 법원은 동적 할당."""
-    global _branch_auto_code
-    if not court_name:
-        return 0
-    if court_name in COURT_CODE_MAP:
-        return COURT_CODE_MAP[court_name]
-    # 동적 할당 (지원 등 미등록 법원)
-    _branch_auto_code += 1
-    COURT_CODE_MAP[court_name] = _branch_auto_code
-    return _branch_auto_code
+class CourtCodeResolver:
+    """법원명 → 정수 코드 변환기.
+
+    미등록 법원(지원 등)은 인스턴스 로컬에서 동적 할당한다.
+    전역 가변 상태를 제거하기 위한 캡슐화로, 한 번의 변환 세션
+    (예: 1회 DB 덤프)마다 독립 인스턴스를 사용하므로:
+      - 스레드 안전 (전역 dict/카운터 공유 없음)
+      - 실행 간 결정적 (기준 테이블 COURT_CODE_MAP을 변이하지 않음)
+
+    기준 테이블은 복사본으로 보유하며 원본은 절대 수정하지 않는다.
+    """
+
+    def __init__(self, base_map: dict | None = None):
+        self._map = dict(base_map if base_map is not None else COURT_CODE_MAP)
+        self._next_branch_code = BRANCH_CODE_START
+
+    def resolve(self, court_name: str) -> int:
+        """법원명을 정수 코드로 변환. 미등록은 동적 할당."""
+        if not court_name:
+            return 0
+        if court_name in self._map:
+            return self._map[court_name]
+        self._next_branch_code += 1
+        self._map[court_name] = self._next_branch_code
+        return self._next_branch_code
+
+    @property
+    def code_map(self) -> dict:
+        """기준 + 동적 할당분을 포함한 최종 매핑 (읽기용 복사본)."""
+        return dict(self._map)
+
+
+# 모듈 기본 리졸버 — 명시적 인스턴스를 넘기지 않는 호환 호출용.
+# 결정적·스레드 안전 동작이 필요한 경로(master_db 등)는 자체 인스턴스를 사용한다.
+_default_resolver = CourtCodeResolver()
+
+
+def get_court_code(court_name: str, resolver: "CourtCodeResolver | None" = None) -> int:
+    """법원명을 정수 코드로 변환.
+
+    resolver를 넘기면 해당 인스턴스를, 아니면 모듈 기본 리졸버를 사용한다.
+    어느 경우든 기준 테이블 COURT_CODE_MAP은 변이되지 않는다.
+    """
+    return (resolver or _default_resolver).resolve(court_name)
 
 
 # ============================================================
@@ -364,6 +397,7 @@ def build_from_sqlite(db_path: str) -> dict:
 
     result = defaultdict(list)
     stats = {"total": 0, "skipped": 0, "collisions": 0}
+    resolver = CourtCodeResolver()
 
     for table in sorted(tables):
         rows = cur.execute(
@@ -379,7 +413,7 @@ def build_from_sqlite(db_path: str) -> dict:
                 stats["skipped"] += 1
                 continue
 
-            court_code = get_court_code(court)
+            court_code = resolver.resolve(court)
             date_int = compress_date(date)
             name_compressed = compress_case_name(case_name or "")
             entry = [int(serial), court_code, date_int, name_compressed]
@@ -389,7 +423,7 @@ def build_from_sqlite(db_path: str) -> dict:
             result[key].append(entry)
 
     conn.close()
-    return dict(result), stats
+    return dict(result), stats, resolver.code_map
 
 
 def build_from_mock() -> dict:
@@ -412,6 +446,7 @@ def build_from_mock() -> dict:
 
     result = defaultdict(list)
     stats = {"total": 0, "skipped": 0, "collisions": 0}
+    resolver = CourtCodeResolver()
 
     for serial, court, date, case_num, case_name in mock_data:
         stats["total"] += 1
@@ -419,7 +454,7 @@ def build_from_mock() -> dict:
         if not key:
             stats["skipped"] += 1
             continue
-        court_code = get_court_code(court)
+        court_code = resolver.resolve(court)
         date_int = compress_date(date)
         name_compressed = compress_case_name(case_name or "")
         entry = [int(serial), court_code, date_int, name_compressed]
@@ -427,11 +462,16 @@ def build_from_mock() -> dict:
             stats["collisions"] += 1
         result[key].append(entry)
 
-    return dict(result), stats
+    return dict(result), stats, resolver.code_map
 
 
-def save_output(data: dict, stats: dict, output_dir: str):
-    """결과물 JSON 저장."""
+def save_output(data: dict, stats: dict, output_dir: str, court_map: dict | None = None):
+    """결과물 JSON 저장.
+
+    court_map: 동적 할당분을 포함한 최종 법원 코드 맵. None이면 기준 테이블 사용.
+    """
+    if court_map is None:
+        court_map = COURT_CODE_MAP
     os.makedirs(output_dir, exist_ok=True)
 
     # 본문 (compact, no spaces)
@@ -453,7 +493,7 @@ def save_output(data: dict, stats: dict, output_dir: str):
             "file_size_mb": round(size_mb, 2),
         },
         "case_code_map": CASE_CODE_MAP,
-        "court_code_map": COURT_CODE_MAP,
+        "court_code_map": court_map,
     }
 
     meta_path = os.path.join(output_dir, "bupgogae_meta.json")
@@ -480,7 +520,7 @@ if __name__ == "__main__":
         print("=" * 60)
         print("  [MOCK MODE] 테스트 데이터로 변환 파이프라인 검증")
         print("=" * 60)
-        data, stats = build_from_mock()
+        data, stats, court_map = build_from_mock()
         output_dir = _args.out or os.path.join(os.path.dirname(__file__), "output")
     else:
         db_path = _args.db or os.path.join("/app", "data", "master.db")
@@ -490,10 +530,10 @@ if __name__ == "__main__":
         print("=" * 60)
         print(f"  [PRODUCTION] {db_path}")
         print("=" * 60)
-        data, stats = build_from_sqlite(db_path)
+        data, stats, court_map = build_from_sqlite(db_path)
         output_dir = _args.out or os.path.join(os.path.dirname(__file__), "output")
 
-    size_mb = save_output(data, stats, output_dir)
+    size_mb = save_output(data, stats, output_dir, court_map)
 
     print(f"\n📊 변환 통계:")
     print(f"   총 레코드:       {stats['total']:,}")

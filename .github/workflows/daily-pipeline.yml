@@ -23,6 +23,12 @@ jobs:
       - name: 저장소 Checkout
         uses: actions/checkout@v4
 
+      - name: Cloudflare WARP 연결 (IP 차단 우회)
+        uses: fscarmen/warp-on-actions@v1.4
+        with:
+          stack: dual
+          mode: wireguard
+
       - name: Python 3.10 세팅
         uses: actions/setup-python@v5
         with:

@@ -86,3 +86,5 @@ AGENTS.md
 .agents/*
 # Claude Code 개인 로컬 설정 (공용 .claude/settings.json은 추적)
 .claude/settings.local.json
+# 로컬 수동검증용 문서 픽스쳐 (커밋 금지)
+sample/

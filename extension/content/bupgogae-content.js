@@ -34,6 +34,13 @@ const LOOKUP_TIMEOUT_MS = 8000; // 배치 조회 응답 대기 한도 (SW 컨텍
 const LOOKUP_MAX_ATTEMPTS = 3;        // 타임아웃/에러 시 최대 재조회 횟수 (gray 유지, orange 오탐 방지)
 const LOOKUP_RETRY_BACKOFF_MS = 1000; // 재조회 백오프 (시도 횟수 배수: 1s, 2s, ...)
 
+// ── Settle(정지 감지) 처리 게이트 ──
+// Gemini/Grok/Copilot 등은 응답 생성 중 프레임워크가 응답 서브트리를 재렌더하며
+// 외부에서 끼워넣은 우리 배지 노드를 지운다(churn). 스트리밍 중 렌더는 깜빡임만
+// 유발하므로, "응답이 SETTLE_MS 동안 조용해진 뒤" 1회만 처리한다(정지 후 렌더).
+const SETTLE_MS = 2000;             // 마지막 DOM 변경 후 처리까지 대기 (사용자 확정: 2초)
+const SETTLE_MAX_DEFER_MS = 12000;  // 안전망: 페이지가 끝없이 변경돼도 이 시간 내 강제 처리(starvation 방지)
+
 
 // ============================================================
 // 2. 초기화
@@ -201,29 +208,53 @@ function startObserver() {
 // ============================================================
 
 /**
- * 처리를 debounce하여 스케줄링.
- * 빠른 연속 DOM 변경에 대해 마지막 변경 후 500ms 뒤에 1회만 처리.
+ * 처리 스케줄러 — Settle(정지 감지) 기반.
+ * 마지막 관련 DOM 변경 후 SETTLE_MS 동안 추가 변경이 없으면(=응답 렌더 정지) 1회 처리.
+ * 스트리밍/재렌더가 계속되는 동안에는 타이머가 매 변경마다 리셋되어 처리를 보류하므로,
+ * 프레임워크가 우리 배지를 지우는 구간에 렌더하지 않는다(churn/깜빡임 제거).
+ * 단, 페이지가 끝없이 변경되면 SETTLE_MAX_DEFER_MS에서 강제 처리한다(starvation 방지).
  */
 let _rescheduleCount = 0;
-const MAX_RESCHEDULE = 10; // stuck 방지: 최대 10회 재스케줄
+let _settlePendingSince = 0; // 현재 보류 구간의 첫 변경 시각 (0 = 보류 없음)
+const MAX_RESCHEDULE = 10;   // _isProcessing 중 stuck 방지: 최대 10회 재시도
+
+// 테스트 주입 seam — 실제로는 processAllResponses를 호출.
+let _runProcess = processAllResponses;
+
+function _nowMs() {
+  return Date.now();
+}
 
 function scheduleProcessing() {
+  const now = _nowMs();
+  if (_settlePendingSince === 0) _settlePendingSince = now;
   if (_debounceTimer) clearTimeout(_debounceTimer);
 
-  _debounceTimer = setTimeout(() => {
-    if (_isProcessing) {
-      _rescheduleCount++;
-      if (_rescheduleCount <= MAX_RESCHEDULE) {
-        scheduleProcessing();
-      } else {
-        console.warn(`[bupgogae] 재스케줄 상한 초과 (${MAX_RESCHEDULE}회) — 다음 Mutation 대기`);
-        _rescheduleCount = 0;
-      }
+  // settle 창과 강제 처리 데드라인 중 먼저 도래하는 시점에 발화
+  const elapsed = now - _settlePendingSince;
+  const wait = Math.max(0, Math.min(SETTLE_MS, SETTLE_MAX_DEFER_MS - elapsed));
+  _debounceTimer = setTimeout(onSettleTimer, wait);
+}
+
+function onSettleTimer() {
+  _debounceTimer = null;
+
+  if (_isProcessing) {
+    // 직전 처리(비동기 조회)가 아직 진행 중 — settle 구간은 유지한 채 짧게 재시도
+    _rescheduleCount++;
+    if (_rescheduleCount <= MAX_RESCHEDULE) {
+      _debounceTimer = setTimeout(onSettleTimer, DEBOUNCE_MS);
     } else {
+      console.warn(`[bupgogae] 재스케줄 상한 초과 (${MAX_RESCHEDULE}회) — 다음 Mutation 대기`);
       _rescheduleCount = 0;
-      processAllResponses();
+      _settlePendingSince = 0;
     }
-  }, DEBOUNCE_MS);
+    return;
+  }
+
+  _rescheduleCount = 0;
+  _settlePendingSince = 0;
+  _runProcess();
 }
 
 
@@ -889,6 +920,20 @@ if (typeof module !== 'undefined' && module.exports) {
     processContainer,
     batchLookup,
     applyLookupResults,
+    scheduleProcessing,
+    SETTLE_MS,
+    SETTLE_MAX_DEFER_MS,
+    /** 테스트 전용: settle 스케줄러가 호출할 처리 함수를 스파이로 교체. */
+    __setProcessFnForTest(fn) {
+      _runProcess = fn;
+    },
+    /** 테스트 전용: settle 스케줄러 내부 상태 초기화. */
+    __resetSchedulerForTest() {
+      if (_debounceTimer) clearTimeout(_debounceTimer);
+      _debounceTimer = null;
+      _settlePendingSince = 0;
+      _rescheduleCount = 0;
+    },
     /** 테스트 전용: 모듈 전역 상태(orange 토스트 1회 플래그 등) 초기화. */
     __resetForTest() {
       _hasShownOrangeToast = false;

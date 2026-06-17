@@ -447,3 +447,52 @@ test('S2-2: LLM 사이트 진입 시 content script가 신선도 검사를 발�
   // content script 진입 → VERIFY_DB_FRESHNESS → SW가 manifest를 조회해야 한다
   await expect.poll(() => manifestRequested, { timeout: 15_000 }).toBe(true);
 });
+
+// ============================================================
+// H1. 비파괴 재구축 — 재동기화 중 빈/부분 DB 노출 금지 (0.8.1 회귀)
+// ============================================================
+
+test('H1: 재동기화가 진행 중에도 조회는 빈/부분 DB를 보지 않는다', async ({ context, extensionPage }) => {
+  let serve = PAYLOAD_V1;
+  let etag = '"h1-v1"';
+  await mockBupApi(context, {
+    onDb: (route) => route.fulfill({
+      contentType: 'application/json',
+      headers: { ETag: etag },
+      body: serve,
+    }),
+  });
+  const sw = await getBackground(context);
+
+  // 1차 동기화: v1 완전 적재
+  await forceSync(extensionPage);
+  expect((await readLocalState(sw)).caseCount).toBeGreaterThanOrEqual(100_000);
+
+  // 서버를 v2로 교체 후, 재동기화하면서 cases.count()를 SW에서 동시 폴링한다.
+  serve = PAYLOAD_V2;
+  etag = '"h1-v2"';
+  const probe = await sw.evaluate(async () => {
+    const db = await getCachedDB();
+    const countNow = () => new Promise((res) => {
+      try {
+        const r = db.transaction('cases').objectStore('cases').count();
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => res(-1);
+      } catch { res(-2); } // 커넥션이 재구축 중 닫히면(M5) InvalidStateError
+    });
+    let min = Infinity, polls = 0, polling = true;
+    const poller = (async () => {
+      while (polling) { const c = await countNow(); if (c < min) min = c; polls++; }
+    })();
+    await syncDatabase({ trigger: 'force', force: true }); // 2차 동기화(v2)
+    polling = false;
+    await poller;
+    return { min, polls, final: await countNow() };
+  });
+
+  // 현재 구현(dbClear→insert): dbClear 직후~삽입 완료 사이 min이 0 부근으로 떨어진다 → 회귀 재현(Red)
+  // 목표 구현(insert→prune): 기존 데이터가 살아있어 min이 v1 건수 이상 유지(Green)
+  expect(probe.polls).toBeGreaterThan(0);
+  expect(probe.min).toBeGreaterThanOrEqual(100_000);
+  expect(probe.final).toBeGreaterThanOrEqual(100_000);
+});

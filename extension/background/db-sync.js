@@ -58,6 +58,10 @@ const DRIFT = {
 };
 const DRIFT_STATE_KEY = 'bupgogae_drift_state'; // {lastCheckAt, strikes, lastResult}
 
+// M5: 재구축 중 idle DB 커넥션 닫기 방지 플래그
+// (M6 동시 동기화 가드는 user-trigger가 느린 background sync 뒤에 막히는 문제로 0.9.0 이연)
+let _syncActive = false;
+
 // isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity는
 // sync-utils.js(importScripts)에서 전역으로 제공됨.
 
@@ -177,6 +181,78 @@ async function dbBulkInsert(db, storeName, data, chunkSize = 10000) {
   }
 
   return totalCount;
+}
+
+/**
+ * 스토어를 비파괴적으로 새 데이터로 교체 (H1: atomic-swap 대체).
+ * dbClear로 먼저 비우면 재구축 중 조회가 빈 DB를 보지만(0.8.1 회귀 — 검증 지연/덮어써짐),
+ * 여기서는 (1) 덮어쓰기 삽입으로 기존 키를 내내 살려두고
+ * (2) 새 payload에 없는 키(상류 삭제분)만 마지막에 가지치기한다.
+ * 결과 스토어는 data와 정확히 일치한다(건수 검증 통과).
+ *
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @param {Object} data
+ * @param {number} [chunkSize=10000]
+ * @returns {Promise<number>} 최종 레코드 수 (= Object.keys(data).length)
+ */
+async function dbReplaceAll(db, storeName, data, chunkSize = 10000) {
+  _syncActive = true; // M5: 재구축 동안 idle 커넥션 닫기 방지
+  try {
+    const newKeys = new Set(Object.keys(data));
+    // 삽입 전 기존 키를 미리 확보 — 새로 넣을 키는 가지치기 대상이 아니고,
+    // 신규/번들 로드(빈 스토어)에선 priorKeys가 비어 가지치기를 통째로 건너뛴다.
+    const priorKeys = await dbGetAllKeys(db, storeName);
+
+    // (1) 덮어쓰기 삽입 — 기존 데이터는 덮어써지기 전까지 계속 조회 가능
+    await dbBulkInsert(db, storeName, data, chunkSize);
+
+    // (2) 이전엔 있었지만 새 payload에 없는 키만 제거 (상류에서 삭제된 사건)
+    const stale = priorKeys.filter((k) => !newKeys.has(k));
+    if (stale.length > 0) {
+      await dbDeleteKeys(db, storeName, stale, chunkSize);
+      console.log(`[bupgogae] 재구축 가지치기: ${stale.length}건 제거`);
+    }
+    return newKeys.size;
+  } finally {
+    _syncActive = false;
+  }
+}
+
+/**
+ * 스토어의 모든 키를 반환.
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @returns {Promise<Array>}
+ */
+function dbGetAllKeys(db, storeName) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).getAllKeys();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(new Error(`dbGetAllKeys failed: ${req.error}`));
+  });
+}
+
+/**
+ * 키 목록을 청크 단위 트랜잭션으로 삭제.
+ * @param {IDBDatabase} db
+ * @param {string} storeName
+ * @param {Array} keys
+ * @param {number} [chunkSize=10000]
+ * @returns {Promise<void>}
+ */
+async function dbDeleteKeys(db, storeName, keys, chunkSize = 10000) {
+  for (let i = 0; i < keys.length; i += chunkSize) {
+    const chunk = keys.slice(i, i + chunkSize);
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      for (const k of chunk) store.delete(k);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(new Error(`dbDeleteKeys failed: ${tx.error}`));
+    });
+  }
 }
 
 // ============================================================
@@ -469,8 +545,8 @@ async function doSyncDatabase({ force, cacheBuster }) {
   // ── Step 3~5: IndexedDB 교체 + 메타/ETag 저장 ──
   try {
     const db = await getCachedDB();
-    await dbClear(db, STORE_CASES);
-    const count = await dbBulkInsert(db, STORE_CASES, data.cases);
+    // H1: 비파괴 재구축 — 비우지 않고 덮어쓰기 후 stale만 가지치기 (재구축 중 빈 DB 노출 금지)
+    const count = await dbReplaceAll(db, STORE_CASES, data.cases);
     console.log(`[bupgogae] Core DB 교체: ${count}건 삽입`);
 
     const version = data.version || new Date().toISOString().slice(0, 10);
@@ -603,8 +679,8 @@ async function doMaybeLoadBundledDB() {
     console.log(`[bupgogae] 📦 번들 DB 폴백 시도 (${gate.reason})...`);
 
     const db = await getCachedDB();
-    await dbClear(db, STORE_CASES);
-    const count = await dbBulkInsert(db, STORE_CASES, data.cases);
+    // H1: 비파괴 재구축 (번들 폴백도 동일하게 빈 DB 노출 금지)
+    const count = await dbReplaceAll(db, STORE_CASES, data.cases);
     const version = data.version || 'bundled';
     // 번들은 R2 동기화 성공이 아니므로 content_hash/last_success_at은 제거
     await updateMetadata(db, version, data.total || count, {
@@ -785,6 +861,7 @@ async function getCachedDB() {
   // idle 타이머 리셋
   if (_dbIdleTimer) clearTimeout(_dbIdleTimer);
   _dbIdleTimer = setTimeout(() => {
+    if (_syncActive) return; // M5: 재구축 중엔 닫지 않음 — 다음 getCachedDB 호출이 타이머를 재무장
     if (_cachedDB) {
       _cachedDB.close();
       _cachedDB = null;

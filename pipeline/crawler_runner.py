@@ -389,84 +389,7 @@ def crawl_detc_full() -> list[dict]:
     return cases
 
 
-# ════════════════════════════════════════════════════════════
-# 조세심판원 크롤링 (sort=efdes, 듀얼존 스케줄)
-# ════════════════════════════════════════════════════════════
 
-# target=ttSpecialDecc, ~139,000건, ~1,391페이지
-# Zone A (1~10):  매일 — 최신 ~1,000건
-# Zone B (11~):   mod 15 — 15일 1회전
-
-TAX_DAILY_PAGES = 10
-TAX_MOD = 15
-
-
-def get_tax_pages_for_today(today: date) -> list[int]:
-    """오늘 스캔할 조세심판 페이지 목록 (1-indexed)."""
-    today_ser = date_serial(today)
-    bucket = today_ser % TAX_MOD
-
-    pages = list(range(1, TAX_DAILY_PAGES + 1))
-    max_pages = 1500  # 139,062건 / 100 + 여유
-    for p in range(TAX_DAILY_PAGES + 1, max_pages + 1):
-        if (p - TAX_DAILY_PAGES - 1) % TAX_MOD == bucket:
-            pages.append(p)
-    return pages
-
-
-def _fetch_tax_page(page: int) -> list[dict]:
-    """단일 조세심판원 페이지 수집 (sort=efdes)."""
-    xml_content = fetch_xml_safe(
-        target="ttSpecialDecc", query="*", page=page, sort="efdes",
-    )
-    if not xml_content:
-        return []
-    try:
-        root = _safe_fromstring(xml_content)
-    except ET.ParseError:
-        return []
-
-    cases = []
-    for item in root.findall("decc"):
-        raw_serial = get_text(item, "특별행정심판재결례일련번호")
-        if not raw_serial:
-            continue
-        cases.append({
-            "serial": f"T{raw_serial}",  # T prefix
-            "case_name": get_text(item, "사건명"),
-            "case_number": f"조심 {get_text(item, '청구번호')}",
-            "date": get_text(item, "의결일자"),
-            "court": "조세심판원",
-        })
-    return cases
-
-
-def crawl_tax_pages(pages: list[int]) -> list[dict]:
-    """지정된 페이지들만 스캔 (sort=efdes)."""
-    cases = []
-    for page in pages:
-        page_cases = _fetch_tax_page(page)
-        if not page_cases and page > TAX_DAILY_PAGES:
-            break
-        cases.extend(page_cases)
-        time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
-    return cases
-
-
-def crawl_tax_full() -> list[dict]:
-    """조세심판원 전량 수집 (최초 실행 시 1회, sort=efdes)."""
-    cases = []
-    page = 1
-    while True:
-        page_cases = _fetch_tax_page(page)
-        if not page_cases:
-            break
-        cases.extend(page_cases)
-        if page % 100 == 0:
-            log.info(f"  [tax] {page}페이지, {len(cases):,}건")
-        page += 1
-        time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
-    return cases
 
 
 # ════════════════════════════════════════════════════════════
@@ -493,18 +416,15 @@ def _write_gzipped_json(payload: dict, output_path: str) -> float:
     return gz_mb
 
 
-def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float, int]:
-    """master.db → Core(db.json.gz) + DLC(db_tax.json.gz) + DLC(db_patent.json.gz) 분리 덤프.
+def export_split_db(db: MasterDB, data_dir: str) -> float:
+    """master.db → Core(db.json.gz) 덤프.
 
-    Returns: (core_gz_mb, tax_gz_mb, patent_gz_mb, tax_skipped)
+    Returns: core_gz_mb
     """
     version = datetime.now().strftime("%Y%m%d")
 
     # Core: 판례 + 헌재
     core_data, core_skip = db.export_core()
-
-    # DLC: 조세심판
-    tax_data, tax_skip = db.export_tax()
 
     # 압축 후 확정된 court_code_map (auto-assigned 포함)
     court_map = db.court_resolver.code_map  # name → code
@@ -517,17 +437,8 @@ def export_split_db(db: MasterDB, data_dir: str) -> tuple[float, float, float, i
         "court_code_map": court_map,
     }, os.path.join(data_dir, "db.json"))
 
-    tax_mb = _write_gzipped_json({
-        "version": version,
-        "total": len(tax_data),
-        "keys": len(tax_data),
-        "cases": tax_data,
-        "court_code_map": court_map,
-    }, os.path.join(data_dir, "db_tax.json"))
-
-    log.info(f"  └ Core: {len(core_data):,}건, DLC(Tax): {len(tax_data):,}건 (⛔{tax_skip} skip), "
-          f"법원: {len(court_map)}개")
-    return core_mb, tax_mb, tax_skip
+    log.info(f"  └ Core: {len(core_data):,}건, 법원: {len(court_map)}개")
+    return core_mb
 
 
 # ════════════════════════════════════════════════════════════
@@ -565,9 +476,8 @@ def main():
     scan_ranges = get_today_scan_ranges(today, recent_dates=recent_dates)
     summary = scan_plan_summary(scan_ranges, today, recent_count=len(recent_dates))
 
-    # 헌재/조세심판 스케줄 계산
+    # 헌재 스케줄 계산
     detc_pages = get_detc_pages_for_today(today)
-    tax_pages = get_tax_pages_for_today(today)
 
     log.info("=" * 55)
     log.info(f"  🚀 Crawler Runner (Range-Modulus)")
@@ -576,7 +486,6 @@ def main():
     log.info(f"     판례: {summary['total']:,}건"
           f" (T0:{summary['tier0']} T1:{summary['tier1']} T2:{summary['tier2']} T3:{summary['tier3']})")
     log.info(f"     헌재: {len(detc_pages)}페이지 (mod {DETC_MOD})")
-    log.info(f"     조세: {len(tax_pages)}페이지 (mod {TAX_MOD})")
     log.info(f"     예상: ~{summary['est_minutes']}분")
     log.info("=" * 55)
 
@@ -590,7 +499,6 @@ def main():
         if len(scan_ranges) > 20:
             log.info(f"  ... ({len(scan_ranges) - 20}건 생략)")
         log.info(f"\n📜 헌재 스캔: {len(detc_pages)}페이지 {detc_pages[:5]}...")
-        log.info(f"💰 조세 스캔: {len(tax_pages)}페이지 {tax_pages[:5]}...")
         return
 
     # 환경변수 검증
@@ -699,30 +607,13 @@ def main():
         log.info(f"  헌재: {len(detc_cases):,}건 수집"
               f" → +{detc_ins} 신규, ={detc_upd} 갱신, ⛔{detc_skip} 스킵")
 
-    # 조세심판원 크롤링 — 최초 실행 감지
-    has_tax = db.conn.execute(
-        "SELECT 1 FROM cases WHERE serial LIKE 'T%' LIMIT 1"
-    ).fetchone()
-
-    if not has_tax:
-        log.info(f"\n💰 조세심판원 최초 실행 — 전량 크롤링")
-        tax_cases = crawl_tax_full()
-    else:
-        log.info(f"\n💰 조세심판원 스캔 ({len(tax_pages)}페이지, mod {TAX_MOD})")
-        tax_cases = crawl_tax_pages(tax_pages)
-
-    tax_ins, tax_upd, tax_skip = 0, 0, 0
-    if tax_cases:
-        tax_ins, tax_upd, tax_skip = db.upsert_raw(tax_cases)
-        log.info(f"  조세: {len(tax_cases):,}건 수집"
-              f" → +{tax_ins} 신규, ={tax_upd} 갱신, ⛔{tax_skip} 스킵")
     after = db.count()
     delta = after - before
     log.info(f"\n📊 Master DB (통합): {after:,}건 (Δ {delta:+,})")
 
-    # 풀 DB 덤프 (Core + DLC 분리)
-    log.info(f"\n📦 DB 덤프 (Core + DLC)")
-    core_mb, tax_mb, tax_skipped = export_split_db(db, data_dir)
+    # 풀 DB 덤프 (Core)
+    log.info(f"\n📦 DB 덤프 (Core)")
+    core_mb = export_split_db(db, data_dir)
     db.close()
 
     # R2 업로드
@@ -736,20 +627,16 @@ def main():
         from upload_r2 import upload_db_to_r2, ensure_cors  # noqa: E402
         ensure_cors()
         upload_db_to_r2(os.path.join(data_dir, "db.json.gz"))
-        upload_db_to_r2(os.path.join(data_dir, "db_tax.json.gz"),
-                        r2_key="bupgogae/db_tax.json.gz")
 
         # Drift 안전망 manifest — 반드시 DB 업로드가 모두 끝난 뒤 마지막에
         # 게시해야 "manifest는 최신인데 DB는 구버전"인 역전 레이스가 없다.
         # 해시 대상 = 클라이언트가 받는 비압축 바이트 (_write_gzipped_json이
-        # 기록한 raw db.json / db_tax.json).
+        # 기록한 raw db.json).
         from manifest import build_manifest, write_manifest  # noqa: E402
         with open(os.path.join(data_dir, "db.json"), "rb") as f:
             core_bytes = f.read()
-        with open(os.path.join(data_dir, "db_tax.json"), "rb") as f:
-            tax_bytes = f.read()
         manifest_path = os.path.join(data_dir, "manifest.json")
-        write_manifest(build_manifest(core_bytes, tax_bytes=tax_bytes),
+        write_manifest(build_manifest(core_bytes),
                        manifest_path)
         upload_db_to_r2(manifest_path, r2_key="bupgogae/manifest.json",
                         cache_control="no-cache, max-age=0",
@@ -762,7 +649,7 @@ def main():
     log.info(f"\n{'=' * 55}")
     log.info(f"  🏁 완료 ({minutes}분 {seconds}초)")
     log.info(f"     DB: {after:,}건 (Δ {delta:+,})")
-    log.info(f"     Core: {core_mb:.2f} MB | DLC(Tax): {tax_mb:.2f} MB")
+    log.info(f"     Core: {core_mb:.2f} MB")
     log.info(f"{'=' * 55}")
 
     # 텔레그램 리포트
@@ -778,14 +665,10 @@ def main():
         db_total=after,
         db_delta=delta,
         gz_mb=core_mb,
-        tax_gz_mb=tax_mb,
         elapsed_sec=elapsed,
         r2_uploaded=not missing_r2,
         detc_total=len(detc_cases),
         detc_ins=detc_ins,
-        tax_total=len(tax_cases),
-        tax_ins=tax_ins,
-        tax_skipped=tax_skipped,
         net_stats=net_stats,
         failed_count=len(failed_ranges),
         circuit_broken=circuit_broken,
@@ -824,8 +707,6 @@ def send_telegram_report(**kwargs):
 
     detc_total = kwargs.get("detc_total", 0)
     detc_ins_cnt = kwargs.get("detc_ins", 0)
-    tax_total = kwargs.get("tax_total", 0)
-    tax_ins_cnt = kwargs.get("tax_ins", 0)
 
     # 네트워크 통계
     net_stats = kwargs.get("net_stats", {})
@@ -869,12 +750,11 @@ def send_telegram_report(**kwargs):
         f"T2: {summary.get('tier2', 0)} | "
         f"T3: {summary.get('tier3', 0)}\n"
         f"📜 *헌재*: {detc_total:,}건 (+{detc_ins_cnt} 신규)\n"
-        f"💰 *조세심판*: {tax_total:,}건 (+{tax_ins_cnt} 신규, ⛔{kwargs.get('tax_skipped', 0)} TX스킵)\n"
         f"\n"
         f"🗄 *Master DB*: {db_total:,}건 (Δ {db_delta:+,})\n"
         f"  +{total_ins} 신규 | ={total_upd} 갱신 | ⛔{total_skip} 스킵 | ❌{errors} 에러\n"
         f"\n"
-        f"📦 *Core*: {gz_mb:.2f} MB | *DLC(Tax)*: {kwargs.get('tax_gz_mb', 0):.2f} MB\n"
+        f"📦 *Core*: {gz_mb:.2f} MB\n"
         f"☁️ *R2*: {r2_status}"
         f"{net_warning}"
     )

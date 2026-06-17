@@ -54,28 +54,6 @@ class MasterDB:
     CREATE INDEX IF NOT EXISTS idx_cases_inserted ON cases(inserted_at);
     """
 
-    KIPRIS_SCHEMA = """
-    CREATE TABLE IF NOT EXISTS kipris_cases (
-        serial        TEXT PRIMARY KEY,
-        case_name     TEXT,
-        case_number   TEXT,
-        decision_date TEXT,
-        trial_type    TEXT,
-        inserted_at   TEXT DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_kipris_date ON kipris_cases(decision_date);
-
-    CREATE TABLE IF NOT EXISTS kipris_backfill_log (
-        chunk_start    TEXT,
-        chunk_end      TEXT,
-        total_cnt      INTEGER DEFAULT 0,
-        pages_fetched  INTEGER DEFAULT 0,
-        is_completed   INTEGER DEFAULT 0,
-        updated_at     TEXT DEFAULT (datetime('now')),
-        PRIMARY KEY (chunk_start, chunk_end)
-    );
-    """
-
     def __init__(self, db_path: str):
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
@@ -83,7 +61,6 @@ class MasterDB:
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("PRAGMA synchronous=NORMAL;")
         self.conn.executescript(self.SCHEMA)
-        self.conn.executescript(self.KIPRIS_SCHEMA)
         self.conn.commit()
 
         # 법원코드 변환기 — 인스턴스 로컬 상태(미등록 법원 동적 할당).
@@ -243,149 +220,19 @@ class MasterDB:
         return self.compress_rows(rows)
 
     def export_core(self) -> tuple[dict, int]:
-        """판례 + 헌재 레코드 → 압축 dict (조세심판 제외)."""
+        """판례 + 헌재 레코드 → 압축 dict."""
         self.conn.row_factory = sqlite3.Row
         cur = self.conn.execute(
-            "SELECT * FROM cases WHERE serial NOT LIKE 'T%' ORDER BY date"
+            "SELECT * FROM cases ORDER BY date"
         )
         rows = cur.fetchall()
         self.conn.row_factory = None
         return self.compress_rows(rows)
-
-    def export_tax(self) -> tuple[dict, int]:
-        """조세심판 레코드만 → 압축 dict (TX prefix 보장)."""
-        self.conn.row_factory = sqlite3.Row
-        cur = self.conn.execute(
-            "SELECT * FROM cases WHERE serial LIKE 'T%' ORDER BY date"
-        )
-        rows = cur.fetchall()
-        self.conn.row_factory = None
-        return self.compress_rows_tax(rows)
-
-    def compress_rows_tax(self, rows) -> tuple[dict, int]:
-        """조세심판 전용 압축 — TX prefix + 한글 부호 보장."""
-        compressed = defaultdict(list)
-        skipped = 0
-
-        for row in rows:
-            key = compress_tax_case_number(row["case_number_clean"])
-            if not key:
-                skipped += 1
-                continue
-
-            raw_serial = row["serial"] or "0"
-            serial = int(raw_serial) if raw_serial.isdigit() else raw_serial
-            court_code = self.court_resolver.resolve(row["court"])
-            date_int = compress_date(row["date"])
-            name_raw = compress_case_name(row["case_name"] or "")
-
-            compressed[key].append([serial, court_code, date_int, name_raw])
-
-        return dict(compressed), skipped
 
     def export_new(self, since_iso: str) -> tuple[dict, int]:
         """이번 실행에서 추가된 레코드만 → 압축 dict."""
         rows = self.get_new_since(since_iso)
         return self.compress_rows(rows)
-
-    # ════════════════════════════════════════════════
-    # KIPRIS 특허심판원
-    # ════════════════════════════════════════════════
-
-    def upsert_kipris(self, items: list[dict]) -> tuple[int, int]:
-        """KIPRIS 심판 아이템 UPSERT. (inserted, updated) 반환."""
-        cur = self.conn.cursor()
-        inserted = 0
-        updated = 0
-
-        for raw in items:
-            # 입력 검증/정제. serial 없으면 스킵.
-            item = sanitize_kipris_item(raw)
-            if item is None:
-                continue
-            serial = item["serial"]
-
-            existing = cur.execute(
-                "SELECT serial FROM kipris_cases WHERE serial = ?",
-                (serial,),
-            ).fetchone()
-
-            if existing:
-                cur.execute("""
-                    UPDATE kipris_cases SET
-                        case_name = ?, case_number = ?,
-                        decision_date = ?, trial_type = ?
-                    WHERE serial = ?
-                """, (
-                    item["case_name"],
-                    item["case_number"],
-                    item["decision_date"],
-                    item["trial_type"],
-                    serial,
-                ))
-                updated += 1
-            else:
-                cur.execute("""
-                    INSERT INTO kipris_cases
-                        (serial, case_name, case_number,
-                         decision_date, trial_type)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    serial,
-                    item["case_name"],
-                    item["case_number"],
-                    item["decision_date"],
-                    item["trial_type"],
-                ))
-                inserted += 1
-
-        self.conn.commit()
-        return inserted, updated
-
-    def kipris_count(self) -> int:
-        """KIPRIS 특허심판 전체 레코드 수."""
-        return self.conn.execute(
-            "SELECT COUNT(*) FROM kipris_cases"
-        ).fetchone()[0]
-
-    def export_kipris(self) -> tuple[dict, int]:
-        """KIPRIS 특허심판 레코드 → 압축 dict.
-
-        키 형식: KP{연도2자리}{심판종류}{일련번호}
-        예: "2023당1234" → "KP23당1234"
-        """
-        cur = self.conn.execute(
-            "SELECT serial, case_name, case_number, decision_date, trial_type "
-            "FROM kipris_cases ORDER BY decision_date"
-        )
-        compressed = {}
-        skipped = 0
-
-        for serial, case_name, case_number, decision_date, trial_type in cur:
-            if not case_number:
-                skipped += 1
-                continue
-
-            # 심판번호 → KP + 2자리연도 + 나머지 (프론트엔드 compressCaseKey와 일치)
-            # 예: "2023당1234" → "KP23당1234"
-            _m = re.match(r'^(\d{2,4})(.+)$', case_number)
-            if _m:
-                year_2d = _m.group(1)[-2:]
-                key = f"KP{year_2d}{_m.group(2)}"
-            else:
-                key = f"KP{case_number}"
-
-            # 날짜 → 6자리 정수 (YYMMDD) — compress_date() 재사용
-            date_int = compress_date(decision_date)
-
-            entry = [serial, trial_type or "", date_int, case_name or ""]
-
-            if key not in compressed:
-                compressed[key] = [entry]
-            else:
-                compressed[key].append(entry)
-
-        return compressed, skipped
 
     # ════════════════════════════════════════════════
     # 유틸

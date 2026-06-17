@@ -66,11 +66,12 @@ describe('extractCaseNumbers', () => {
     expect(found).toHaveLength(1);
   });
 
-  test('조세심판원: 조심 prefix는 메타 없이도 추출, type=tax', () => {
+  test('조세(조심) 사건번호는 더 이상 탐지하지 않는다 (DLC 제거)', () => {
+    caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP);
+    // "중"은 화이트리스트에 없고 조세 전용 정규식도 제거됨 → 어떤 항목도 추출되지 않음
     const found = caseRegex.extractCaseNumbers('조심 2025중2548 결정');
-    const tax = found.filter(f => f.type === 'tax');
-    expect(tax).toHaveLength(1);
-    expect(tax[0]).toMatchObject({ year: '2025', code: '중', serial: '2548' });
+    expect(found).toHaveLength(0);
+    expect(found.some(f => f.type === 'tax')).toBe(false);
   });
 
   test('폴백 모드(메타 미로드): 범용 정규식으로 추출', () => {
@@ -105,13 +106,6 @@ describe('validateCaseNumber', () => {
     });
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/비현실적/);
-  });
-
-  test('조세: 1966년 미만은 invalid', () => {
-    const r = caseRegex.validateCaseNumber({
-      year: '1965', code: '중', serial: '1', type: 'tax',
-    });
-    expect(r.valid).toBe(false);
   });
 
   test('일련번호 0은 invalid', () => {
@@ -165,12 +159,5 @@ describe('compressCaseKey', () => {
     expect(caseRegex.compressCaseKey({
       year: '2015', code: '없는부호', serial: '1', type: 'court',
     })).toBeNull();
-  });
-
-  test('조세심판: TX prefix + 지역코드 유지', () => {
-    caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP);
-    expect(caseRegex.compressCaseKey({
-      year: '2025', code: '중', serial: '2548', type: 'tax',
-    })).toBe('TX25중2548');
   });
 });

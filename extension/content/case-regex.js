@@ -6,7 +6,6 @@
  * [파이프라인]
  *   1. extractCaseNumbers(text) → 화이트리스트 정규식으로 사건번호 추출
  *      - 법원/헌재: case_code_map 기반 동적 정규식 (등록된 사건부호만 매칭)
- *      - 조세심판: "조심" prefix 전용 정규식
  *   2. validateCaseNumber(num)  → Red 필터: 미래 연도, 비현실적 과거, 비정상 일련번호
  *   3. compressCaseKey(num)     → "2015다6302" → "15Da6302"
  *
@@ -89,19 +88,6 @@ const CASE_NUMBER_REGEX_FALLBACK = /(?:(?:19|20)\d{2}|\d{2})[가-힣]{1,4}\d{1,7
 const CASE_PARTS_REGEX = /^((?:19|20)\d{2}|\d{2})([가-힣]{1,4})(\d{1,7})$/;
 
 /**
- * 조세심판원 사건번호 정규식.
- *
- * 구조: [조심] [연도][지역코드][일련번호]
- *   - "조심" 접두사 (필수)
- *   - 연도: 4자리 또는 2자리
- *   - 지역코드: 한글 1자 (중/서/지/전/부/구/광/대/국 등)
- *   - 일련번호: 1~5자리 숫자
- *
- * 예시: "조심 2025중2548", "조심2024지1234"
- */
-const TAX_CASE_REGEX = /조심\s*(\d{2,4})([가-힣])(\d{1,5})/g;
-
-/**
  * 2자리 연도 → 4자리 변환 기준 피벗.
  * 이 값 이상이면 19xx, 미만이면 20xx로 해석한다.
  * (예: 30 → "30"~"99"는 1930~1999, "00"~"29"는 2000~2029)
@@ -114,7 +100,7 @@ const TWO_DIGIT_YEAR_PIVOT = 30;
 
 /**
  * 텍스트에서 모든 사건번호 후보를 추출.
- * 법원 판례 + 조세심판원 통합.
+ * 법원 판례 + 헌법재판소.
  *
  * [주의] g 플래그 정규식의 lastIndex를 수동 리셋함.
  * Content Script는 단일 스레드이므로 안전하나,
@@ -122,7 +108,7 @@ const TWO_DIGIT_YEAR_PIVOT = 30;
  *
  * @param {string} text - 스캔할 텍스트
  * @returns {Array<{raw: string, year: string, code: string, serial: string, startIdx: number, type: string}>}
- *          매칭 결과 배열 (중복 제거됨). type: 'court' | 'tax'
+ *          매칭 결과 배열 (중복 제거됨). type: 'court' | 'constitutional'
  */
 function extractCaseNumbers(text) {
   if (!text || typeof text !== 'string') return [];
@@ -163,18 +149,6 @@ function extractCaseNumbers(text) {
     }
   }
 
-  // --- 조세심판원 ---
-  TAX_CASE_REGEX.lastIndex = 0;
-  while ((match = TAX_CASE_REGEX.exec(text)) !== null) {
-    const raw = match[0];
-    if (seen.has(raw)) continue;
-    seen.add(raw);
-    results.push({
-      raw, year: match[1], code: match[2], serial: match[3],
-      startIdx: match.index, type: 'tax',
-    });
-  }
-
   return results;
 }
 
@@ -188,7 +162,7 @@ function extractCaseNumbers(text) {
  *
  * Red 판정 기준:
  *   1. 미래 연도: year > currentYear
- *   2. 비현실적 과거 연도: 법원 < 1945, 특허 < 1956, 조세 < 1966
+ *   2. 비현실적 과거 연도: 법원 < 1945
  *   3. 비정상 일련번호: 0
  *
  * 사건부호 유효성은 추출 단계에서 화이트리스트 정규식(_courtCaseRegex)으로
@@ -219,7 +193,7 @@ function validateCaseNumber(parsed) {
   }
 
   // ── Red 2: 비현실적 과거 연도 ──
-  const minYears = { tax: 1966, court: 1945 };
+  const minYears = { court: 1945 };
   const minYear = minYears[parsed.type] || 1945;
   if (fullYear < minYear) {
     return {
@@ -268,12 +242,7 @@ function compressCaseKey(parsed) {
     ? parsed.year.slice(2)
     : parsed.year;
 
-  // 조세심판원: "TX" prefix + 지역코드 그대로
-  if (parsed.type === 'tax') {
-    return `TX${yearSuffix}${parsed.code}${parsed.serial}`;
-  }
-
-  // 법원 판례: 기존 로직
+  // 법원/헌재 판례: case_code_map 로마자 압축
   const romanCode = _caseCodeMap[parsed.code];
   if (!romanCode) return null;
   return `${yearSuffix}${romanCode}${parsed.serial}`;

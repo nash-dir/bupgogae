@@ -5,7 +5,7 @@
   "description": "LLM 환각 판례를 실시간으로 탐지합니다",
   "permissions": ["alarms", "storage", "unlimitedStorage", "tabs"],
   "host_permissions": [
-    "*://*.law.go.kr/*",
+    "https://www.law.go.kr/*",
     "https://api.bup.live/*"
   ],
   "background": { "service_worker": "background/db-sync.js" },

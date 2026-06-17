@@ -141,7 +141,9 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
         except requests.exceptions.RequestException as e:
             _stats["retries"] += 1
             backoff = min(5 * (2 ** i), 60)
-            log.error(f"❌ [Network Error] {e}. "
+            # OC=API_KEY가 요청 URL에 실려 예외 문자열에 노출되므로 로깅 전 마스킹
+            safe_err = str(e).replace(API_KEY, "***") if API_KEY else str(e)
+            log.error(f"❌ [Network Error] {safe_err}. "
                   f"대기 {backoff}초 후 재시도 ({i + 1}/{retries})...")
             time.sleep(backoff)
 

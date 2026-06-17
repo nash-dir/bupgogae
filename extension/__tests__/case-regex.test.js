@@ -131,6 +131,60 @@ describe('validateCaseNumber', () => {
   });
 });
 
+describe('validateCaseNumber — 연도 피벗 상대화(M3) + 헌재 floor(L2)', () => {
+  afterEach(() => jest.useRealTimers());
+
+  test('M3: 2030년에 "30다1"은 1930이 아니라 2030으로 해석되어 valid', () => {
+    // 하드코딩 피벗(30)은 "30"을 영구히 1930(< 1945 court floor)으로 오인 → invalid.
+    // 현재연도 기준 슬라이딩 윈도우는 2030 <= 2031 → 2030 → valid 여야 한다.
+    jest.useFakeTimers().setSystemTime(new Date('2031-06-01T00:00:00Z'));
+    const r = caseRegex.validateCaseNumber({
+      year: '30', code: '다', serial: '1', type: 'court',
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  test('M3: 2자리 연도는 현재연도를 넘기지 않도록 직전 세기로 해석 (미래 방지)', () => {
+    // 2026년에 "27" → 2027(미래)이 아니라 1927로 해석. 1927 < 1945 → court invalid.
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-01T00:00:00Z'));
+    const r = caseRegex.validateCaseNumber({
+      year: '27', code: '다', serial: '1', type: 'court',
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/비현실적/);
+  });
+
+  test('M3: 현재연도 2자리(예: 2026의 "26")는 현 세기로 해석되어 valid', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-01T00:00:00Z'));
+    const r = caseRegex.validateCaseNumber({
+      year: '26', code: '다', serial: '1', type: 'court',
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  test('L2: 헌재 사건은 1988년 미만이면 invalid (헌법재판소 1988 설립)', () => {
+    const r = caseRegex.validateCaseNumber({
+      year: '1987', code: '헌마', serial: '1', type: 'constitutional',
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/비현실적/);
+  });
+
+  test('L2: 헌재 1988년은 valid (경계)', () => {
+    const r = caseRegex.validateCaseNumber({
+      year: '1988', code: '헌마', serial: '1', type: 'constitutional',
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  test('L2: 법원 사건은 헌재 floor의 영향을 받지 않는다 (1945~1987 valid)', () => {
+    const r = caseRegex.validateCaseNumber({
+      year: '1987', code: '다', serial: '1', type: 'court',
+    });
+    expect(r.valid).toBe(true);
+  });
+});
+
 describe('compressCaseKey', () => {
   afterEach(() => caseRegex.__resetMetaForTest());
 

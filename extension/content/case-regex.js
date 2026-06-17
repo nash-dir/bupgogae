@@ -88,14 +88,21 @@ const CASE_NUMBER_REGEX_FALLBACK = /(?:(?:19|20)\d{2}|\d{2})[가-힣]{1,4}\d{1,7
 const CASE_PARTS_REGEX = /^((?:19|20)\d{2}|\d{2})([가-힣]{1,4})(\d{1,7})$/;
 
 /**
- * 2자리 연도 → 4자리 변환 기준 피벗.
- * 이 값 이상이면 19xx, 미만이면 20xx로 해석한다.
- * (예: 30 → "30"~"99"는 1930~1999, "00"~"29"는 2000~2029)
- * 전자판례 데이터가 2자리 연도를 거의 쓰지 않는 구간(1930~)에 맞춰 30으로 설정.
+ * 2자리 연도 → 4자리 변환 (현재연도 기준 슬라이딩 윈도우, M3).
+ *
+ * 하드코딩 피벗(예: 30)은 시간이 지나면 깨진다 — 피벗이 30이면 2030년의
+ * "30다1"이 영구히 1930으로 오인된다. 대신 "현재연도를 넘지 않는 가장 가까운
+ * 과거"로 해석한다: 현 세기 후보가 미래면 직전 세기로 내린다.
+ *   (예: 2026년 → "26"→2026, "27"→1927, "99"→1999, "00"→2000)
+ *
+ * @param {number} twoDigit 0~99
+ * @returns {number} 4자리 연도
  */
-const TWO_DIGIT_YEAR_PIVOT = 30;
-
-
+function expandTwoDigitYear(twoDigit) {
+  const now = new Date().getFullYear();
+  const candidate = Math.floor(now / 100) * 100 + twoDigit; // 현 세기 후보
+  return candidate > now ? candidate - 100 : candidate;     // 미래면 직전 세기
+}
 
 
 /**
@@ -162,7 +169,7 @@ function extractCaseNumbers(text) {
  *
  * Red 판정 기준:
  *   1. 미래 연도: year > currentYear
- *   2. 비현실적 과거 연도: 법원 < 1945
+ *   2. 비현실적 과거 연도: 법원 < 1945, 헌재 < 1988
  *   3. 비정상 일련번호: 0
  *
  * 사건부호 유효성은 추출 단계에서 화이트리스트 정규식(_courtCaseRegex)으로
@@ -174,12 +181,10 @@ function extractCaseNumbers(text) {
 function validateCaseNumber(parsed) {
   const currentYear = new Date().getFullYear();
 
-  // ── 연도 정규화 (2자리 → 4자리) ──
+  // ── 연도 정규화 (2자리 → 4자리, 현재연도 기준 슬라이딩 윈도우) ──
   let fullYear;
   if (parsed.year.length === 2) {
-    const twoDigit = parseInt(parsed.year, 10);
-    // TWO_DIGIT_YEAR_PIVOT 이상 → 19xx, 미만 → 20xx
-    fullYear = twoDigit >= TWO_DIGIT_YEAR_PIVOT ? 1900 + twoDigit : 2000 + twoDigit;
+    fullYear = expandTwoDigitYear(parseInt(parsed.year, 10));
   } else {
     fullYear = parseInt(parsed.year, 10);
   }
@@ -193,7 +198,8 @@ function validateCaseNumber(parsed) {
   }
 
   // ── Red 2: 비현실적 과거 연도 ──
-  const minYears = { court: 1945 };
+  // 헌재(constitutional)는 헌법재판소 설립(1988) 이전 사건이 존재할 수 없다 (L2).
+  const minYears = { court: 1945, constitutional: 1988 };
   const minYear = minYears[parsed.type] || 1945;
   if (fullYear < minYear) {
     return {

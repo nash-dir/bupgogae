@@ -1,5 +1,11 @@
 # ⚖️ 법고개 (Bupgogae) - AI 판례 환각 탐지기
 
+[![Chrome Web Store](https://img.shields.io/chrome-web-store/v/ippnejkimhofmcbghlkabbhhgiehgajf)](https://chromewebstore.google.com/detail/법고개-bupgogae/ippnejkimhofmcbghlkabbhhgiehgajf)
+[![CI](https://img.shields.io/github/actions/workflow/status/nash-dir/bupgogae/ci.yml?branch=main&label=CI)](https://github.com/nash-dir/bupgogae/actions/workflows/ci.yml)
+[![License: GPLv3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE.txt)
+
+![demo](docs/demo.gif)
+
 **법고개(Bupgogae)**는 대형 언어 모델(LLM)이 생성한 법률 답변 속에서 '존재하지 않는 가짜 판례(Hallucination)'를 실시간으로 탐지하고 검증하는 크롬 확장프로그램입니다. 
 
 법률 실무가 AI에 의해 혁신되고 있지만, 거짓된 판례 인용은 치명적인 법적 리스크를 초래할 수 있습니다. 법고개는 변호사가 직접 기획하고 개발하여, 실무진이 안심하고 AI를 활용할 수 있는 환경을 제공합니다.

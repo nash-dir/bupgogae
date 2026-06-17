@@ -79,6 +79,32 @@ describe('extractCaseNumbers', () => {
     expect(found).toHaveLength(1);
     expect(found[0].code).toBe('다');
   });
+
+  // ── M4: 연도 좌측 경계 (숫자열에 붙은 사건번호 오탐 차단) ──
+  describe('M4: 연도 앞이 숫자면 매칭하지 않는다', () => {
+    test('전화번호 뒤 사건부호는 매칭 안 됨 (화이트리스트)', () => {
+      caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP);
+      // 010-1234-5678도1 → 과거엔 "78도1"로 오탐
+      expect(caseRegex.extractCaseNumbers('전화 010-1234-5678도1')).toEqual([]);
+    });
+
+    test('전화번호 뒤 사건부호는 매칭 안 됨 (폴백)', () => {
+      expect(caseRegex.extractCaseNumbers('전화 010-1234-5678도1')).toEqual([]);
+    });
+
+    test('4자리 비현실 연도(3015)가 2자리로 잘려 매칭되지 않음', () => {
+      caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP);
+      // 과거엔 "15다1234"로 잘려 미래연도 Red를 우회
+      expect(caseRegex.extractCaseNumbers('대법원 3015다1234')).toEqual([]);
+    });
+
+    test('정상 사건번호는 앞 경계(공백/괄호/문장시작)에서 그대로 매칭', () => {
+      caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP);
+      expect(caseRegex.extractCaseNumbers('(2015다6302)')).toHaveLength(1);
+      expect(caseRegex.extractCaseNumbers('2015다6302 참조')[0].raw).toBe('2015다6302');
+      expect(caseRegex.extractCaseNumbers('99다1234 사건')[0].raw).toBe('99다1234');
+    });
+  });
 });
 
 describe('validateCaseNumber', () => {

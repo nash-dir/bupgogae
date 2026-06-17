@@ -58,7 +58,7 @@ function initMeta() {
           const codesPattern = codes.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
           // 캡처 그룹: (연도)(사건부호)(일련번호)
           _courtCaseRegex = new RegExp(
-            `((?:19|20)\\d{2}|\\d{2})(${codesPattern})(\\d{1,7})`, 'g'
+            `(?<![0-9])((?:19|20)\\d{2}|\\d{2})(${codesPattern})(\\d{1,7})`, 'g'
           );
         }
 
@@ -84,7 +84,7 @@ function initMeta() {
  * 법원 사건번호 폴백 정규식 (메타 미로드 시에만 사용).
  * 메타 로드 후에는 _courtCaseRegex (화이트리스트)를 우선 사용.
  */
-const CASE_NUMBER_REGEX_FALLBACK = /(?:(?:19|20)\d{2}|\d{2})[가-힣]{1,4}\d{1,7}/g;
+const CASE_NUMBER_REGEX_FALLBACK = /(?<![0-9])(?:(?:19|20)\d{2}|\d{2})[가-힣]{1,4}\d{1,7}/g;
 const CASE_PARTS_REGEX = /^((?:19|20)\d{2}|\d{2})([가-힣]{1,4})(\d{1,7})$/;
 
 /**
@@ -313,7 +313,7 @@ if (typeof module !== 'undefined' && module.exports) {
       if (codes.length > 0) {
         const codesPattern = codes.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
         _courtCaseRegex = new RegExp(
-          `((?:19|20)\\d{2}|\\d{2})(${codesPattern})(\\d{1,7})`, 'g'
+          `(?<![0-9])((?:19|20)\\d{2}|\\d{2})(${codesPattern})(\\d{1,7})`, 'g'
         );
       } else {
         _courtCaseRegex = null;

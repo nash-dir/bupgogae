@@ -295,11 +295,7 @@ _courtCaseRegex = new RegExp(
 );
 ```
 
-This **whitelist approach** eliminates false positives from non-court case codes (e.g., `부해` from labor commissions, `형제` from prosecutors) at the extraction stage, rather than requiring a downstream Red filter.
-
-Separate fixed regexes handle non-court case numbers:
-- **조세심판원**: `/조심\s*(\d{2,4})([가-힣])(\d{1,5})/g` — requires `조심` prefix
-- **특허심판원**: `/(\d{4})(당|원|취|정|무)\s*(\d{1,6})/g` — specific trial type codes only
+This **whitelist approach** eliminates false positives from non-court case codes (e.g., `부해` from labor commissions, `형제` from prosecutors) at the extraction stage, rather than requiring a downstream Red filter. The same dynamic regex also covers Constitutional Court codes (`헌가`, `헌마`, …) since they live in `case_code_map`.
 
 ---
 
@@ -311,7 +307,7 @@ Analyzing user conversations with AI chatbots is inherently privacy-sensitive. A
 
 ### Solution
 
-The extension implements a **Zero-Server Architecture** where **all text analysis, pattern matching, and case law verification occurs entirely within the user's browser**. The complete case law database is stored locally in IndexedDB, with optional DLC packs for additional jurisdictions. No conversation data ever leaves the device.
+The extension implements a **Zero-Server Architecture** where **all text analysis, pattern matching, and case law verification occurs entirely within the user's browser**. The complete case law database is stored locally in IndexedDB. No conversation data ever leaves the device.
 
 ### Data Flow: 100% Local Processing
 
@@ -322,16 +318,13 @@ User's Browser (all processing local — no network calls)
 │  LLM Response Text                                               │
 │       │                                                          │
 │       ▼                                                          │
-│  [Whitelist Regex] case_code_map 기반 동적 정규식                   │
-│    + 조세심판(조심 prefix) + 특허심판(당/원/취/정/무)              │
+│  [Whitelist Regex] case_code_map 기반 동적 정규식 (법원 + 헌재)     │
 │       │ { year, code, serial, type }                              │
 │       ▼                                                          │
 │  [Red Filter Cascade] L1→L2→L3                                   │
 │       │ pass? ──── fail → 🔴 Red badge (instant, zero latency)  │
 │       ▼                                                          │
 │  [Key Compression] "2015다6302" → "15Da6302"                     │
-│                    "조심 2025중1234" → "TX25중1234"                │
-│                    "2023당1234" → "KP23당1234"                    │
 │       │ ASCII key                                                │
 │       ▼                                                          │
 │  [LOOKUP_BATCH IPC] Content Script → Service Worker              │
@@ -344,7 +337,7 @@ User's Browser (all processing local — no network calls)
 │  [Badge Render] Inline highlight + tooltip with metadata         │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
-     ▲ The ONLY network calls: periodic db.json.gz + DLC downloads
+     ▲ The ONLY network call: periodic db.json.gz download
      │ (public case law data only — no user data ever transmitted)
 ```
 
@@ -362,9 +355,7 @@ Original:    2015다6302     →  Compressed:  15Da6302
                       Serial (as-is)
 ```
 
-The `case_code_map` maps ~159 Hangul case codes to short romanized abbreviations (~40% reduction in average key length). DLC data uses prefix-based keys:
-- **TX** prefix: 조세심판원 (Tax Tribunal)
-- **KP** prefix: 특허심판원 (Patent Trial)
+The `case_code_map` maps ~159 Hangul case codes to short romanized abbreviations (~40% reduction in average key length).
 
 ### Positional Array Encoding
 
@@ -414,7 +405,6 @@ The **only** network communication is a periodic download of a static, pre-built
 ```
 
 * **Full-DB deploy** — one `db.json.gz` file (~3 MB gzip) contains the entire case law database
-* **DLC packs** — `db_tax.json.gz` (조세심판원) and `db_patent.json.gz` (특허심판원) are optional downloads managed via popup toggles
 * **ETag caching** — R2 returns `304 Not Modified` if unchanged; bandwidth cost is near-zero on most polls
 * **Bundled DB** — the full database ships with the extension for instant offline access on first install
 * **Batch lookup** — content scripts send all detected case numbers in a single `LOOKUP_BATCH` message, resolved in one IndexedDB readonly transaction
@@ -485,8 +475,6 @@ extension/
 
 pipeline/
 ├── api.py                      # 법제처 API client
-├── kipris_api.py               # KIPRIS Plus API client (특허심판원)
-├── kipris_runner.py            # KIPRIS Slow Grazing backfill runner
 ├── compress.py                 # SQLite → compressed JSON converter
 ├── master_db.py                # SQLite master DB with blacklist
 ├── crawler_runner.py               # Crawler orchestrator (date-modulus)

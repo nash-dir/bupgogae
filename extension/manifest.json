@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "법고개 (Bupgogae)",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "LLM 환각 판례를 실시간으로 탐지합니다",
   "permissions": ["alarms", "storage", "unlimitedStorage", "tabs"],
   "host_permissions": [

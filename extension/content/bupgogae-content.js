@@ -431,211 +431,159 @@ function findResponseContainers() {
 
 /**
  * 단일 컨테이너의 텍스트 노드를 순회하며 판례번호를 처리.
+ *
+ * [M2 수정] 한 텍스트노드에 여러 사건번호가 있어도(모델이 "한 줄에 하나씩"
+ * 출력하면 마크다운 렌더러에 따라 한 노드에 \n으로 모이는 경우가 많다) 노드별로
+ * 단 한 번의 분할 렌더(renderPrecedentBadges)로 전부 배지한다. 사건번호별로
+ * renderBadge를 반복하면 첫 분할에서 노드가 detach되어 나머지가 누락됐다.
+ *
+ * [렌더 시점] gray(pending) 단계 없이, 조회 결과가 확정된 뒤 최종색을 1회 렌더.
+ * 조회 타임아웃/시스템 에러(L13)는 'DB 미확인(orange)'으로 단정하지 않고
+ * 평문으로 남겨(plain) 재조회/다음 사이클에서 회복한다.
  * @param {Element} container
  */
 async function processContainer(container) {
-  // 미처리 텍스트 노드 수집
   const textNodes = collectTextNodes(container);
   if (textNodes.length === 0) return;
 
-  // 모든 텍스트에서 사건번호 추출
-  const allCases = [];
-  const nodeMap = new Map(); // raw → { textNode, parsed }[]
-
+  // ── 텍스트노드별 매칭 수집 (같은 노드 매칭을 함께 모아 한 번에 렌더) ──
+  const nodes = []; // [{ textNode, entries: [{ precedentString, startIdx, parsed, level, options, key }] }]
+  let totalDetected = 0;
   for (const textNode of textNodes) {
     const text = textNode.textContent;
-    if (!text || text.length < 5) continue; // 최소 "99다1" 정도는 되어야
+    if (!text || text.length < 5) continue; // 최소 "99다1" 정도
 
-    const cases = window.bupgogaeCaseRegex.extractCaseNumbers(text);
-    for (const parsed of cases) {
-      allCases.push({ textNode, parsed });
+    const cases = window.bupgogaeCaseRegex.extractCaseNumbers(text)
+      .filter((p) => _categoryFilters[p.type] !== false);
+    if (cases.length === 0) continue;
 
-      if (!nodeMap.has(parsed.raw)) {
-        nodeMap.set(parsed.raw, []);
+    const entries = cases.map((parsed) => ({
+      precedentString: parsed.raw,
+      startIdx: parsed.startIdx,
+      parsed,
+      level: null,    // 'red' | 'green' | 'orange' | null(미정→평문 유지)
+      options: {},
+      key: null,
+    }));
+    nodes.push({ textNode, entries });
+    totalDetected += entries.length;
+  }
+
+  if (totalDetected === 0) return;
+  console.log(`[bupgogae] ${totalDetected}개 사건번호 감지`);
+
+  // ── 검증(Red) + 키 압축(조회 대상 수집) ──
+  const keyToEntries = new Map(); // compressedKey → entry[]
+  for (const node of nodes) {
+    for (const e of node.entries) {
+      const validation = window.bupgogaeCaseRegex.validateCaseNumber(e.parsed);
+      if (!validation.valid) {
+        e.level = 'red';
+        e.options = { redReason: validation.reason };
+        continue;
       }
-      nodeMap.get(parsed.raw).push({ textNode, parsed });
+      const key = window.bupgogaeCaseRegex.compressCaseKey(e.parsed);
+      if (!key) {
+        // case_code_map에 없는 부호 → Orange (안전 처리)
+        e.level = 'orange';
+        continue;
+      }
+      e.key = key;
+      if (!keyToEntries.has(key)) keyToEntries.set(key, []);
+      keyToEntries.get(key).push(e);
     }
   }
 
-  if (allCases.length === 0) return;
-
-  // 카테고리 필터 적용: 비활성 타입은 스킵
-  const filteredCases = allCases.filter(({ parsed }) => _categoryFilters[parsed.type] !== false);
-
-  if (filteredCases.length === 0) return;
-
-  // ── M-1: 동일 텍스트 노드 내 다중 사건번호 역순 정렬 ──
-  // 같은 텍스트 노드에서 뒤쪽(startIdx가 큰) 매칭부터 처리하면
-  // 앞쪽 텍스트 노드의 인덱스가 무효화되지 않는다.
-  filteredCases.sort((a, b) => b.parsed.startIdx - a.parsed.startIdx);
-
-  console.log(`[bupgogae] ${filteredCases.length}개 사건번호 감지 (${allCases.length}개 중 필터 통과)`);
-
-  // ── Stage 1: Red 필터 ──
-  const redCases = [];
-  const lookupCases = [];
-
-  for (const { textNode, parsed } of filteredCases) {
-    const validation = window.bupgogaeCaseRegex.validateCaseNumber(parsed);
-
-    if (!validation.valid) {
-      redCases.push({ textNode, parsed, reason: validation.reason });
-    } else {
-      lookupCases.push({ textNode, parsed });
-    }
-  }
-
-  // Red 즉시 렌더링
-  for (const { textNode, parsed, reason } of redCases) {
-    renderBadge(textNode, parsed.raw, 'red', { redReason: reason });
-  }
-
-  if (lookupCases.length === 0) return;
-
-  // ── Stage 2: 키 압축 ──
-  const keyToCases = new Map(); // compressedKey → { textNode, parsed }[]
-
-  for (const { textNode, parsed } of lookupCases) {
-    const key = window.bupgogaeCaseRegex.compressCaseKey(parsed);
-    if (!key) {
-      // case_code_map에 없는 부호 → Orange (안전 처리)
-      renderBadge(textNode, parsed.raw, 'orange');
-      showOrangeToast();
-      continue;
-    }
-
-    if (!keyToCases.has(key)) {
-      keyToCases.set(key, []);
-    }
-    keyToCases.get(key).push({ textNode, parsed });
-  }
-
-  if (keyToCases.size === 0) return;
-
-  // ── Stage 2.5: Pending (Gray) 렌더링 ──
-  const pendingBadges = new Map(); // key -> { badge, parsed }[]
-
-  for (const [key, entries] of keyToCases) {
-    const items = [];
-    for (const { textNode, parsed } of entries) {
-      // 타다닥 효과를 위한 회색 껍데기 렌더링
-      const badge = renderBadge(textNode, parsed.raw, 'gray');
-      items.push({ badge, parsed }); // badge가 null이어도(이미 렌더링됨) 안전하게 모아둠
-    }
-    pendingBadges.set(key, items);
-  }
-
-  // ── Stage 3 + 4: 배치 조회 + 결과 적용 (타임아웃/에러는 gray 유지 후 재조회) ──
-  // L13 회귀 수정: 룩업 타임아웃을 'DB 미확인(orange)'으로 단정하지 않는다.
-  // DB 콜드 스타트(~20s)·SW 일시 정지로 인한 지연은 재조회로 회복하며,
-  // 회복 전까지 gray(pending)를 유지해 늦게 도착한 진짜 응답을 버리지 않는다.
+  // ── 배치 조회 + L13 재시도 (타임아웃/에러 키만 재조회) ──
   const courtCodeMap = window.bupgogaeCaseRegex.getCourtCodeMap();
-  let keysToLookup = Array.from(pendingBadges.keys());
-
-  for (let attempt = 1; attempt <= LOOKUP_MAX_ATTEMPTS; attempt++) {
+  let keysToLookup = Array.from(keyToEntries.keys());
+  for (let attempt = 1; attempt <= LOOKUP_MAX_ATTEMPTS && keysToLookup.length > 0; attempt++) {
     const results = await batchLookup(keysToLookup);
-    // green/orange 확정분은 즉시 렌더링하고, 타임아웃/에러 키만 남겨 재조회 대상으로 반환
-    keysToLookup = applyLookupResults(results, keysToLookup, pendingBadges, courtCodeMap);
-    if (keysToLookup.length === 0) break;
-    if (attempt < LOOKUP_MAX_ATTEMPTS) {
+    const unresolved = [];
+    for (const key of keysToLookup) {
+      const result = results[key];
+      const entries = keyToEntries.get(key) || [];
+
+      if (result && result.error) {
+        unresolved.push(key); // L13: 타임아웃/에러 → 미정(평문 유지) → 재조회
+        continue;
+      }
+      if (result && result.found) {
+        const greenEntries = buildGreenEntries(result.data, entries[0]?.parsed);
+        for (const e of entries) {
+          e.level = 'green';
+          e.options = { greenEntries, caseCode: e.parsed.code, caseType: e.parsed.type, courtCodeMap };
+        }
+      } else {
+        for (const e of entries) e.level = 'orange';
+      }
+    }
+    keysToLookup = unresolved;
+    if (keysToLookup.length > 0 && attempt < LOOKUP_MAX_ATTEMPTS) {
       await new Promise((r) => setTimeout(r, LOOKUP_RETRY_BACKOFF_MS * attempt));
     }
   }
-  // 모든 재조회가 타임아웃/에러로 끝나면 gray(pending)를 유지한다.
-  // orange 오탐(진짜 판례를 '미확인'으로 표시)보다 pending 유지가 안전하다.
+  // 끝까지 미정인 키(타임아웃)는 level이 null로 남아 평문 유지 — orange 오탐 방지.
+
+  // ── 렌더: 노드별로 level이 확정된 매칭만 한 번에 분할 렌더 ──
+  let anyOrange = false;
+  for (const node of nodes) {
+    if (!node.textNode.parentNode) continue; // 노드가 사라졌으면 스킵
+    const ready = node.entries.filter((e) => e.level); // 미정(null)은 평문 유지
+    if (ready.length === 0) continue;
+
+    renderBadges(node.textNode, ready);
+    if (ready.some((e) => e.level === 'orange')) anyOrange = true;
+  }
+  if (anyOrange) showOrangeToast();
 }
 
 /**
- * 배치 조회 결과를 pending(gray) 배지에 적용한다.
- *
- *   found:true        → Green (data 배열의 모든 매칭 사건을 entries로 조립)
- *   found:false       → Orange (DB 미확인) + 토스트
- *   error/timeout     → gray 유지 → 미해결 키로 반환 (재조회 대상)
- *
- * @param {Object} results          batchLookup 결과 맵 (key → { found, data, error })
- * @param {string[]} keys           이번에 조회한 키 목록
- * @param {Map} pendingBadges       key → { badge, parsed }[]
- * @param {Object} courtCodeMap     법원코드 매핑
- * @returns {string[]} 미해결(재조회 필요) 키 목록
+ * 조회 결과(data 배열)를 Green 툴팁용 entries로 조립.
+ * @param {Array} data   batchLookup 결과의 data (행 배열)
+ * @param {Object} parsed 대표 매칭(부호/타입 추출용)
+ * @returns {Array}
  */
-function applyLookupResults(results, keys, pendingBadges, courtCodeMap) {
-  const unresolved = [];
+function buildGreenEntries(data, parsed) {
+  const entryType = parsed?.type;
+  const caseCode = parsed?.code;
+  const greenEntries = [];
 
-  for (const key of keys) {
-    const items = pendingBadges.get(key);
-    if (!items) continue;
-    const result = results[key];
+  if (data && data.length > 0) {
+    for (const row of data) {
+      if (!row || row.length < 1) continue;
 
-    // 타임아웃/시스템 에러: gray 유지 (orange로 단정 금지) → 재조회 대상
-    if (result && result.error) {
-      unresolved.push(key);
-      continue;
-    }
+      const entry = {
+        serialNumber: row[0],
+        courtCode: null,
+        dateInt: null,
+        caseName: '',
+        caseType: entryType || 'court',
+        caseCode: caseCode || '',
+        trialType: '',
+      };
 
-    if (result && result.found) {
-      // Green — data 배열의 모든 매칭 사건을 entries로 조립
-      const data = result.data;
-      const entryType = items[0]?.parsed?.type;
-      const caseCode = items[0]?.parsed?.code;
-
-      const greenEntries = [];
-
-      if (data && data.length > 0) {
-        for (const row of data) {
-          if (!row || row.length < 1) continue;
-
-          const entry = {
-            serialNumber: row[0],
-            courtCode: null,
-            dateInt: null,
-            caseName: '',
-            caseType: entryType || 'court',
-            caseCode: caseCode || '',
-            trialType: '',
-          };
-
-          if (row.length >= 2) entry.courtCode = row[1];
-          if (row.length >= 3 && typeof row[2] === 'number') entry.dateInt = row[2];
-          const nameIdx = (typeof row[2] === 'string') ? 2 : 3;
-          if (row.length > nameIdx && typeof row[nameIdx] === 'string') {
-            entry.caseName = row[nameIdx] || '';
-          }
-
-          greenEntries.push(entry);
-        }
+      if (row.length >= 2) entry.courtCode = row[1];
+      if (row.length >= 3 && typeof row[2] === 'number') entry.dateInt = row[2];
+      const nameIdx = (typeof row[2] === 'string') ? 2 : 3;
+      if (row.length > nameIdx && typeof row[nameIdx] === 'string') {
+        entry.caseName = row[nameIdx] || '';
       }
 
-      // 매칭이 0건이면 안전 처리 (빈 entries 배열)
-      if (greenEntries.length === 0) {
-        greenEntries.push({
-          serialNumber: '', courtCode: null, dateInt: null,
-          caseName: '', caseType: entryType || 'court',
-          caseCode: caseCode || '', trialType: '',
-        });
-      }
-
-      for (const item of items) {
-        if (item.badge) {
-          window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'green', {
-            greenEntries,
-            caseCode: item.parsed.code,
-            caseType: item.parsed.type,
-            courtCodeMap,
-          });
-        }
-      }
-    } else {
-      // Orange (genuine miss: 응답은 받았으나 DB에 없음)
-      for (const item of items) {
-        if (item.badge) {
-          window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'orange');
-        }
-      }
-      if (items.length > 0) showOrangeToast();
+      greenEntries.push(entry);
     }
   }
 
-  return unresolved;
+  // 매칭이 0건이면 안전 처리 (빈 entries)
+  if (greenEntries.length === 0) {
+    greenEntries.push({
+      serialNumber: '', courtCode: null, dateInt: null,
+      caseName: '', caseType: entryType || 'court',
+      caseCode: caseCode || '', trialType: '',
+    });
+  }
+
+  return greenEntries;
 }
 
 
@@ -792,6 +740,30 @@ function renderBadge(textNode, raw, level, options = {}) {
   return null;
 }
 
+/**
+ * renderPrecedentBadges(다중 매칭) 래퍼.
+ * 한 텍스트노드의 매칭들을 1회 분할 렌더 (M2 수정).
+ *
+ * @param {Text} textNode
+ * @param {Array<{precedentString, level, options, startIdx}>} entries
+ * @returns {HTMLElement[]} 생성된 배지들
+ */
+function renderBadges(textNode, entries) {
+  try {
+    if (!textNode.parentNode) return [];
+    if (textNode.parentNode.closest && textNode.parentNode.closest('.bgae-badge')) return [];
+
+    const created = window.bupgogae.renderPrecedentBadges(textNode, entries);
+    if (created && created.length) {
+      console.debug(`[bupgogae] ${created.length}개 배지 렌더링`);
+    }
+    return created || [];
+  } catch (err) {
+    console.error('[bupgogae] 다중 렌더링 실패:', err);
+    return [];
+  }
+}
+
 
 // ============================================================
 // 9. 메시지 수신 (팝업/단축키용)
@@ -919,7 +891,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     processContainer,
     batchLookup,
-    applyLookupResults,
+    buildGreenEntries,
     scheduleProcessing,
     SETTLE_MS,
     SETTLE_MAX_DEFER_MS,

@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe('processContainer — 룩업 결과 렌더링 (L13)', () => {
-  test('타임아웃/에러는 gray를 orange로 덮어쓰지 않고, 재조회로 늦게 온 진짜 응답(green)을 반영한다', async () => {
+  test('타임아웃/에러는 orange로 오탐하지 않고(평문 유지), 재조회로 늦게 온 진짜 응답(green)을 반영한다', async () => {
     jest.useFakeTimers();
 
     let lookupCalls = 0;
@@ -76,7 +76,7 @@ describe('processContainer — 룩업 결과 렌더링 (L13)', () => {
     expect(lookupCalls).toBeGreaterThanOrEqual(2);        // 재조회 발생
   });
 
-  test('진짜 타임아웃(콜백 미호출, 8s)도 orange가 아니라 gray 유지 후 재조회로 green이 된다', async () => {
+  test('진짜 타임아웃(콜백 미호출, 8s)도 orange가 아니라 평문 유지 후 재조회로 green이 된다', async () => {
     jest.useFakeTimers();
 
     let lookupCalls = 0;
@@ -140,5 +140,24 @@ describe('processContainer — 룩업 결과 렌더링 (L13)', () => {
     expect(badge).not.toBeNull();
     expect(badge.className).toContain('bgae-green');
     expect(badge.className).not.toContain('bgae-orange');
+  });
+
+  test('M2: 한 텍스트노드 내 여러 사건번호가 단일 처리로 전부 배지된다', async () => {
+    // 전부 miss/red — 한 텍스트노드에 4개(valid 2 + red 2)
+    global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+      if (msg && msg.type === 'LOOKUP_BATCH') cb({}); // 응답은 받되 키 없음 → miss → orange
+      else if (cb) cb({});
+    });
+
+    // 2015다6302/2020두1234 → valid(miss→orange), 2099다1(미래)/2015다0(일련번호0) → red
+    const container = makeContainer('판례 2015다6302 2020두1234 2099다1 2015다0 참조');
+    await content.processContainer(container);
+
+    const badges = container.querySelectorAll('.bgae-badge');
+    expect(badges.length).toBe(4); // M2 수정 전엔 첫 분할로 노드가 detach되어 1개만 떴다
+    const cases = Array.from(badges).map((b) => b.getAttribute('data-bgae-case'));
+    expect(cases).toEqual(
+      expect.arrayContaining(['2015다6302', '2020두1234', '2099다1', '2015다0']),
+    );
   });
 });

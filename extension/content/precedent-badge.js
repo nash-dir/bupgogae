@@ -731,6 +731,39 @@ if (typeof document !== 'undefined') {
  * @param {Object} [options]
  * @returns {HTMLElement|null}
  */
+/**
+ * 배지 <span> 요소 생성 (DOM 삽입은 호출자 책임).
+ * 툴팁 이벤트(hover/click)도 여기서 연결한다.
+ * @param {string} precedentString
+ * @param {'green'|'orange'|'red'|'gray'} level
+ * @param {Object} [options]
+ * @returns {HTMLElement}
+ */
+function _createBadge(precedentString, level, options = {}) {
+  const badge = document.createElement('span');
+  badge.className = `bgae-badge bgae-${level}`;
+  badge.setAttribute('data-bgae-level', level);
+  badge.setAttribute('data-bgae-case', precedentString);
+  badge.textContent = precedentString;
+
+  // gray(pending)는 툴팁 없음
+  if (level !== 'gray') {
+    badge.addEventListener('mouseenter', () => {
+      showTooltip(badge, level, options, precedentString);
+    });
+    badge.addEventListener('mouseleave', () => {
+      hideTooltip();
+    });
+    badge.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      togglePinTooltip(badge, level, options, precedentString);
+    });
+  }
+
+  return badge;
+}
+
 function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return null;
 
@@ -746,29 +779,7 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   const beforeText = text.slice(0, idx);
   const afterText = text.slice(idx + precedentString.length);
 
-  // ── 배지 <span> 생성 ──
-  const badge = document.createElement('span');
-  badge.className = `bgae-badge bgae-${level}`;
-  badge.setAttribute('data-bgae-level', level);
-  badge.setAttribute('data-bgae-case', precedentString);
-  badge.textContent = precedentString;
-
-  // ── 툴팁 이벤트 연결 ──
-  if (level !== 'gray') {
-    badge.addEventListener('mouseenter', () => {
-      showTooltip(badge, level, options, precedentString);
-    });
-    
-    badge.addEventListener('mouseleave', () => {
-      hideTooltip();
-    });
-    
-    badge.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      togglePinTooltip(badge, level, options, precedentString);
-    });
-  }
+  const badge = _createBadge(precedentString, level, options);
 
   // ── DOM 교체 ──
   // 분할로 생성하는 텍스트 노드는 _ownTextNodes에 등록해 옵저버가 무시하도록 함.
@@ -786,6 +797,65 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   parent.removeChild(textNode);
 
   return badge;
+}
+
+/**
+ * 한 텍스트노드 안의 여러 사건번호를 단 한 번의 분할로 모두 배지화 (M2 수정).
+ *
+ * 사건번호별로 renderPrecedentBadge를 반복하면 첫 호출이 텍스트노드를 분할/제거해
+ * 나머지 매칭의 노드 참조가 detach되어 누락된다. 여기서는 텍스트를 한 번만 훑어
+ * [텍스트][배지][텍스트][배지]… DocumentFragment를 만들어 원노드를 통째로 교체한다.
+ *
+ * @param {Text} textNode
+ * @param {Array<{precedentString: string, level: string, options?: Object, startIdx?: number}>} matches
+ * @returns {HTMLElement[]} 생성된 배지 요소들 (위치 순)
+ */
+function renderPrecedentBadges(textNode, matches) {
+  if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return [];
+  if (!Array.isArray(matches) || matches.length === 0) return [];
+
+  const parent = textNode.parentNode;
+  if (!parent) return [];
+
+  const text = textNode.textContent;
+
+  // 위치(startIdx) 오름차순 — 없으면 현재 텍스트에서 indexOf로 보정
+  const sorted = matches.slice().sort(
+    (a, b) => (a.startIdx ?? text.indexOf(a.precedentString)) - (b.startIdx ?? text.indexOf(b.precedentString)),
+  );
+
+  injectBadgeStyles();
+
+  const frag = document.createDocumentFragment();
+  const created = [];
+  let cursor = 0;
+
+  for (const m of sorted) {
+    const idx = text.indexOf(m.precedentString, cursor);
+    if (idx < 0) continue; // 현재 텍스트에서 못 찾으면 스킵 (중복 제거 등)
+
+    if (idx > cursor) {
+      const before = document.createTextNode(text.slice(cursor, idx));
+      _ownTextNodes.add(before);
+      frag.appendChild(before);
+    }
+
+    const badge = _createBadge(m.precedentString, m.level, m.options || {});
+    frag.appendChild(badge);
+    created.push(badge);
+    cursor = idx + m.precedentString.length;
+  }
+
+  if (created.length === 0) return [];
+
+  if (cursor < text.length) {
+    const after = document.createTextNode(text.slice(cursor));
+    _ownTextNodes.add(after);
+    frag.appendChild(after);
+  }
+
+  parent.replaceChild(frag, textNode);
+  return created;
 }
 
 /**
@@ -825,6 +895,7 @@ if (typeof window !== 'undefined') {
   window.bupgogae = window.bupgogae || {};
   Object.assign(window.bupgogae, {
     renderPrecedentBadge,
+    renderPrecedentBadges,
     updatePrecedentBadge,
     revertPrecedentBadge,
     formatDecisionDate,

@@ -59,6 +59,27 @@ describe('renderPrecedentBadge', () => {
     expect(bg.renderPrecedentBadge(tn, '2015다6302', 'green')).toBeNull();
   });
 
+  test('renderPrecedentBadges: 한 텍스트노드 내 다중 매칭을 1회 분할로 모두 배지 (M2)', () => {
+    const { parent, tn } = makeTextNode('a 2015다6302 b 2020두1234 c 99다1234 d');
+    const created = bg.renderPrecedentBadges(tn, [
+      { precedentString: '2015다6302', startIdx: 2, level: 'green' },
+      { precedentString: '2020두1234', startIdx: 15, level: 'orange' },
+      { precedentString: '99다1234', startIdx: 28, level: 'red', options: { redReason: 'x' } },
+    ]);
+
+    expect(created).toHaveLength(3);
+    const badges = parent.querySelectorAll('.bgae-badge');
+    expect(badges).toHaveLength(3);
+    // 텍스트 보존 + 위치 순서 유지
+    expect(parent.textContent).toBe('a 2015다6302 b 2020두1234 c 99다1234 d');
+    expect(badges[0].getAttribute('data-bgae-case')).toBe('2015다6302');
+    expect(badges[0].className).toContain('bgae-green');
+    expect(badges[1].className).toContain('bgae-orange');
+    expect(badges[2].className).toContain('bgae-red');
+    // 원본 텍스트노드는 제거됨
+    expect(parent.contains(tn)).toBe(false);
+  });
+
   test('revertPrecedentBadge: 배지를 텍스트로 원복하고 _ownTextNodes 등록', () => {
     const { parent, tn } = makeTextNode('x 99다1 y');
     const badge = bg.renderPrecedentBadge(tn, '99다1', 'gray');

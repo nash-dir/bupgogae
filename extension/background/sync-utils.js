@@ -239,11 +239,6 @@
     const coreError = validateManifestEntry(m.core, 'core');
     if (coreError) return { ok: false, error: coreError };
 
-    if (m.tax !== undefined) {
-      const taxError = validateManifestEntry(m.tax, 'tax');
-      if (taxError) return { ok: false, error: taxError };
-    }
-
     return { ok: true };
   }
 

@@ -171,11 +171,6 @@ describe('validateManifest', () => {
     expect(validateManifest(VALID).ok).toBe(true);
   });
 
-  test('tax 항목이 있으면 같은 스키마로 검증 — 유효하면 통과', () => {
-    const m = { ...VALID, tax: { version: '20260606', sha256: 'b'.repeat(64), total: 31_204 } };
-    expect(validateManifest(m).ok).toBe(true);
-  });
-
   test.each([
     ['null', null],
     ['schema 불일치', { ...VALID, schema: 2 }],
@@ -188,7 +183,6 @@ describe('validateManifest', () => {
     ['total 비정수', { ...VALID, core: { ...VALID.core, total: 1.5 } }],
     ['total 상한 초과', { ...VALID, core: { ...VALID.core, total: 10_000_001 } }],
     ['built_at 파싱 불가', { ...VALID, built_at: 'not-a-date' }],
-    ['tax 형식 불량', { ...VALID, tax: { version: 'bad' } }],
   ])('거부: %s', (_label, m) => {
     expect(validateManifest(m).ok).toBe(false);
   });

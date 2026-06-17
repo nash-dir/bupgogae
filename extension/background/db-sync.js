@@ -23,7 +23,6 @@ importScripts('sync-utils.js');
 // 상수
 // ============================================================
 const DB_URL = 'https://api.bup.live/bupgogae/db.json.gz';
-const DB_TAX_URL = 'https://api.bup.live/bupgogae/db_tax.json.gz';  // DLC: 조세심판
 
 const ADAPTERS_URL = 'https://api.bup.live/bupgogae/adapters.json'; // 원격 어댑터 셀렉터 설정
 const MANIFEST_URL = 'https://api.bup.live/bupgogae/manifest.json'; // Drift 안전망 정답지
@@ -42,7 +41,6 @@ const MAX_SELECTOR_LENGTH = 150;     // 선택자 하나당 최대 길이 (문�
 
 // [무결성 검증 상수]
 const MIN_KEYS_CORE = 100_000;       // Core DB 최소 키 수 (미달 시 파이프라인 장애 판정)
-const MIN_KEYS_TAX_DLC = 30_000;     // 조세 DLC 최소 키 수
 const VERSION_REGEX = /^\d{8}$/;     // version 형식: YYYYMMDD
 
 // [동기화 견고성 상수] — 0.8.0 "DB 2달 정체" 사고 재발 방지
@@ -142,37 +140,7 @@ function dbClear(db, storeName) {
   });
 }
 
-/**
- * Core 데이터만 삭제 (DLC 키 TX*, KP*는 보존).
- * syncDatabase에서 dbClear 대신 사용하여 DLC 데이터 소실 방지.
- *
- * 키 범위 일괄 삭제 3건으로 처리한다 — 커서로 1건씩 지우면 20만건 기준
- * 수십 초가 걸려 동기화 응답을 지연시킨다 (E2E 타임아웃의 원인이기도 했다).
- * 문자열 정렬상 'KP*'는 ['KP','KQ'), 'TX*'는 ['TX','TY') 구간이므로
- * 그 바깥 3개 범위를 지우면 DLC만 정확히 남는다.
- * (cases 키는 JSON 객체 속성명에서 오므로 항상 문자열이다)
- *
- * @param {IDBDatabase} db
- * @param {string} storeName
- * @returns {Promise<number>} 삭제된 레코드 수
- */
-async function dbClearCoreOnly(db, storeName) {
-  const deleted = await countCoreKeys(db).catch(() => 0);
 
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, 'readwrite');
-    const store = tx.objectStore(storeName);
-
-    store.delete(IDBKeyRange.bound('', 'KP', false, true));   // < 'KP'
-    store.delete(IDBKeyRange.bound('KQ', 'TX', false, true)); // ['KQ', 'TX')
-    store.delete(IDBKeyRange.lowerBound('TY'));               // >= 'TY'
-
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(new Error(`dbClearCoreOnly failed: ${tx.error}`));
-  });
-
-  return deleted;
-}
 
 /**
  * 대량 데이터 삽입 (Bulk Insert).
@@ -410,9 +378,6 @@ async function syncDatabase(opts = {}) {
   // ── 어댑터 원격 설정 동기화 (DB 동기화와 독립적으로 실행) ──
   try { await fetchAdaptersConfig(); } catch {}
 
-  // ── DLC 동기화 (조세심판) ──
-  try { await syncTaxDLCIfEnabled(); } catch {}
-
   // ── post-sync 드리프트 자동 검증 (drift 트리거 자신은 제외 — 재귀 방지) ──
   if (trigger !== 'drift' &&
       (result.outcome === 'replaced' || result.outcome === 'not_modified')) {
@@ -504,9 +469,9 @@ async function doSyncDatabase({ force, cacheBuster }) {
   // ── Step 3~5: IndexedDB 교체 + 메타/ETag 저장 ──
   try {
     const db = await getCachedDB();
-    const cleared = await dbClearCoreOnly(db, STORE_CASES);
+    await dbClear(db, STORE_CASES);
     const count = await dbBulkInsert(db, STORE_CASES, data.cases);
-    console.log(`[bupgogae] Core DB 교체: ${cleared}건 삭제 → ${count}건 삽입 (DLC 보존)`);
+    console.log(`[bupgogae] Core DB 교체: ${count}건 삽입`);
 
     const version = data.version || new Date().toISOString().slice(0, 10);
     await updateMetadata(db, version, data.total || count, {
@@ -638,7 +603,7 @@ async function doMaybeLoadBundledDB() {
     console.log(`[bupgogae] 📦 번들 DB 폴백 시도 (${gate.reason})...`);
 
     const db = await getCachedDB();
-    await dbClearCoreOnly(db, STORE_CASES);
+    await dbClear(db, STORE_CASES);
     const count = await dbBulkInsert(db, STORE_CASES, data.cases);
     const version = data.version || 'bundled';
     // 번들은 R2 동기화 성공이 아니므로 content_hash/last_success_at은 제거
@@ -1110,26 +1075,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // ── DLC 다운로드 요청 (Popup에서 토글 ON 시) ──
-  if (message.type === 'DOWNLOAD_DLC') {
-    if (message.dlc === 'tax') {
-      console.log('[bupgogae] DLC 다운로드 요청: 조세심판');
-      syncTaxDLC()
-        .then(() => sendResponse({ success: true }))
-        .catch(err => sendResponse({ success: false, error: err.message }));
-      return true;
-    }
-    sendResponse({ success: false, error: 'Unknown DLC' });
-    return true;
-  }
-
-  // ── DLC DB 삭제 (Popup에서 삭제 버튼 클릭 시) ──
-  if (message.type === 'DELETE_DLC_DB') {
-    deleteDlcData()
-      .then(() => sendResponse({ success: true }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
 });
 
 /**
@@ -1304,102 +1249,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 
-// ============================================================
-// 8. DLC 동기화 (조세심판원)
-// ============================================================
-
-/**
- * 조세심판 DLC 설정이 켜져있으면 동기화.
- */
-async function syncTaxDLCIfEnabled() {
-  const { bupgogae_dlc_tax } = await chrome.storage.local.get('bupgogae_dlc_tax');
-  if (bupgogae_dlc_tax === true) {
-    await syncTaxDLC();
-  }
-}
-
-/**
- * 조세심판 DLC DB를 R2에서 fetch하여 IndexedDB에 추가 (merge).
- * Core DB와 같은 cases 스토어를 사용하되, TX prefix 키로 구분.
- */
-async function syncTaxDLC() {
-  console.log('[bupgogae] 조세 DLC 동기화 시작...');
-
-  try {
-    const { bupgogae_tax_etag: cachedETag = null } =
-      await chrome.storage.local.get('bupgogae_tax_etag');
-
-    const { data, etag, notModified } = await fetchDB(DB_TAX_URL, cachedETag);
-
-    if (notModified) {
-      console.log('[bupgogae] 조세 DLC 변경 없음 (304)');
-      return;
-    }
-
-    if (!data || !data.cases) {
-      console.warn('[bupgogae] 조세 DLC 유효하지 않음');
-      return;
-    }
-
-    // ── 무결성 게이트: 키 수 하한선 + version 형식 ──
-    const taxKeyCount = Object.keys(data.cases).length;
-    if (taxKeyCount < MIN_KEYS_TAX_DLC) {
-      throw new Error(`조세 DLC 무결성 검증 실패: 키 수 ${taxKeyCount.toLocaleString()} < 하한 ${MIN_KEYS_TAX_DLC.toLocaleString()}`);
-    }
-    if (data.version && !VERSION_REGEX.test(String(data.version))) {
-      throw new Error(`조세 DLC 무결성 검증 실패: version 형식 오류 '${data.version}'`);
-    }
-    console.log(`[bupgogae] 조세 DLC 무결성 검증 통과: ${taxKeyCount.toLocaleString()}건`);
-
-    // Core DB와 같은 스토어에 merge (TX prefix 키라 충돌 없음)
-    const db = await getCachedDB();
-    const count = await dbBulkInsert(db, STORE_CASES, data.cases);
-
-    await chrome.storage.local.set({ bupgogae_tax_etag: etag });
-    console.log(`[bupgogae] ✅ 조세 DLC 동기화 완료: ${count}건 merge`);
-
-  } catch (err) {
-    console.error('[bupgogae] ❌ 조세 DLC 동기화 실패:', err);
-  }
-}
-
-/**
- * DLC 데이터 삭제: TX prefix 키를 cases 스토어에서 제거.
- */
-async function deleteDlcData() {
-  console.log('[bupgogae] DLC DB 삭제 시작...');
-
-  try {
-    const db = await getCachedDB();
-    const tx = db.transaction(STORE_CASES, 'readwrite');
-    const store = tx.objectStore(STORE_CASES);
-    const req = store.openCursor();
-    let deleted = 0;
-
-    await new Promise((resolve, reject) => {
-      req.onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (!cursor) return; // cursor 소진 — tx.oncomplete 대기
-        // DLC prefix = TX(조세심판), KP(특허심판)
-        if (typeof cursor.key === 'string' &&
-            (cursor.key.startsWith('TX') || cursor.key.startsWith('KP'))) {
-          cursor.delete();
-          deleted++;
-        }
-        cursor.continue();
-      };
-      tx.oncomplete = () => resolve(deleted);
-      tx.onerror = () => reject(new Error(`DLC delete tx failed: ${tx.error}`));
-    });
-
-    // ETag도 초기화
-    await chrome.storage.local.remove(['bupgogae_tax_etag']);
-
-    console.log(`[bupgogae] ✅ DLC 삭제 완료: ${deleted}건 제거`);
-  } catch (err) {
-    console.error('[bupgogae] DLC 삭제 실패:', err);
-  }
-}
 
 /**
  * 단축키(commands) 핸들러

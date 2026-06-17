@@ -28,8 +28,6 @@ const $dbCount = document.getElementById('dbCount');
 const $dlcToggleBtn = document.getElementById('dlcToggleBtn');
 const $dlcArrow = document.getElementById('dlcArrow');
 const $dlcBody = document.getElementById('dlcBody');
-const $taxDlcToggle = document.getElementById('taxDlcToggle');
-const $taxDlcDesc = document.getElementById('taxDlcDesc');
 
 // 동기화 이력 (ledger)
 const $ledgerToggleBtn = document.getElementById('ledgerToggleBtn');
@@ -52,7 +50,6 @@ let _currentTabId = null;        // 현재 탭 ID
 let _disabledGlobal = false;     // 전체 비활성
 let _disabledSites = [];         // 비활성 사이트 목록
 let _isSupportedSite = false;    // 현재 사이트가 지원 대상인지
-let _dlcTaxEnabled = false;      // 조세심판 DLC 활성 여부
 
 let _filterCourt = true;         // 법원 판례 필터 (기본 ON)
 let _filterConstitutional = true; // 헌법재판소 필터 (기본 ON)
@@ -124,14 +121,12 @@ async function loadState() {
     const data = await chrome.storage.local.get([
       'bupgogae_disabled_global',
       'bupgogae_disabled_sites',
-      'bupgogae_dlc_tax',
 
       'bupgogae_filter_court',
       'bupgogae_filter_constitutional',
     ]);
     _disabledGlobal = data.bupgogae_disabled_global === true;
     _disabledSites = Array.isArray(data.bupgogae_disabled_sites) ? data.bupgogae_disabled_sites : [];
-    _dlcTaxEnabled = data.bupgogae_dlc_tax === true;
 
     // 법원/헌재 기본값은 true (undefined → true)
     _filterCourt = data.bupgogae_filter_court !== false;
@@ -227,8 +222,6 @@ function renderUI() {
   updateCourtFilterDesc();
   $constitutionalFilterToggle.checked = _filterConstitutional;
   updateConstitutionalFilterDesc();
-  $taxDlcToggle.checked = _dlcTaxEnabled;
-  updateTaxDlcDesc();
 
 }
 
@@ -242,12 +235,6 @@ function updateConstitutionalFilterDesc() {
   $constitutionalFilterDesc.textContent = _filterConstitutional
     ? '헌재 결정 검증 활성'
     : '헌재 결정 검증 비활성';
-}
-
-function updateTaxDlcDesc() {
-  $taxDlcDesc.textContent = _dlcTaxEnabled
-    ? '조세심판 사건 검증 활성'
-    : '조세심판 사건 검증 비활성';
 }
 
 
@@ -331,18 +318,6 @@ function bindEvents() {
     _filterConstitutional = $constitutionalFilterToggle.checked;
     await chrome.storage.local.set({ bupgogae_filter_constitutional: _filterConstitutional });
     updateConstitutionalFilterDesc();
-  });
-
-  // DLC 조세심판 토글
-  $taxDlcToggle.addEventListener('change', async () => {
-    _dlcTaxEnabled = $taxDlcToggle.checked;
-    await chrome.storage.local.set({ bupgogae_dlc_tax: _dlcTaxEnabled });
-    updateTaxDlcDesc();
-
-    if (_dlcTaxEnabled) {
-      // Service Worker에 DLC 다운로드 요청
-      chrome.runtime.sendMessage({ type: 'DOWNLOAD_DLC', dlc: 'tax' });
-    }
   });
 
 }

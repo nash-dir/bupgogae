@@ -771,67 +771,100 @@ function renderBadges(textNode, entries) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'EXTRACT_ORANGE_CASES') {
-    let badges = [];
-    const allBadges = document.querySelectorAll('.bgae-badge.bgae-orange');
-    
-    if (allBadges.length > 0) {
-      const lastBadge = allBadges[allBadges.length - 1];
-      // 해당 배지가 속한 메시지 전체 블록을 탐색 (플랫폼별 최상위 컨테이너)
-      const msgContainer = lastBadge.closest('article, [data-testid="conversation-turn"], [data-message-author-role], message-content, model-response, .response-container, .markdown-main-panel');
-      
-      if (msgContainer) {
-        badges = msgContainer.querySelectorAll('.bgae-badge.bgae-orange');
-      } else {
-        badges = allBadges; // 명확한 컨테이너가 없으면 전체 긁어오기 (안전 폴백)
-      }
-    }
-
-    const cases = Array.from(new Set(Array.from(badges).map(b => b.getAttribute('data-bgae-case')))).filter(Boolean);
-    
-    if (cases.length === 0) {
-      sendResponse({ count: 0 });
-      return false; // 동기 응답
-    }
-
-    const textToCopy = `다음 사건번호의 출처를 확인하세요 : ${cases.join(', ')}`;
-    
-    // Clipboard API 사용 (현대 브라우저)
-    // 주의: 확장프로그램 단축키(Alt+C)로 트리거 시, Content Script는
-    // 'User Activation' 컨텍스트를 잃어버려 NotAllowedError가 발생할 수 있습니다.
-    navigator.clipboard.writeText(textToCopy).then(() => {
-      sendResponse({ count: cases.length, text: textToCopy });
-    }).catch(err => {
-      console.warn('[bupgogae] Clipboard API failed (User Activation lost), using execCommand fallback.', err);
-      // Fallback: deprecated이지만 확장프로그램 단축키 환경에서는 유일하게 작동하는 안정적 우회책
-      try {
-        const input = document.createElement('textarea');
-        input.value = textToCopy;
-        document.body.appendChild(input);
-        input.select();
-        document.execCommand('copy');
-        document.body.removeChild(input);
-        sendResponse({ count: cases.length, text: textToCopy });
-      } catch (fallbackErr) {
-        console.error('[bupgogae] Fallback execCommand also failed:', fallbackErr);
-        sendResponse({ count: cases.length, text: textToCopy, copyFailed: true });
-      }
-    });
-
+    // Alt+C 단축키 경로 — 토스트 복사 버튼과 동일 로직 공용.
+    copyOrangeCases().then((res) => sendResponse(res));
     return true; // 비동기 응답 대기
   }
 });
 
 // ============================================================
-// 10. 토스트 알림
+// 10. 주황(미확인) 사건번호 수집/복사 + 토스트 알림
 // ============================================================
 
+/**
+ * 현재 화면의 주황(DB 미확인) 사건번호를 수집.
+ * 가장 최근 주황 배지가 속한 메시지 블록 범위에서 중복 없이 모은다.
+ * @returns {string[]}
+ */
+function collectOrangeCases() {
+  let badges = [];
+  const allBadges = document.querySelectorAll('.bgae-badge.bgae-orange');
+
+  if (allBadges.length > 0) {
+    const lastBadge = allBadges[allBadges.length - 1];
+    // 해당 배지가 속한 메시지 전체 블록을 탐색 (플랫폼별 최상위 컨테이너)
+    const msgContainer = lastBadge.closest('article, [data-testid="conversation-turn"], [data-message-author-role], message-content, model-response, .response-container, .markdown-main-panel');
+    badges = msgContainer
+      ? msgContainer.querySelectorAll('.bgae-badge.bgae-orange')
+      : allBadges; // 명확한 컨테이너가 없으면 전체 (안전 폴백)
+  }
+
+  return Array.from(new Set(Array.from(badges).map((b) => b.getAttribute('data-bgae-case')))).filter(Boolean);
+}
+
+/**
+ * 주황 사건번호를 클립보드로 복사.
+ * 클립보드 API 우선, 실패(권한/activation 상실) 시 execCommand 폴백.
+ * @returns {Promise<{count: number, text?: string, copyFailed?: boolean}>}
+ */
+function copyOrangeCases() {
+  const cases = collectOrangeCases();
+  if (cases.length === 0) return Promise.resolve({ count: 0 });
+
+  const text = `다음 사건번호의 출처를 확인하세요 : ${cases.join(', ')}`;
+
+  const execFallback = () => {
+    try {
+      const input = document.createElement('textarea');
+      input.value = text;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      return { count: cases.length, text };
+    } catch (e) {
+      console.error('[bupgogae] execCommand 복사 실패:', e);
+      return { count: cases.length, text, copyFailed: true };
+    }
+  };
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text)
+      .then(() => ({ count: cases.length, text }))
+      .catch((err) => {
+        console.warn('[bupgogae] Clipboard API 실패, execCommand 폴백:', err && err.message);
+        return execFallback();
+      });
+  }
+  return Promise.resolve(execFallback());
+}
+
+let _orangeToastTimer = null;
+
+/**
+ * 주황 토스트 닫기 (페이드아웃 후 제거). 닫기 버튼 / 자동 만료 공용.
+ * @param {HTMLElement} toast
+ */
+function dismissOrangeToast(toast) {
+  if (_orangeToastTimer) { clearTimeout(_orangeToastTimer); _orangeToastTimer = null; }
+  if (!toast || !toast.parentNode) return;
+  toast.style.opacity = '0';
+  toast.style.bottom = '20px';
+  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 300);
+}
+
+/**
+ * 주황(미확인) 사건번호 감지 안내 토스트.
+ * 단축키(Alt+C)가 일부 서비스에서 가로채일 수 있어, 토스트에 '복사' 버튼을 둔다.
+ * 버튼 클릭은 user activation 컨텍스트라 클립보드 복사가 안정적이다.
+ * 우측 '×' 닫기 버튼 제공 + 10초 후 자동 닫힘. (세션당 1회 노출)
+ */
 function showOrangeToast() {
   if (_hasShownOrangeToast) return;
   _hasShownOrangeToast = true;
 
   const toast = document.createElement('div');
   toast.className = 'bgae-orange-toast';
-  toast.textContent = '국가법령정보 DB에서 확인되지 않는 사건번호가 감지되었습니다(Alt+C로 사건번호 복사)';
   // M-5: all:initial + !important로 호스트 페이지 CSS 간섭 방지
   Object.assign(toast.style, {
     all: 'initial',
@@ -839,9 +872,13 @@ function showOrangeToast() {
     bottom: '20px',
     left: '50%',
     transform: 'translateX(-50%)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    maxWidth: '90vw',
     backgroundColor: '#ea580c',
     color: '#fff',
-    padding: '12px 24px',
+    padding: '12px 14px 12px 20px',
     borderRadius: '8px',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     fontSize: '14px',
@@ -850,27 +887,62 @@ function showOrangeToast() {
     zIndex: '2147483647',
     opacity: '0',
     transition: 'opacity 0.3s ease, bottom 0.3s ease',
-    pointerEvents: 'none',
+    pointerEvents: 'auto',
     lineHeight: '1.4',
-    textAlign: 'center',
     boxSizing: 'border-box',
   });
-  // !important 적용 (호스트 CSS 오버라이드 방어)
   toast.style.setProperty('position', 'fixed', 'important');
   toast.style.setProperty('z-index', '2147483647', 'important');
-  
+  toast.style.setProperty('display', 'flex', 'important');
+
+  // ── 메시지 ──
+  const msg = document.createElement('span');
+  msg.textContent = '국가법령정보 DB에서 확인되지 않는 사건번호가 감지되었습니다';
+  Object.assign(msg.style, {
+    all: 'initial', color: '#fff', fontFamily: 'inherit',
+    fontSize: '14px', fontWeight: 'bold', lineHeight: '1.4',
+  });
+
+  // ── 복사 버튼 (단축키 대체) ──
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = '사건번호 복사';
+  Object.assign(copyBtn.style, {
+    all: 'initial', cursor: 'pointer', whiteSpace: 'nowrap',
+    display: 'inline-block', backgroundColor: '#fff', color: '#ea580c',
+    fontFamily: 'inherit', fontSize: '13px', fontWeight: 'bold',
+    padding: '6px 12px', borderRadius: '6px', boxSizing: 'border-box',
+  });
+  copyBtn.addEventListener('click', () => {
+    copyOrangeCases().then((res) => {
+      copyBtn.textContent = res.copyFailed
+        ? '복사 실패'
+        : (res.count > 0 ? `복사됨 (${res.count})` : '복사할 항목 없음');
+    });
+  });
+
+  // ── 닫기 버튼 ──
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '×'; // ×
+  closeBtn.setAttribute('aria-label', '닫기');
+  Object.assign(closeBtn.style, {
+    all: 'initial', cursor: 'pointer', display: 'inline-block', color: '#fff',
+    fontFamily: 'inherit', fontSize: '18px', fontWeight: 'bold',
+    lineHeight: '1', padding: '2px 6px', boxSizing: 'border-box',
+  });
+  closeBtn.addEventListener('click', () => dismissOrangeToast(toast));
+
+  toast.appendChild(msg);
+  toast.appendChild(copyBtn);
+  toast.appendChild(closeBtn);
   document.body.appendChild(toast);
-  
+
   requestAnimationFrame(() => {
     toast.style.opacity = '1';
     toast.style.bottom = '30px';
   });
 
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.bottom = '20px';
-    setTimeout(() => toast.remove(), 300);
-  }, 5000);
+  // 10초 후 자동 닫힘 (닫기 버튼으로 조기 해제 가능)
+  _orangeToastTimer = setTimeout(() => dismissOrangeToast(toast), 10000);
 }
 
 // ============================================================
@@ -893,6 +965,9 @@ if (typeof module !== 'undefined' && module.exports) {
     batchLookup,
     buildGreenEntries,
     scheduleProcessing,
+    collectOrangeCases,
+    copyOrangeCases,
+    showOrangeToast,
     SETTLE_MS,
     SETTLE_MAX_DEFER_MS,
     /** 테스트 전용: settle 스케줄러가 호출할 처리 함수를 스파이로 교체. */

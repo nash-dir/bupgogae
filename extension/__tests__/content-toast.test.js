@@ -102,4 +102,32 @@ describe('showOrangeToast', () => {
     content.showOrangeToast();
     expect(document.querySelectorAll('.bgae-orange-toast')).toHaveLength(1);
   });
+
+  test('팝업 표시 설정이 OFF면 토스트를 만들지 않는다', () => {
+    content.__setShowOrangeToastForTest(false);
+    content.showOrangeToast();
+    expect(document.querySelector('.bgae-orange-toast')).toBeNull();
+  });
+
+  test('자동 닫힘은 5초', () => {
+    jest.useFakeTimers();
+    content.showOrangeToast();
+    jest.advanceTimersByTime(4000);
+    expect(document.querySelector('.bgae-orange-toast')).not.toBeNull(); // 4초엔 살아있음
+    jest.advanceTimersByTime(1000 + 300);                                // 5초 + 페이드
+    expect(document.querySelector('.bgae-orange-toast')).toBeNull();
+  });
+
+  test('복사 성공 후 3초 뒤 스르륵 닫힌다', async () => {
+    jest.useFakeTimers();
+    seedOrangeBadges(['2015다6302']);
+    content.showOrangeToast();
+    const copyBtn = document.querySelector('.bgae-orange-toast button');
+    copyBtn.click();
+    await jest.advanceTimersByTimeAsync(0); // 클립보드 .then flush → '복사됨' + 3초 타이머 설정
+    expect(copyBtn.textContent).toContain('복사됨');
+    expect(document.querySelector('.bgae-orange-toast')).not.toBeNull();
+    await jest.advanceTimersByTimeAsync(3000 + 300); // 3초 후 닫힘 + 페이드
+    expect(document.querySelector('.bgae-orange-toast')).toBeNull();
+  });
 });

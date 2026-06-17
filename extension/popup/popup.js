@@ -40,6 +40,9 @@ const $courtFilterDesc = document.getElementById('courtFilterDesc');
 const $constitutionalFilterToggle = document.getElementById('constitutionalFilterToggle');
 const $constitutionalFilterDesc = document.getElementById('constitutionalFilterDesc');
 
+const $orangeToastToggle = document.getElementById('orangeToastToggle');
+const $orangeToastToggleDesc = document.getElementById('orangeToastToggleDesc');
+
 
 // ============================================================
 // 2. 상태
@@ -53,6 +56,7 @@ let _isSupportedSite = false;    // 현재 사이트가 지원 대상인지
 
 let _filterCourt = true;         // 법원 판례 필터 (기본 ON)
 let _filterConstitutional = true; // 헌법재판소 필터 (기본 ON)
+let _showOrangeToast = true;     // 미확인 사건번호 팝업(토스트) 표시 (기본 ON)
 
 // 지원 대상 호스트 — adapters.json에서 동적 로드 (M-8: SSOT 통합)
 // 로드 실패 시 폴백용 정적 목록
@@ -124,13 +128,15 @@ async function loadState() {
 
       'bupgogae_filter_court',
       'bupgogae_filter_constitutional',
+      'bupgogae_show_orange_toast',
     ]);
     _disabledGlobal = data.bupgogae_disabled_global === true;
     _disabledSites = Array.isArray(data.bupgogae_disabled_sites) ? data.bupgogae_disabled_sites : [];
 
-    // 법원/헌재 기본값은 true (undefined → true)
+    // 법원/헌재/토스트 기본값은 true (undefined → true)
     _filterCourt = data.bupgogae_filter_court !== false;
     _filterConstitutional = data.bupgogae_filter_constitutional !== false;
+    _showOrangeToast = data.bupgogae_show_orange_toast !== false;
   } catch (err) {
     console.warn('[popup] 상태 로드 실패:', err);
   }
@@ -223,6 +229,15 @@ function renderUI() {
   $constitutionalFilterToggle.checked = _filterConstitutional;
   updateConstitutionalFilterDesc();
 
+  // 미확인 사건번호 팝업 표시 토글
+  $orangeToastToggle.checked = _showOrangeToast;
+  updateOrangeToastDesc();
+}
+
+function updateOrangeToastDesc() {
+  $orangeToastToggleDesc.textContent = _showOrangeToast
+    ? '미확인 사건번호 감지 시 안내 팝업 표시'
+    : '안내 팝업 표시 안 함';
 }
 
 function updateCourtFilterDesc() {
@@ -320,6 +335,12 @@ function bindEvents() {
     updateConstitutionalFilterDesc();
   });
 
+  // 미확인 사건번호 팝업 표시 토글 (content script가 storage 변경을 즉시 반영)
+  $orangeToastToggle.addEventListener('change', async () => {
+    _showOrangeToast = $orangeToastToggle.checked;
+    await chrome.storage.local.set({ bupgogae_show_orange_toast: _showOrangeToast });
+    updateOrangeToastDesc();
+  });
 }
 
 /**

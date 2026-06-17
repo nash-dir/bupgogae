@@ -40,6 +40,8 @@ const LOOKUP_RETRY_BACKOFF_MS = 1000; // 재조회 백오프 (시도 횟수 배�
 // 유발하므로, "응답이 SETTLE_MS 동안 조용해진 뒤" 1회만 처리한다(정지 후 렌더).
 const SETTLE_MS = 2000;             // 마지막 DOM 변경 후 처리까지 대기 (사용자 확정: 2초)
 const SETTLE_MAX_DEFER_MS = 12000;  // 안전망: 페이지가 끝없이 변경돼도 이 시간 내 강제 처리(starvation 방지)
+const ORANGE_TOAST_DISMISS_MS = 5000;     // 주황 토스트 자동 닫힘
+const ORANGE_TOAST_AFTER_COPY_MS = 3000;  // '복사됨' 표시 후 자동 닫힘
 
 
 // ============================================================
@@ -51,6 +53,7 @@ let _isProcessing = false;
 let _adapter = null; // 현재 사이트 어댑터
 let _adapterFetchRequested = false; // Auto-Fetch 쓰로틀링 플래그 (세션당 1회)
 let _hasShownOrangeToast = false; // Orange 배지 토스트 알림을 한 번만 띄우기 위한 플래그
+let _showOrangeToast = true;     // 미확인 사건번호 팝업(토스트) 표시 여부 (팝업 토글)
 let _categoryFilters = {         // 카테고리별 필터 (기본값)
   court: true,
   constitutional: true,
@@ -115,22 +118,35 @@ async function init() {
     return;
   }
 
-  // 카테고리 필터 로드
+  // 카테고리 필터 + 토스트 표시 설정 로드
   try {
     const filterData = await chrome.storage.local.get([
       'bupgogae_filter_court',
       'bupgogae_filter_constitutional',
       'bupgogae_dlc_tax',
+      'bupgogae_show_orange_toast',
     ]);
     _categoryFilters = {
       court: filterData.bupgogae_filter_court !== false,         // 기본 ON
       constitutional: filterData.bupgogae_filter_constitutional !== false, // 기본 ON
       tax: filterData.bupgogae_dlc_tax === true,                 // 기본 OFF
     };
+    _showOrangeToast = filterData.bupgogae_show_orange_toast !== false; // 기본 ON
     console.log('[bupgogae] 카테고리 필터:', _categoryFilters);
   } catch (err) {
     console.warn('[bupgogae] 필터 로드 실패, 기본값 사용');
   }
+
+  // 팝업의 '미확인 사건번호 팝업 표시' 토글을 새로고침 없이 즉시 반영
+  try {
+    if (chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.bupgogae_show_orange_toast) {
+          _showOrangeToast = changes.bupgogae_show_orange_toast.newValue !== false;
+        }
+      });
+    }
+  } catch { /* storage.onChanged 미지원 환경 — 무시 */ }
 
   // precedent-badge.js 확인
   if (!window.bupgogae || !window.bupgogae.renderPrecedentBadge) {
@@ -860,6 +876,7 @@ function dismissOrangeToast(toast) {
  * 우측 '×' 닫기 버튼 제공 + 10초 후 자동 닫힘. (세션당 1회 노출)
  */
 function showOrangeToast() {
+  if (!_showOrangeToast) return;       // 팝업 토글로 비활성화됨
   if (_hasShownOrangeToast) return;
   _hasShownOrangeToast = true;
 
@@ -917,6 +934,11 @@ function showOrangeToast() {
       copyBtn.textContent = res.copyFailed
         ? '복사 실패'
         : (res.count > 0 ? `복사됨 (${res.count})` : '복사할 항목 없음');
+      // 복사 성공 시 '복사됨' 잠시 보여준 뒤 스르륵 닫힘
+      if (!res.copyFailed && res.count > 0) {
+        if (_orangeToastTimer) clearTimeout(_orangeToastTimer);
+        _orangeToastTimer = setTimeout(() => dismissOrangeToast(toast), ORANGE_TOAST_AFTER_COPY_MS);
+      }
     });
   });
 
@@ -941,8 +963,8 @@ function showOrangeToast() {
     toast.style.bottom = '30px';
   });
 
-  // 10초 후 자동 닫힘 (닫기 버튼으로 조기 해제 가능)
-  _orangeToastTimer = setTimeout(() => dismissOrangeToast(toast), 10000);
+  // 5초 후 자동 닫힘 (닫기 버튼으로 조기 해제 가능)
+  _orangeToastTimer = setTimeout(() => dismissOrangeToast(toast), ORANGE_TOAST_DISMISS_MS);
 }
 
 // ============================================================
@@ -984,6 +1006,11 @@ if (typeof module !== 'undefined' && module.exports) {
     /** 테스트 전용: 모듈 전역 상태(orange 토스트 1회 플래그 등) 초기화. */
     __resetForTest() {
       _hasShownOrangeToast = false;
+      _showOrangeToast = true;
+    },
+    /** 테스트 전용: '미확인 사건번호 팝업 표시' 설정 주입. */
+    __setShowOrangeToastForTest(v) {
+      _showOrangeToast = v;
     },
     /** 테스트 전용: 카테고리 필터 주입. */
     __setCategoryFiltersForTest(filters) {

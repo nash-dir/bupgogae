@@ -52,9 +52,10 @@ fi
 echo ""
 echo "🧪 [2/4] Jest 단위 테스트..."
 
-if [ -f "$REPO_ROOT/extension/package.json" ]; then
-  cd "$REPO_ROOT/extension"
-  if npx jest --silent 2>/dev/null; then
+if [ -f "$REPO_ROOT/package.json" ]; then
+  cd "$REPO_ROOT"
+  # jest 설정은 루트 package.json에 있으며 e2e/는 testPathIgnorePatterns로 제외됨
+  if npx jest --silent; then
     echo "  ✅ Jest 통과"
   else
     echo "  ❌ Jest 실패"
@@ -62,18 +63,19 @@ if [ -f "$REPO_ROOT/extension/package.json" ]; then
   fi
   cd "$REPO_ROOT"
 else
-  echo "  ⏭  extension/package.json 없음 — 스킵"
+  echo "  ⏭  package.json 없음 — 스킵"
 fi
 
 # ──────────────────────────────────────────
-# 3. PyTest 단위 테스트 (compress)
+# 3. PyTest 단위 테스트 (pipeline)
 # ──────────────────────────────────────────
 echo ""
 echo "🐍 [3/4] PyTest 단위 테스트..."
 
-if [ -f "$REPO_ROOT/pipeline/test_compress.py" ]; then
+# pipeline/test_*.py 가 하나라도 있으면 전체 실행
+if ls "$REPO_ROOT/pipeline"/test_*.py >/dev/null 2>&1; then
   cd "$REPO_ROOT/pipeline"
-  if python -m pytest test_compress.py -q 2>/dev/null; then
+  if python -m pytest -q; then
     echo "  ✅ PyTest 통과"
   else
     echo "  ❌ PyTest 실패"
@@ -81,7 +83,7 @@ if [ -f "$REPO_ROOT/pipeline/test_compress.py" ]; then
   fi
   cd "$REPO_ROOT"
 else
-  echo "  ⏭  pipeline/test_compress.py 없음 — 스킵"
+  echo "  ⏭  pipeline 테스트 없음 — 스킵"
 fi
 
 # ──────────────────────────────────────────

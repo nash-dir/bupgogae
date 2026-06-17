@@ -53,6 +53,7 @@ playwright/.cache/
 .coverage
 htmlcov/
 .ipynb_checkpoints/
+temp/
 
 # ===== 민감 파일 =====
 *.pem

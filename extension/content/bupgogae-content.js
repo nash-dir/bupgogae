@@ -31,6 +31,8 @@ const DEBOUNCE_MS = 500;
 const PROCESSED_ATTR = 'data-bgae-processed';
 const MAX_BATCH_SIZE = 50; // 한 번에 조회할 최대 키 수
 const LOOKUP_TIMEOUT_MS = 8000; // 배치 조회 응답 대기 한도 (SW 컨텍스트 무효화 시 무한 대기 방지)
+const LOOKUP_MAX_ATTEMPTS = 3;        // 타임아웃/에러 시 최대 재조회 횟수 (gray 유지, orange 오탐 방지)
+const LOOKUP_RETRY_BACKOFF_MS = 1000; // 재조회 백오프 (시도 횟수 배수: 1s, 2s, ...)
 
 
 // ============================================================
@@ -492,24 +494,50 @@ async function processContainer(container) {
     pendingBadges.set(key, items);
   }
 
-  // ── Stage 3: 배치 조회 ──
-  const keys = Array.from(pendingBadges.keys());
-  const results = await batchLookup(keys);
-
-  // ── Stage 4: Green/Orange 렌더링 (결과 덮어쓰기) ──
+  // ── Stage 3 + 4: 배치 조회 + 결과 적용 (타임아웃/에러는 gray 유지 후 재조회) ──
+  // L13 회귀 수정: 룩업 타임아웃을 'DB 미확인(orange)'으로 단정하지 않는다.
+  // DB 콜드 스타트(~20s)·SW 일시 정지로 인한 지연은 재조회로 회복하며,
+  // 회복 전까지 gray(pending)를 유지해 늦게 도착한 진짜 응답을 버리지 않는다.
   const courtCodeMap = window.bupgogaeCaseRegex.getCourtCodeMap();
+  let keysToLookup = Array.from(pendingBadges.keys());
 
-  for (const [key, items] of pendingBadges) {
+  for (let attempt = 1; attempt <= LOOKUP_MAX_ATTEMPTS; attempt++) {
+    const results = await batchLookup(keysToLookup);
+    // green/orange 확정분은 즉시 렌더링하고, 타임아웃/에러 키만 남겨 재조회 대상으로 반환
+    keysToLookup = applyLookupResults(results, keysToLookup, pendingBadges, courtCodeMap);
+    if (keysToLookup.length === 0) break;
+    if (attempt < LOOKUP_MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, LOOKUP_RETRY_BACKOFF_MS * attempt));
+    }
+  }
+  // 모든 재조회가 타임아웃/에러로 끝나면 gray(pending)를 유지한다.
+  // orange 오탐(진짜 판례를 '미확인'으로 표시)보다 pending 유지가 안전하다.
+}
+
+/**
+ * 배치 조회 결과를 pending(gray) 배지에 적용한다.
+ *
+ *   found:true        → Green (data 배열의 모든 매칭 사건을 entries로 조립)
+ *   found:false       → Orange (DB 미확인) + 토스트
+ *   error/timeout     → gray 유지 → 미해결 키로 반환 (재조회 대상)
+ *
+ * @param {Object} results          batchLookup 결과 맵 (key → { found, data, error })
+ * @param {string[]} keys           이번에 조회한 키 목록
+ * @param {Map} pendingBadges       key → { badge, parsed }[]
+ * @param {Object} courtCodeMap     법원코드 매핑
+ * @returns {string[]} 미해결(재조회 필요) 키 목록
+ */
+function applyLookupResults(results, keys, pendingBadges, courtCodeMap) {
+  const unresolved = [];
+
+  for (const key of keys) {
+    const items = pendingBadges.get(key);
+    if (!items) continue;
     const result = results[key];
 
-    // 🚨 DB 조회 지연/시스템 에러: 무한 깜빡임 루프 방지를 위해 임시 Orange 배지로 폴백
+    // 타임아웃/시스템 에러: gray 유지 (orange로 단정 금지) → 재조회 대상
     if (result && result.error) {
-      for (const item of items) {
-        if (item.badge) {
-          window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'orange');
-        }
-      }
-      if (items.length > 0) showOrangeToast();
+      unresolved.push(key);
       continue;
     }
 
@@ -566,7 +594,7 @@ async function processContainer(container) {
         }
       }
     } else {
-      // Orange
+      // Orange (genuine miss: 응답은 받았으나 DB에 없음)
       for (const item of items) {
         if (item.badge) {
           window.bupgogae.updatePrecedentBadge(item.badge, item.parsed.raw, 'orange');
@@ -575,6 +603,8 @@ async function processContainer(container) {
       if (items.length > 0) showOrangeToast();
     }
   }
+
+  return unresolved;
 }
 
 
@@ -844,5 +874,28 @@ function showOrangeToast() {
 // 11. 시작
 // ============================================================
 
-// Content Script 로드 시 즉시 초기화 시작
-init();
+// Content Script 로드 시 즉시 초기화 시작.
+// (CommonJS 단위 테스트 컨텍스트에서는 auto-init을 건너뛴다 — 함수만 require로 노출)
+if (typeof module === 'undefined' || !module.exports) {
+  init();
+}
+
+// ============================================================
+// 12. CommonJS 노출 (단위 테스트용 — 런타임 동작에는 영향 없음)
+// ============================================================
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    processContainer,
+    batchLookup,
+    applyLookupResults,
+    /** 테스트 전용: 모듈 전역 상태(orange 토스트 1회 플래그 등) 초기화. */
+    __resetForTest() {
+      _hasShownOrangeToast = false;
+    },
+    /** 테스트 전용: 카테고리 필터 주입. */
+    __setCategoryFiltersForTest(filters) {
+      _categoryFilters = { ...filters };
+    },
+  };
+}

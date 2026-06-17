@@ -15,7 +15,7 @@
 * **🚦 3단계 실시간 판례 검증 시스템**
   * 🟢 **실존 판례**: 공개 판례 DB와 교차 검증된 안전한 판례 (판례일련번호 기반 원문 직접 링크)
   * 🟠 **의심 판례**: 사건번호 형식은 맞으나 DB에서 확인되지 않는 판례 (사법정보공개포털 검증 유도)
-  * 🔴 **형식 오류**: 미래 연도, 대한민국 사법부 설립(1945년) 이전 등 명백한 AI 환각 지적
+  * 🔴 **형식 오류**: 미래 연도, 법원(1945년)·헌법재판소(1988년) 설립 이전 등 명백한 AI 환각 지적
 * **🌐 멀티 LLM 플랫폼 지원 (어댑터 패턴 적용)**
   * ChatGPT (`chatgpt.com`)
   * Claude (`claude.ai`)
@@ -26,7 +26,7 @@
 * **📖 사이드바 판례 원문 뷰어**
   * 초록색(안전) 배지로 검증된 판례 클릭 시, 화면 이탈 없이 우측 뷰어에서 법제처 원문을 즉시 열람합니다. (Shadow DOM 캡슐화로 호스트 UI와 충돌 방지)
 * **📋 미확인 판례 일괄 복사**
-  * 단축키(`Alt+C`)를 통해 화면에 출력된 주황색(DB 미확인) 사건번호만 추출하여 클립보드에 일괄 복사합니다.
+  * 주황색(DB 미확인) 사건번호가 감지되면 안내 배너의 **'사건번호 복사' 버튼**으로 클립보드에 일괄 복사합니다. 단축키(`Alt+C`)도 지원하지만, 일부 서비스가 단축키를 가로채는 경우 버튼이 안정적으로 동작합니다. 팝업에서 안내 배너 표시 여부를 켜고 끌 수 있습니다.
 * **🔄 원격 설정 자동 업데이트 (Remote Config)**
   * 각 플랫폼의 DOM 셀렉터가 변경되어 탐지에 실패할 경우, 서버(`adapters.json`)에서 최신 셀렉터를 자동으로 가져와 적용합니다.
   * 기존 어댑터에 내장된(Batteries-included) 셀렉터가 폴백(Fallback)으로 사용되므로, 서버에 접근할 수 없는 오프라인 환경에서도 정상 동작합니다.
@@ -78,7 +78,7 @@ While AI is revolutionizing legal practice, fabricated case citations can lead t
 * **🚦 3-Level Real-Time Case Law Verification**
   * 🟢 **Verified Case**: Cross-verified against the public case law database (direct link to original judgment via serial ID)
   * 🟠 **Unverified Case**: Valid case number format, but not found in the database (prompts manual verification)
-  * 🔴 **Format Error**: Future dates, non-existent case codes, dates before the Korean judiciary was established (1945) — clear AI hallucinations flagged with strikethrough
+  * 🔴 **Format Error**: Future dates, or dates before the courts (1945) / Constitutional Court (1988) were established — clear AI hallucinations flagged with strikethrough
 * **🌐 Multi-LLM Platform Support (Site Adapter Pattern)**
   * ChatGPT (`chatgpt.com`)
   * Claude (`claude.ai`)
@@ -89,7 +89,7 @@ While AI is revolutionizing legal practice, fabricated case citations can lead t
 * **📖 Built-in Sidebar Viewer**
   * Click any Green (Verified) badge to instantly view the original case law document from the Ministry of Government Legislation in a sliding sidebar, without leaving the chatbot tab. Uses Shadow DOM to prevent CSS conflicts.
 * **📋 Extract Unverified Cases**
-  * Use the keyboard shortcut (`Alt+C`) to instantly extract and copy all Orange (Unverified) case numbers from the current response to your clipboard for further manual review.
+  * When Orange (Unverified) case numbers are detected, copy them all to your clipboard via the **"Copy case numbers" button** on the notification banner. The `Alt+C` shortcut also works, but the button stays reliable when a site overrides the shortcut. The banner can be toggled on/off from the popup.
 * **🔄 Remote Config — Dynamic Selector Updates**
   * When a platform's DOM changes break detection, the extension automatically fetches updated CSS selectors from the server (`adapters.json`).
   * Built-in (batteries-included) selectors serve as a fallback, ensuring full offline functionality when the server is unreachable.
@@ -156,15 +156,17 @@ The extension implements a **Site Adapter Pattern** — a variant of the Strateg
 4. **Shared Core Pipeline**: Operates identically regardless of which adapter is active:
 
 ```
-MutationObserver (debounce 500ms)
+MutationObserver → settle (process after the response stops mutating)
     → adapter.findResponseContainers()     [adapter-specific]
     → collectTextNodes(container)           [shared, filters editables]
     → extractCaseNumbers(text)              [shared, whitelist regex]
     → validateCaseNumber(parsed)            [shared, Red filter cascade]
     → compressCaseKey(parsed)               [shared, Hangul→ASCII]
     → chrome.runtime.sendMessage(LOOKUP_BATCH)  [shared, IPC to SW]
-    → renderPrecedentBadge(result)          [shared, Green/Orange/Red]
+    → renderPrecedentBadges(textNode)       [shared, one-pass: Green/Orange/Red]
 ```
+
+> **Render timing (settle + single-pass).** Some platforms (e.g., Gemini, Copilot, Grok) re-render the response subtree while streaming, discarding externally injected badge nodes. To avoid flicker, the pipeline waits for the subtree to go quiet (a **settle** window) before processing, then renders once. Within a text node, all matches are split and badged in a **single pass** (`renderPrecedentBadges`), so case numbers listed across consecutive lines — which some platforms place in one text node — all appear together instead of one-per-cycle.
 
 ### Selector Resolution Algorithm
 
@@ -238,7 +240,7 @@ Before any IndexedDB query, each candidate passes through this cascade **in stri
 | Level | Check | Rule | Example | Rationale |
 |-------|-------|------|---------|-----------|
 | 🔴 L1 | **Future year** | `fullYear > currentYear` | `2030다12345` | No case can exist in the future |
-| 🔴 L2 | **Pre-judiciary** | `fullYear < 1945` | `1940다100` | Korea's modern judiciary was established in 1945 |
+| 🔴 L2 | **Pre-establishment** | `< 1945` (court), `< 1988` (헌재) | `1940다100`, `1987헌마1` | Courts established 1945; Constitutional Court 1988 |
 | 🔴 L3 | **Invalid code** | `code ∉ validCodes` (~159 types) | `2020뿡12345` | `뿡` is not a registered case type |
 | 🔴 L4 | **Zero serial** | `parseInt(serial) === 0` | `2020다0` | Serial numbers are 1-indexed |
 
@@ -246,9 +248,7 @@ Before any IndexedDB query, each candidate passes through this cascade **in stri
 
 ### 2-Digit Year Normalization
 
-Legacy Korean case numbers use 2-digit years (e.g., `99다카34567`). The system normalizes these deterministically before the cascade:
-- `00–29` → `2000–2029`
-- `30–99` → `1930–1999`
+Legacy Korean case numbers use 2-digit years (e.g., `99다카34567`). The system expands these relative to the **current year** with a sliding window (`expandTwoDigitYear`): a 2-digit year resolves to the most recent past year not exceeding the current year. For example, in 2026: `26` → 2026, `27` → 1927, `99` → 1999, `00` → 2000. This avoids a hardcoded pivot that drifts over time — a fixed `30` pivot would wrongly read `30다1` as 1930 from 2030 onward.
 
 ## Anatomy of a Korean Case Number
 
@@ -289,13 +289,15 @@ Dynamic (primary):   /(가합|가단|다|나|마|카|...)/ ← matches ONLY regi
 At `initMeta()`, the extension sorts all ~159 case codes by length (descending) to ensure greedy matching (`가합` before `가`), then builds a single `RegExp`:
 
 ```javascript
-// Built dynamically from case_code_map keys
+// Built dynamically from case_code_map keys.
+// (?<![0-9]) — left boundary so a run of digits (phone/account numbers)
+//              isn't mis-split into a bogus 2-digit-year case number.
 _courtCaseRegex = new RegExp(
-  `((?:19|20)\\d{2}|\\d{2})(${sortedCodesPattern})(\\d{1,7})`, 'g'
+  `(?<![0-9])((?:19|20)\\d{2}|\\d{2})(${sortedCodesPattern})(\\d{1,7})`, 'g'
 );
 ```
 
-This **whitelist approach** eliminates false positives from non-court case codes (e.g., `부해` from labor commissions, `형제` from prosecutors) at the extraction stage, rather than requiring a downstream Red filter. The same dynamic regex also covers Constitutional Court codes (`헌가`, `헌마`, …) since they live in `case_code_map`.
+This **whitelist approach** eliminates false positives from non-court case codes (e.g., `부해` from labor commissions, `형제` from prosecutors) at the extraction stage, rather than requiring a downstream Red filter. The same dynamic regex also covers Constitutional Court codes (`헌가`, `헌마`, …) since they live in `case_code_map`. The leading `(?<![0-9])` boundary prevents a digit run such as `010-1234-5678도1` or `3015다1234` from being mis-matched as `78도1` / `15다1234`.
 
 ---
 
@@ -400,13 +402,14 @@ The **only** network communication is a periodic download of a static, pre-built
    │          ↓               │            │ db.json.gz from R2       │
    │ Upload to Cloudflare R2  │──────────→ │ ETag 304? skip : replace │
    │          ↓               │            │          ↓               │
-   │ Telegram report          │            │ Full IndexedDB rebuild   │
+   │ Telegram report          │            │ Non-destructive rebuild  │
    └──────────────────────────┘            └──────────────────────────┘
 ```
 
 * **Full-DB deploy** — one `db.json.gz` file (~3 MB gzip) contains the entire case law database
 * **ETag caching** — R2 returns `304 Not Modified` if unchanged; bandwidth cost is near-zero on most polls
 * **Bundled DB** — the full database ships with the extension for instant offline access on first install
+* **Non-destructive rebuild** — on each sync the new keys are inserted over the existing store and only stale keys are pruned, so lookups never observe an empty/partial DB mid-sync (no green→orange flicker during updates)
 * **Batch lookup** — content scripts send all detected case numbers in a single `LOOKUP_BATCH` message, resolved in one IndexedDB readonly transaction
 * **Adapter Remote Config** — `adapters.json` is fetched alongside `db.json.gz` on every sync cycle, providing up-to-date CSS selectors without extension updates
 

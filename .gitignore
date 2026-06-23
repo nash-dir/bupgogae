@@ -31,6 +31,7 @@ node_modules/
 # ===== 스크랩/실험 (전체 제외) =====
 scrap/
 tmp/
+temp/
 
 # ===== 레거시 코드 =====
 legacy/
@@ -53,7 +54,6 @@ playwright/.cache/
 .coverage
 htmlcov/
 .ipynb_checkpoints/
-temp/
 
 # ===== 민감 파일 =====
 *.pem

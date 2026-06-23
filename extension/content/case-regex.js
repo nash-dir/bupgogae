@@ -183,8 +183,15 @@ function validateCaseNumber(parsed) {
 
   // ── 연도 정규화 (2자리 → 4자리, 현재연도 기준 슬라이딩 윈도우) ──
   let fullYear;
+  // 2자리 연도가 "현 세기 후보가 미래라 직전 세기로 내려간" 경우를 표시.
+  // (예: 2026년의 "27" → 2027은 미래 → 1927로 해석). 이 경우 floor 미만 사유를
+  // "비현실적 연도(1927년)"로만 적으면 1927이 의도였던 것처럼 오도되므로 분기한다.
+  let twoDigitDroppedToPastCentury = false;
   if (parsed.year.length === 2) {
-    fullYear = expandTwoDigitYear(parseInt(parsed.year, 10));
+    const twoDigit = parseInt(parsed.year, 10);
+    fullYear = expandTwoDigitYear(twoDigit);
+    const sameCenturyCandidate = Math.floor(currentYear / 100) * 100 + twoDigit;
+    twoDigitDroppedToPastCentury = sameCenturyCandidate > currentYear;
   } else {
     fullYear = parseInt(parsed.year, 10);
   }
@@ -202,10 +209,15 @@ function validateCaseNumber(parsed) {
   const minYears = { court: 1945, constitutional: 1988 };
   const minYear = minYears[parsed.type] || 1945;
   if (fullYear < minYear) {
-    return {
-      valid: false,
-      reason: `비현실적 연도(${fullYear}년)입니다.`,
-    };
+    const floorLabel = parsed.type === 'constitutional'
+      ? '헌법재판소 설립(1988)'
+      : '법원 설립(1945)';
+    // 2자리 연도가 직전 세기로 해석돼 floor 미만이 된 경우엔, 해석 과정을 밝혀
+    // "왜 과거로 읽혔는지"를 사용자가 알 수 있게 한다 (라벨은 Red로 동일).
+    const reason = twoDigitDroppedToPastCentury
+      ? `2자리 연도 '${parsed.year}'은 가장 가까운 과거인 ${fullYear}년으로 해석되며, 이는 ${floorLabel} 이전입니다.`
+      : `비현실적 연도(${fullYear}년)입니다. ${floorLabel} 이전 사건은 존재할 수 없습니다.`;
+    return { valid: false, reason };
   }
 
   // (Red 3 삭제: 사건부호 유효성 검증은 타기관 부호(부해, 형제 등) 오탐 문제로 제거)

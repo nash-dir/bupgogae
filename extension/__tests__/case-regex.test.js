@@ -177,7 +177,9 @@ describe('validateCaseNumber — 연도 피벗 상대화(M3) + 헌재 floor(L2)'
       year: '27', code: '다', serial: '1', type: 'court',
     });
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/비현실적/);
+    // 직전 세기 해석을 사유에 밝혀, 1927이 의도였던 것처럼 오도하지 않는다.
+    expect(r.reason).toMatch(/2자리 연도 '27'/);
+    expect(r.reason).toMatch(/1927년/);
   });
 
   test('M3: 현재연도 2자리(예: 2026의 "26")는 현 세기로 해석되어 valid', () => {

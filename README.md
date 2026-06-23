@@ -223,7 +223,7 @@ Naively querying a database for every potential case number extracted from LLM t
 
 ### Solution
 
-The extension implements a **Multi-Tier Pre-Database Filtering** system — a 4-level validation cascade that classifies each candidate case number *before* any database query. This produces a **3-class output taxonomy** (Red / Orange / Green) that provides graduated confidence signaling to the user.
+The extension implements a **Multi-Tier Pre-Database Filtering** system — a 3-level validation cascade that classifies each candidate case number *before* any database query. This produces a **3-class output taxonomy** (Red / Orange / Green) that provides graduated confidence signaling to the user.
 
 ### 3-Class Output Taxonomy
 
@@ -233,7 +233,7 @@ The extension implements a **Multi-Tier Pre-Database Filtering** system — a 4-
 | 🟠 **Orange** (Unverified) | Valid format, not found in database | DB lookup: no match |
 | 🟢 **Green** (Verified) | Confirmed real case | DB lookup: match found |
 
-### 4-Level Validation Cascade
+### 3-Level Validation Cascade
 
 Before any IndexedDB query, each candidate passes through this cascade **in strict order**. The first failing check immediately classifies the candidate as Red and halts further processing:
 
@@ -241,8 +241,9 @@ Before any IndexedDB query, each candidate passes through this cascade **in stri
 |-------|-------|------|---------|-----------|
 | 🔴 L1 | **Future year** | `fullYear > currentYear` | `2030다12345` | No case can exist in the future |
 | 🔴 L2 | **Pre-establishment** | `< 1945` (court), `< 1988` (헌재) | `1940다100`, `1987헌마1` | Courts established 1945; Constitutional Court 1988 |
-| 🔴 L3 | **Invalid code** | `code ∉ validCodes` (~159 types) | `2020뿡12345` | `뿡` is not a registered case type |
-| 🔴 L4 | **Zero serial** | `parseInt(serial) === 0` | `2020다0` | Serial numbers are 1-indexed |
+| 🔴 L3 | **Zero serial** | `parseInt(serial) === 0` | `2020다0` | Serial numbers are 1-indexed |
+
+**Why there is no "invalid code" check in this cascade**: case-code validity is enforced *upstream*, at the extraction stage, not here. The whitelist extraction regex (see Core Concept below) only emits candidates whose code is in `case_code_map` (~159 registered types). An unregistered code — a hallucinated `뿡`, or another agency's code such as `부해` (labor commission) / `형제` (prosecution) — is therefore never extracted and receives **no badge at all**. That silence *is* the signal: the extension highlights only the citations it can actually reason about, rather than flagging every unknown token Red. Because all reachable candidates already carry a registered code, this cascade only needs to check the year and serial.
 
 **Key insight**: Red badges with strikethrough appear **instantly** (zero latency), while Green/Orange classifications require an asynchronous `LOOKUP_BATCH` IPC round-trip to the Service Worker.
 

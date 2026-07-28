@@ -144,14 +144,29 @@ class SiteAdapter {
    * @returns {boolean}
    */
   isStreaming(container) {
-    // Remote Config → 번들 JSON 순으로 streamingIndicator 확인
-    const indicator =
-      (this._remoteConfig && this._remoteConfig.streamingIndicator) ||
-      this._bundledStreamingIndicator;
+    // Remote Config 우선. 문법 오류라면 번들 indicator로 안전하게 후퇴한다.
+    const remoteIndicator = this._remoteConfig && this._remoteConfig.streamingIndicator;
+    if (remoteIndicator) {
+      try {
+        return !!container.closest(remoteIndicator);
+      } catch (err) {
+        console.warn(
+          `[bupgogae:${this.siteId}] streamingIndicator 셀렉터 오류: ${remoteIndicator}`,
+          err,
+        );
+      }
+    }
 
-    if (indicator) {
-      // L-4: closest()는 클래스 셀렉터(.result-streaming)도 정확히 처리
-      return !!container.closest(indicator);
+    if (this._bundledStreamingIndicator &&
+        this._bundledStreamingIndicator !== remoteIndicator) {
+      try {
+        return !!container.closest(this._bundledStreamingIndicator);
+      } catch (err) {
+        console.warn(
+          `[bupgogae:${this.siteId}] 번들 streamingIndicator 셀렉터 오류`,
+          err,
+        );
+      }
     }
     return false;
   }

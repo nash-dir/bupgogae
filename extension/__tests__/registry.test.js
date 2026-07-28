@@ -13,7 +13,7 @@ const path = require('path');
 function loadScript(rel) {
   const code = fs.readFileSync(path.join(__dirname, '..', rel), 'utf-8');
   // 간접 eval → 전역 스코프 실행 (window.bupgogaeAdapters에 부착됨)
-  (0, eval)(code); // eslint-disable-line no-eval
+  (0, eval)(code);
 }
 
 describe('registry SITE_DEFS 파생', () => {
@@ -59,5 +59,27 @@ describe('registry SITE_DEFS 파생', () => {
     for (const className of Object.values(adapters.ADAPTER_MAP)) {
       expect(typeof adapters[className]).toBe('function');
     }
+  });
+
+  test('원격 streamingIndicator 문법 오류는 전체 스캔을 깨지 않고 번들로 후퇴', () => {
+    const inst = new adapters.GeminiAdapter();
+    inst.setBundledConfig({
+      responseSelectors: [],
+      streamingIndicator: '.bundled-streaming',
+    });
+    inst.setRemoteConfig({
+      version: 'test',
+      adapters: { gemini: { streamingIndicator: 'div[' } },
+    });
+    const parent = document.createElement('div');
+    parent.className = 'bundled-streaming';
+    const container = document.createElement('div');
+    parent.appendChild(container);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(() => inst.isStreaming(container)).not.toThrow();
+    expect(inst.isStreaming(container)).toBe(true);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

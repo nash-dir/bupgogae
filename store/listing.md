@@ -7,41 +7,38 @@
 ## 요약 (Short Description, 132자 이내)
 
 ```
-AI(LLM)가 생성한 허위 판례 인용을 실시간으로 탐지합니다. 13만여 건의 대한민국 공공 판례 DB를 로컬에 내장하여, 개인정보 수집 없이 100% 브라우저 내에서 동작합니다.
+AI 답변의 한국 사건번호를 찾아 현재 브라우저의 공개 판례 DB와 로컬에서 대조하고 원문 확인 링크를 제공합니다.
 ```
 
 ## 상세 설명 (Detailed Description)
 
 ```
-법고개 (Bupgogae) — LLM 환각 판례 탐지기
+법고개 (Bupgogae) — AI 답변 사건번호 확인 도구
 
 ◆ 무엇을 하나요?
-AI 챗봇(ChatGPT, Gemini, Copilot, Claude, Perplexity, Grok)이 생성한 응답에서 대한민국 판례 사건번호를 실시간으로 감지하고, 실제 존재하는 판례인지 3단계(Green/Orange/Red) 신호등으로 즉시 알려드립니다.
+ChatGPT, Gemini, Copilot, Claude, Perplexity, Grok의 답변에서 한국 사건번호를 찾아 현재 브라우저의 공개 판례 DB와 대조합니다.
 
-◆ 왜 필요한가요?
-AI가 존재하지 않는 판례를 그럴듯하게 인용하는 "환각(hallucination)" 현상은 법률 업무에서 치명적인 위험을 초래합니다. 법고개는 이 위험을 브라우저에서 즉시 차단합니다.
+◆ 표시 의미
+🟢 DB에서 찾음: 현재 활성 공개 DB에서 해당 사건번호를 찾았습니다.
+🟠 DB에서 찾지 못함: 현재 로컬 DB에 해당 사건번호가 없습니다. 새 판례, 비공개 판례 또는 DB 갱신 지연일 수도 있습니다.
+🔴 형식 오류: 미래 연도 등 사건번호 형식 검사를 통과하지 못했습니다.
+
+이 표시는 판례의 진위·법적 유효성·안전성 또는 AI 답변 전체의 정확성을 보장하지 않습니다. 중요한 인용은 반드시 원문과 추가 자료로 확인하세요.
 
 ◆ 주요 기능
-✓ 판례번호 자동 감지 및 공개 DB 대조 검증
-✓ 검증 결과에 따른 3단계 컬러 배지 (초록/주황/빨강)
-✓ AI 환각(Hallucination) 의심 판례 경고
-✓ 법제처 사이트 원문 바로가기 링크
-✓ 판례 상세 정보 툴팁 (사건명, 선고일, 사건유형)
-✓ 주요 LLM 챗봇 호환
+✓ 사건번호 자동 감지와 로컬 공개 DB 대조
+✓ 초록/주황/빨강 상태 배지
+✓ 법제처 원문 조회와 공공 확인 링크
+✓ 사건명·선고일·사건유형 툴팁
+✓ 미확인 사건번호 일괄 복사
+✓ 주요 AI 챗봇 호환
 
-🟢 실존 판례 : 공개 판례 DB와 교차 검증된 안전한 판례 (판례일련번호 기반 원문 직접 링크)
-🟠 의심 판례 : 사건번호 형식은 맞으나 DB에서 확인되지 않는 판례 (사법정보공개포털 검증 유도)
-🔴 형식 오류 : 미래 연도, 대한민국 사법부 설립(1945년)·헌법재판소(1988년) 이전, 비정상 일련번호 등 구조적으로 불가능한 명백한 AI 환각 지적
+◆ 개인정보와 네트워크
+프롬프트·답변 텍스트의 판별은 브라우저 로컬에서 수행하며 그 텍스트를 외부로 전송하지 않습니다.
+공개 판례 DB·manifest·검증된 selector 설정은 설치·시작·주기 동기화와 지원 사이트 진입 시 api.bup.live에서 확인하거나 갱신합니다. 이 요청에 프롬프트·답변 텍스트를 첨부하지 않습니다. 사용자가 원문 조회를 요청하면 선택한 공개 일련번호로 www.law.go.kr에 요청합니다. 자세한 내용은 개인정보처리방침을 확인하세요.
 
-◆ 특징
-✓ 14만여 건 대한민국 공공 판례 DB 내장 (설치 즉시 동작)
-✓ 100% 로컬 처리 — 개인정보·채팅 내용 일절 수집하지 않음
-✓ 오픈소스 (GitHub: github.com/nashdir/bupgogae)
-
-◆ 데이터 출처
-대법원 종합법률정보, 국가법령정보센터 등 공공 데이터 활용
-
-13만여 건의 판례 DB를 내장하여 설치 용량이 약 12MB입니다. 이는 네트워크 없이도 즉시 동작하기 위함입니다.
+◆ 오픈소스
+GitHub: github.com/nash-dir/bupgogae
 ```
 
 ## 카테고리
@@ -53,7 +50,7 @@ Productivity (생산성)
 ## 단일 목적 설명 (Single Purpose)
 
 ```
-LLM이 생성한 한국 법률 판례의 사건번호 진위를 내장 DB를 통해 실시간으로 검증하는 도구입니다
+AI 답변에 표시된 한국 사건번호를 현재 로컬 공개 판례 DB와 대조하고 원문 확인을 돕는 도구입니다.
 ```
 
 ---
@@ -61,44 +58,45 @@ LLM이 생성한 한국 법률 판례의 사건번호 진위를 내장 DB를 통
 ## 권한 정당화 (Permission Justification)
 
 ### alarms
+
 ```
-Used to schedule periodic background database synchronization to keep the local case law database up to date without persistent background processes.
+Schedules public database, integrity manifest, and validated selector-configuration synchronization every six hours without a persistent background page.
 ```
 
 ### storage
+
 ```
-Used to save user preferences (e.g., sidebar width, filters) and cache metadata and remote CSS selectors locally for efficient validation.
+Stores user preferences, sync/drift metadata, ETag state, and validated remote selector configuration locally in chrome.storage.local.
 ```
 
 ### unlimitedStorage
-```
-Required to store the full Korean public case law database (~12MB, 140K+ entries) locally in IndexedDB for offline-capable, privacy-preserving lookups.
-```
 
-### tabs
 ```
-Used to identify the active tab's hostname to update the extension popup state and to route keyboard shortcut commands (e.g., Alt+C) to the correct content script.
+Stores complete public case-law database snapshots in IndexedDB and prevents a small quota from interrupting staging before the active snapshot is switched.
 ```
 
 ### host_permissions
+
 ```
-Only two endpoints are requested: "*://*.law.go.kr/*" is used solely to fetch original Korean case law documents to display safely in the extension's side-viewer, and "https://api.bup.live/*" is the extension's own API server for database synchronization.
+Supported AI-site hosts allow the content script to read displayed response text and render badges locally. https://api.bup.live/* is used for the public database, manifest, and selector configuration. https://www.law.go.kr/* is used only when the user requests an original public document. Prompt and response text is not attached to these supporting requests.
 ```
+
+The manifest does not request the `tabs` permission.
 
 ---
 
 ## 스크린샷
 
 | 순서 | 파일 | 내용 |
-|------|------|------|
-| 1 | `1_chatgpt_green.png` | ChatGPT – 초록 배지 (검증 완료) |
-| 2 | `2_gemini_orange.png` | Gemini – 주황 배지 (DB 미확인) |
-| 3 | `3_copilot_red.png` | Copilot – 빨강 배지 (형식 오류 / AI 환각) |
+|---|---|---|
+| 1 | `1_chatgpt_green.png` | ChatGPT – 초록 배지 (현재 DB에서 찾음) |
+| 2 | `2_gemini_orange.png` | Gemini – 주황 배지 (현재 로컬 DB에서 찾지 못함) |
+| 3 | `3_copilot_red.png` | Copilot – 빨강 배지 (형식 오류) |
 
 ## 프로모션 이미지
 
 | 파일 | 크기 | 용도 |
-|------|------|------|
+|---|---|---|
 | `icon128.png` | 128×128 | 스토어 아이콘 (96×96 + 16px 투명 패딩) |
 | `promo_small_440x280.png` | 440×280 | 작은 프로모션 타일 |
 | `marquee_1400x560.png` | 1400×560 | 마키 프로모션 배너 |
@@ -106,5 +104,5 @@ Only two endpoints are requested: "*://*.law.go.kr/*" is used solely to fetch or
 ## Privacy Policy URL
 
 ```
-http://api.bup.live/bupgogae/privacy.html
+https://api.bup.live/bupgogae/privacy.html
 ```

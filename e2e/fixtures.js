@@ -25,8 +25,15 @@ const os = require('os');
 const fs = require('fs');
 const { test: base, chromium, expect } = require('@playwright/test');
 
-/** 확장프로그램 소스 루트 (manifest.json 위치) */
-const EXTENSION_PATH = path.resolve(__dirname, '..', 'extension');
+/**
+ * 확장프로그램 루트(manifest.json 위치).
+ * CI release gate는 결정적 Store ZIP을 임시 디렉터리에 풀고 이 환경변수로
+ * 정확한 제출 산출물을 로드한다. 미지정 시 개발 소스 디렉터리를 사용한다.
+ */
+const EXTENSION_PATH = path.resolve(
+  process.env.BUPGOGAE_EXTENSION_PATH
+    || path.resolve(__dirname, '..', 'extension'),
+);
 
 // ============================================================
 // 법제처(law.go.kr) 모의 응답 HTML 빌더
@@ -102,20 +109,35 @@ const test = base.extend({
       args: [
         `--disable-extensions-except=${EXTENSION_PATH}`,
         `--load-extension=${EXTENSION_PATH}`,
+        // launch 직후 onInstalled/onStartup fetch가 route 등록보다 먼저 실행돼도
+        // 실제 production host로 빠져나가지 못하게 한다. 등록된 context.route
+        // fulfill은 정상 동작하고, escape한 요청만 loopback에서 fail-closed한다.
+        '--host-resolver-rules=MAP api.bup.live 0.0.0.0,MAP www.law.go.kr 0.0.0.0',
       ],
       // MV3 Service Worker 허용 (기본값이지만 명시)
       serviceWorkers: 'allow',
     });
 
     // ── Hermetic 네트워크 기본값 ──
-    // 1) R2/원격 설정 요청은 "영구 보류" — abort가 아닌 hold인 이유:
-    //    abort는 설치 시점 동기화를 실패시켜 번들 DB 폴백(92k건 삽입)을
-    //    유발하므로 테스트 초기 상태가 비결정적으로 오염된다.
-    //    hold는 설치 동기화를 fetch 단계에서 잠재워 DB를 빈 상태로 유지하고,
-    //    동기화 테스트는 자체 route를 나중에 등록해(우선 매칭) 흐름을 직접 구동한다.
-    await context.route('https://api.bup.live/**', () => { /* 의도적 미응답 */ });
+    // 1) 원격 Core DB는 기본적으로 404로 차단한다. 설치 동기화는 정직하게
+    //    fetch_failed가 되고 패키지의 실제 번들 DB로 복구된다. 무조건부 304로
+    //    빈 DB를 정상 상태처럼 가장하지 않는다.
+    //    각 테스트가 나중에 등록한 route가 이 기본값보다 우선 매칭된다.
+    await context.route('https://api.bup.live/**', (route) => {
+      const url = route.request().url();
+      if (url.includes('/db.json.gz')) return route.fulfill({ status: 404, body: 'not found' });
+      if (url.includes('/adapters.json')) {
+        return route.fulfill({ contentType: 'application/json', body: '{"adapters":{}}' });
+      }
+      return route.fulfill({ status: 404, body: 'not found' });
+    });
     // 2) 법제처 요청은 기본 모의 응답 (테스트에서 재등록하여 오버라이드 가능)
     await installDefaultLawMock(context);
+
+    // 테스트 시작 전에 설치 single-flight와 번들 폴백을 끝내 초기 상태를 결정적으로 만든다.
+    let [serviceWorker] = context.serviceWorkers();
+    if (!serviceWorker) serviceWorker = await context.waitForEvent('serviceworker');
+    await serviceWorker.evaluate(() => syncDatabase({ trigger: 'e2e_fixture' }));
 
     await use(context);
 

@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.9.0 — 2026-07-28
+
+데이터 용량이 아니라 **부분 설치·부분 수집·게시 중단에도 마지막 정상본을
+유지하는 것**을 목표로 한 무결성·운영 보강 릴리스입니다. 이전에 0.9.0으로
+예고했던 문서 검증 기능은 이번 릴리스에 포함하지 않습니다.
+
+### 확장프로그램 데이터 무결성
+
+- IndexedDB v2의 비파괴 A/B snapshot 구조를 도입했습니다. 기존 `cases`
+  저장소는 보존되며, 새 snapshot을 staging·전수 검증한 뒤 활성 포인터만
+  원자적으로 전환합니다.
+- 모든 동기화 trigger를 single-flight로 합쳐 동일 fetch·검증·설치 결과를
+  공유합니다.
+- manifest version·건수·SHA-256과 content-addressed 객체를 검증하고,
+  무조건부 304·downgrade·불완전 bundle 활성화를 차단합니다.
+- 조회 데이터와 법원 메타데이터를 동일 snapshot transaction에서 읽습니다.
+
+### 크롤러·게시·복구
+
+- XML·필수 필드·페이지 완결성을 날짜 단위로 검증하고, 부분 실패를 durable
+  backlog에 남겨 다음 실행에서 재시도합니다.
+- backlog가 남은 부분 수집 결과는 공개하지 않고 last-known-good DB를
+  유지합니다.
+- SQLite state는 generation 객체와 `current`/`previous` 포인터로 게시하며,
+  최신 세대가 손상되면 완전한 이전 세대로만 복구합니다.
+- 공개 DB는 immutable 객체 → manifest → 구버전 mirror 순서로 게시합니다.
+
+### 보안·품질·공개 문구
+
+- GitHub Actions secret을 필요한 step으로 한정하고 공식 Action과 production
+  의존성을 commit/digest/hash로 고정했습니다.
+- 수동 WARP WireGuard identity와 private-key secret을 제거하고, SHA-256으로
+  고정한 공식 Cloudflare client의 ephemeral consumer 등록으로 교체했습니다.
+- 개인정보처리방침·스토어 설명을 실제 보조 네트워크 요청과 배지 의미에 맞게
+  정정했습니다.
+- ESLint, Ruff, Jest, Python unittest, Playwright E2E를 CI gate에 연결했습니다.
+
 ## 0.8.2 — 2026-06-17
 
 0.8.1에서 drift 안전망이 동기화를 자주 돌리며 생긴 회귀("검증이 느려지고

@@ -56,9 +56,10 @@ def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None,
     bucket = os.environ["R2_BUCKET"]
 
     log.info(f"\n{'─'*50}")
-    log.info(f"  📤 R2 Upload")
+    log.info("  📤 R2 Upload")
     log.info(f"     파일: {gz_path} ({size_mb:.2f} MB)")
-    log.info(f"     버킷: {bucket}/{key}")
+    # bucket 이름도 credential scope/인프라 식별자이므로 로그에는 object key만 남긴다.
+    log.info(f"     객체 키: {key}")
     log.info(f"{'─'*50}")
 
     if dry:
@@ -97,7 +98,7 @@ def ensure_cors():
         )
         log.info("  ✅ CORS 설정 완료")
     except Exception as e:
-        log.warning(f"  ⚠️ CORS 설정 실패 (무시): {e}")
+        log.warning(f"  ⚠️ CORS 설정 실패 (무시): {type(e).__name__}")
 
 
 if __name__ == "__main__":

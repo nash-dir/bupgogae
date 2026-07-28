@@ -18,9 +18,10 @@
  *  S2-2 (진입 트리거): 지원 사이트(LLM) 진입 시 content script가 신선도 검사를 발화한다.
  *
  * [네트워크 모킹]
- *  fixtures.js의 기본 라우트는 api.bup.live를 영구 보류(hold)하므로 설치 시점
- *  동기화는 잠들어 있고, 각 테스트가 mockBupApi()로 자체 라우트를 등록(우선 매칭)해
- *  FORCE_SYNC / VERIFY_DB_FRESHNESS 메시지로 흐름을 직접 구동한다.
+ *  fixtures.js의 기본 라우트는 원격 DB를 404로 차단하고 실제 번들 DB 폴백을
+ *  완료해 결정적인 정상 초기 상태를 만든다.
+ *  각 테스트가 mockBupApi()로 자체 라우트를 등록(우선 매칭)해 FORCE_SYNC /
+ *  VERIFY_DB_FRESHNESS 메시지로 흐름을 직접 구동한다.
  */
 
 const { createHash } = require('node:crypto');
@@ -36,18 +37,40 @@ function buildDbPayload(version, keyCount = 100_500) {
   for (let i = 1; i <= keyCount; i++) {
     cases[`00Da${i}`] = [[i, 1, 200101, '테스트사건']];
   }
-  return JSON.stringify({ version, total: keyCount, cases });
+  return JSON.stringify({
+    version,
+    total: keyCount,
+    court_code_map: { '대법원': 1 },
+    cases,
+  });
 }
 
 const sha256 = (s) => createHash('sha256').update(s, 'utf-8').digest('hex');
 
-// 모의 버전은 번들 DB(extension/data/db.json — 릴리스마다 갱신됨)보다 항상
-// 미래여야 한다. S1-3의 "로컬이 번들보다 최신" 전제가 번들 갱신으로 무너지면
-// 테스트가 시간이 지나며 거짓 실패하므로 먼 미래(2099년)로 고정한다.
-const VER_V1 = '20990601';
-const VER_V2 = '20990607';
+// production의 미래 version 잠금 방지 정책(KST 오늘 +1일) 안에서 두 버전을 만든다.
+// 번들은 빌드 당일 이하이고, 같은 버전 재게시 시나리오는 별도 unit test가 담당한다.
+function kstVersion(offsetDays) {
+  const shifted = new Date(Date.now() + 9 * 3600 * 1000 + offsetDays * 24 * 3600 * 1000);
+  return `${shifted.getUTCFullYear()}${String(shifted.getUTCMonth() + 1).padStart(2, '0')}`
+    + String(shifted.getUTCDate()).padStart(2, '0');
+}
+const VER_V1 = kstVersion(0);
+const VER_V2 = kstVersion(1);
 const PAYLOAD_V1 = buildDbPayload(VER_V1);
 const PAYLOAD_V2 = buildDbPayload(VER_V2);
+
+function buildManifest(payloadText) {
+  const payload = JSON.parse(payloadText);
+  return JSON.stringify({
+    schema: 1,
+    built_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+    core: {
+      version: payload.version,
+      sha256: sha256(payloadText),
+      total: payload.total,
+    },
+  });
+}
 
 /**
  * api.bup.live 모의 라우트 설치.
@@ -55,7 +78,7 @@ const PAYLOAD_V2 = buildDbPayload(VER_V2);
  * @param {import('@playwright/test').BrowserContext} context
  * @param {{onDb: function, onManifest?: function}} handlers
  *   onDb(route, request): db.json.gz 요청 처리 (시나리오별 가변)
- *   onManifest(route): manifest.json 요청 처리 (없으면 404)
+ *   onManifest(route): manifest.json 요청 처리 (없으면 PAYLOAD_V1 commit)
  */
 async function mockBupApi(context, handlers) {
   await context.route('https://api.bup.live/**', async (route) => {
@@ -65,7 +88,7 @@ async function mockBupApi(context, handlers) {
     }
     if (url.includes('/manifest.json')) {
       if (handlers.onManifest) return handlers.onManifest(route);
-      return route.fulfill({ status: 404, body: 'not found' });
+      return route.fulfill({ contentType: 'application/json', body: buildManifest(PAYLOAD_V1) });
     }
     if (url.includes('/db.json.gz')) {
       return handlers.onDb(route, route.request());
@@ -88,36 +111,42 @@ async function getBackground(context) {
 function readLocalState(sw) {
   return sw.evaluate(async () => {
     const db = await getCachedDB();
-    const get = (store, key) => new Promise((res, rej) => {
-      const r = db.transaction(store).objectStore(store).get(key);
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
     const count = await new Promise((res, rej) => {
-      const r = db.transaction('cases').objectStore('cases').count();
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
+      const tx = db.transaction(['metadata', 'cases', 'cases_a', 'cases_b'], 'readonly');
+      const active = tx.objectStore('metadata').get('active_cases_store');
+      let result = 0;
+      active.onsuccess = () => {
+        const name = ['cases_a', 'cases_b'].includes(active.result) ? active.result : 'cases';
+        const r = tx.objectStore(name).count();
+        r.onsuccess = () => { result = r.result; };
+      };
+      tx.oncomplete = () => res(result);
+      tx.onerror = () => rej(tx.error);
     });
     const storage = await chrome.storage.local.get(null);
+    const syncState = await readLocalSyncState();
+    const status = await getSyncStatus();
     return {
-      localVer: (await get('metadata', 'local_ver')) ?? null,
-      totalCount: (await get('metadata', 'total_count')) ?? null,
-      contentHash: (await get('metadata', 'content_hash')) ?? null,
-      lastSuccessAt: (await get('metadata', 'last_success_at')) ?? null,
+      localVer: status.localVer,
+      totalCount: status.totalCount,
+      contentHash: syncState.contentHash,
+      lastSuccessAt: syncState.lastSuccessAt,
       caseCount: count,
-      etag: storage.bupgogae_etag ?? null,
+      etag: syncState.etag,
       ledger: storage.bupgogae_sync_ledger ?? null,
     };
   });
 }
 
-/** IndexedDB의 cases + metadata 스토어를 비워 손상/축출 상태를 시뮬레이션 */
+/** IndexedDB의 모든 snapshot + metadata 스토어를 비워 손상/축출 상태를 시뮬레이션 */
 function wipeLocalDb(sw) {
   return sw.evaluate(async () => {
     const db = await getCachedDB();
     await new Promise((res, rej) => {
-      const tx = db.transaction(['cases', 'metadata'], 'readwrite');
+      const tx = db.transaction(['cases', 'cases_a', 'cases_b', 'metadata'], 'readwrite');
       tx.objectStore('cases').clear();
+      tx.objectStore('cases_a').clear();
+      tx.objectStore('cases_b').clear();
       tx.objectStore('metadata').clear();
       tx.oncomplete = res;
       tx.onerror = () => rej(tx.error);
@@ -131,7 +160,18 @@ function backdateLastSuccess(sw, epochMs) {
     const db = await getCachedDB();
     await new Promise((res, rej) => {
       const tx = db.transaction('metadata', 'readwrite');
-      tx.objectStore('metadata').put(ts, 'last_success_at');
+      const store = tx.objectStore('metadata');
+      const activeReq = store.get('active_cases_store');
+      activeReq.onsuccess = () => {
+        const active = activeReq.result;
+        if (active === 'cases_a' || active === 'cases_b') {
+          const key = `snapshot_meta:${active}`;
+          const metaReq = store.get(key);
+          metaReq.onsuccess = () => store.put({ ...metaReq.result, lastSuccessAt: ts }, key);
+        } else {
+          store.put(ts, 'last_success_at');
+        }
+      };
       tx.oncomplete = res;
       tx.onerror = () => rej(tx.error);
     });
@@ -196,6 +236,27 @@ test('S1-1: 로컬 DB가 비어도 304에 갇히지 않고 전체 DB를 복구�
   expect(state.localVer).toBe(VER_V1);
 });
 
+test('S1-1b: 무조건부 304는 실패로 보고하고 빈 DB를 번들로 복구한다', async ({ context, extensionPage }) => {
+  await mockBupApi(context, {
+    onDb: (route) => route.fulfill({ status: 304 }),
+  });
+  const sw = await getBackground(context);
+  await wipeLocalDb(sw);
+  await sw.evaluate(() => chrome.storage.local.remove('bupgogae_etag'));
+
+  const response = await forceSync(extensionPage);
+  const state = await readLocalState(sw);
+
+  expect(response).toMatchObject({
+    success: false,
+    outcome: 'fetch_failed',
+    error: expect.stringMatching(/조건 없는 요청.*304/),
+  });
+  expect(state.localVer).toMatch(/^\d{8}$/);
+  expect(state.caseCount).toBeGreaterThanOrEqual(100_000);
+  expect(state.etag).toBeNull();
+});
+
 // ============================================================
 // S1-2. 워치독 — 48시간 무성공 시 ETag 무시
 // ============================================================
@@ -214,6 +275,10 @@ test('S1-2: 마지막 성공이 48시간을 넘기면 ETag를 무시하고 최�
         body: served.body,
       });
     },
+    onManifest: (route) => route.fulfill({
+      contentType: 'application/json',
+      body: buildManifest(served.body),
+    }),
   });
   const sw = await getBackground(context);
 
@@ -249,7 +314,7 @@ test('S1-3: 동기화 실패가 최신 로컬 DB를 구버전 번들로 롤백�
   });
   const sw = await getBackground(context);
 
-  // 1차 동기화 성공: 로컬은 VER_V1(2099년) — 번들 DB보다 항상 최신
+  // 1차 동기화 성공: 로컬은 KST 당일 VER_V1
   await forceSync(extensionPage);
   expect((await readLocalState(sw)).localVer).toBe(VER_V1);
 
@@ -257,8 +322,7 @@ test('S1-3: 동기화 실패가 최신 로컬 DB를 구버전 번들로 롤백�
   mode.fail = true;
   await forceSync(extensionPage);
 
-  // 현재 구현: 번들 폴백이 local_ver를 20260321로 롤백 + 데이터 92k건으로 격하
-  // 목표 구현: 실패는 실패로 남기고 로컬 데이터는 보존
+  // 실패는 실패로 남기고 이미 설치한 로컬 snapshot은 보존한다.
   const state = await readLocalState(sw);
   expect(state.localVer).toBe(VER_V1);
   expect(state.caseCount).toBeGreaterThanOrEqual(100_000);
@@ -310,17 +374,18 @@ test('S1-4: 팝업 새로고침 버튼은 동기화 실패를 사용자에게 �
 // ============================================================
 
 test('S1-5b: 팝업의 동기화 이력 섹션이 원장을 렌더링한다', async ({ context, extensionId }) => {
-  // mockBupApi를 등록하지 않는다 — fixture의 hold가 설치 동기화를 잠재워
-  // 시드한 원장에 실제 동기화 엔트리가 끼어드는 레이스를 차단한다.
+  // fixture의 설치 single-flight가 끝난 뒤 원장을 덮어써 실제 install 엔트리가
+  // 시드 데이터 뒤에 끼어드는 레이스를 차단한다.
   const sw = await getBackground(context);
+  await sw.evaluate(() => syncDatabase({ trigger: 'e2e_ledger_seed' }));
 
   // 원장 시드 (렌더링 검증이 목적 — 기록 자체의 정확성은 S1-4/5가 검증)
-  await sw.evaluate(() => chrome.storage.local.set({
+  await sw.evaluate((version) => chrome.storage.local.set({
     bupgogae_sync_ledger: [
       { ts: Date.now(), trigger: 'force', outcome: 'fetch_failed', reason: 'HTTP 500', durationMs: 6500 },
-      { ts: Date.now() - 3600_000, trigger: 'alarm', outcome: 'replaced', version: '20990601', durationMs: 4200 },
+      { ts: Date.now() - 3600_000, trigger: 'alarm', outcome: 'replaced', version, durationMs: 4200 },
     ],
-  }));
+  }), VER_V1);
 
   const popupPage = await context.newPage();
   await popupPage.goto(`chrome-extension://${extensionId}/popup/popup.html`);
@@ -363,14 +428,15 @@ test('S1-6: 동기화 성공 시 수신 바이트의 SHA-256과 성공 시각을
 
 test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동기화해 치유한다', async ({ context, extensionPage }) => {
   const dbRequests = [];
-  const manifestState = { body: null };
+  const manifestState = { body: buildManifest(PAYLOAD_V1) };
 
   await mockBupApi(context, {
     onDb: (route, req) => {
       const url = req.url();
       dbRequests.push(url);
       // 캐시 버스터가 붙은 요청만 최신(v2)을 반환 — "낡은 CDN 캐시 우회" 시뮬레이션
-      if (url.includes('cb=')) {
+      const cb = new URL(url).searchParams.get('cb');
+      if (cb === sha256(PAYLOAD_V2)) {
         return route.fulfill({
           contentType: 'application/json',
           headers: { ETag: '"sync-e2"' },
@@ -387,7 +453,6 @@ test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동
       });
     },
     onManifest: (route) => {
-      if (!manifestState.body) return route.fulfill({ status: 404, body: 'not yet' });
       return route.fulfill({ contentType: 'application/json', body: manifestState.body });
     },
   });
@@ -417,8 +482,8 @@ test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동
   expect(state.localVer).toBe(VER_V2);
   expect(state.contentHash).toBe(sha256(PAYLOAD_V2));
 
-  // 치유 fetch는 캐시 버스터를 사용했어야 한다
-  expect(dbRequests.some((u) => u.includes('cb='))).toBe(true);
+  // 치유 fetch는 같은 날짜 재게시도 구분하는 manifest hash 캐시 버스터를 사용한다.
+  expect(dbRequests.some((u) => u.includes(`cb=${sha256(PAYLOAD_V2)}`))).toBe(true);
 });
 
 // ============================================================
@@ -452,7 +517,7 @@ test('S2-2: LLM 사이트 진입 시 content script가 신선도 검사를 발�
 // H1. 비파괴 재구축 — 재동기화 중 빈/부분 DB 노출 금지 (0.8.1 회귀)
 // ============================================================
 
-test('H1: 재동기화가 진행 중에도 조회는 빈/부분 DB를 보지 않는다', async ({ context, extensionPage }) => {
+test('H1: snapshot 전환 중에도 조회는 빈/부분 DB를 보지 않는다', async ({ context, extensionPage }) => {
   let serve = PAYLOAD_V1;
   let etag = '"h1-v1"';
   await mockBupApi(context, {
@@ -460,6 +525,10 @@ test('H1: 재동기화가 진행 중에도 조회는 빈/부분 DB를 보지 않
       contentType: 'application/json',
       headers: { ETag: etag },
       body: serve,
+    }),
+    onManifest: (route) => route.fulfill({
+      contentType: 'application/json',
+      body: buildManifest(serve),
     }),
   });
   const sw = await getBackground(context);
@@ -475,9 +544,17 @@ test('H1: 재동기화가 진행 중에도 조회는 빈/부분 DB를 보지 않
     const db = await getCachedDB();
     const countNow = () => new Promise((res) => {
       try {
-        const r = db.transaction('cases').objectStore('cases').count();
-        r.onsuccess = () => res(r.result);
-        r.onerror = () => res(-1);
+        const tx = db.transaction(['metadata', 'cases', 'cases_a', 'cases_b'], 'readonly');
+        const active = tx.objectStore('metadata').get('active_cases_store');
+        let result = -1;
+        active.onsuccess = () => {
+          const name = ['cases_a', 'cases_b'].includes(active.result) ? active.result : 'cases';
+          const r = tx.objectStore(name).count();
+          r.onsuccess = () => { result = r.result; };
+          r.onerror = () => { result = -1; };
+        };
+        tx.oncomplete = () => res(result);
+        tx.onerror = () => res(-1);
       } catch { res(-2); } // 커넥션이 재구축 중 닫히면(M5) InvalidStateError
     });
     let min = Infinity, polls = 0, polling = true;
@@ -490,8 +567,7 @@ test('H1: 재동기화가 진행 중에도 조회는 빈/부분 DB를 보지 않
     return { min, polls, final: await countNow() };
   });
 
-  // 현재 구현(dbClear→insert): dbClear 직후~삽입 완료 사이 min이 0 부근으로 떨어진다 → 회귀 재현(Red)
-  // 목표 구현(insert→prune): 기존 데이터가 살아있어 min이 v1 건수 이상 유지(Green)
+  // inactive store staging 동안 active pointer는 v1을 유지하고 전환 뒤에는 v2만 보여야 한다.
   expect(probe.polls).toBeGreaterThan(0);
   expect(probe.min).toBeGreaterThanOrEqual(100_000);
   expect(probe.final).toBeGreaterThanOrEqual(100_000);

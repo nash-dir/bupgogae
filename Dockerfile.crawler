@@ -1,10 +1,11 @@
-FROM python:3.12-slim
+FROM python:3.12.13-slim-trixie@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
 
 WORKDIR /app
 
-# 의존성만 먼저 복사 (캐시 레이어)
-COPY requirements-crawler.txt .
-RUN pip install --no-cache-dir -r requirements-crawler.txt
+# 검토된 Linux wheel만 해시 검증하여 설치 (캐시 레이어)
+COPY requirements-crawler.lock .
+RUN pip install --no-cache-dir --require-hashes --only-binary=:all: \
+    -r requirements-crawler.lock
 
 # 소스 복사
 COPY pipeline/ ./pipeline/
@@ -15,4 +16,4 @@ VOLUME /app/data
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Asia/Seoul
 
-ENTRYPOINT ["python", "/app/pipeline/nas_runner.py"]
+ENTRYPOINT ["python", "/app/pipeline/crawler_runner.py", "--data-dir", "/app/data"]

@@ -21,17 +21,15 @@ Master DB 관리 모듈 — 영속 SQLite.
 
 import json
 import os
-import re
 import sqlite3
 from collections import defaultdict
-from datetime import datetime
 
 from compress import (  # noqa: E402
-    compress_case_number, compress_tax_case_number,
+    compress_case_number,
     compress_case_name, compress_date, CourtCodeResolver,
 )
 from api import clean_case_number  # noqa: E402
-from validate import sanitize_raw_case, sanitize_kipris_item  # noqa: E402
+from validate import sanitize_raw_case  # noqa: E402
 from log_setup import get_logger  # noqa: E402
 
 log = get_logger(__name__)
@@ -87,67 +85,83 @@ class MasterDB:
     # ════════════════════════════════════════════════
 
     def upsert_raw(self, raw_cases: list[dict]) -> tuple[int, int, int]:
-        """raw API 결과를 UPSERT. (inserted, updated, skipped) 반환."""
+        """raw API 결과를 한 transaction으로 UPSERT.
+
+        한 날짜/페이지 묶음 도중 SQLite 오류가 나면 그 호출에서 쓴 행을 모두
+        rollback한다. 그렇지 않으면 다음 성공 호출의 commit이 앞선 부분 쓰기까지
+        함께 확정해 durable backlog와 master DB의 완료 경계가 어긋날 수 있다.
+        """
         cur = self.conn.cursor()
         inserted = 0
         updated = 0
         skipped = 0
 
-        for raw in raw_cases:
-            # 입력 검증/정제 (길이 상한·None 안전). serial 없으면 스킵.
-            case = sanitize_raw_case(raw)
-            if case is None:
-                skipped += 1
-                continue
-            serial = case["serial"]
-
-            # 블랙리스트 체크
-            try:
-                if int(serial) in self.blacklist:
+        try:
+            for raw in raw_cases:
+                # 입력 검증/정제 (길이 상한·None 안전). serial 없으면 스킵.
+                case = sanitize_raw_case(raw)
+                if case is None:
                     skipped += 1
                     continue
-            except ValueError:
-                pass
+                serial = case["serial"]
 
-            case_number_clean = clean_case_number(case["case_number"])
+                # 블랙리스트 체크
+                try:
+                    if int(serial) in self.blacklist:
+                        skipped += 1
+                        continue
+                except ValueError:
+                    pass
 
-            # 존재 여부 확인
-            existing = cur.execute(
-                "SELECT serial FROM cases WHERE serial = ?", (serial,)
-            ).fetchone()
+                case_number_clean = clean_case_number(case["case_number"])
 
-            if existing:
-                cur.execute("""
-                    UPDATE cases SET
-                        case_name = ?, case_number = ?, case_number_clean = ?,
-                        date = ?, court = ?
-                    WHERE serial = ?
-                """, (
-                    case["case_name"],
-                    case["case_number"],
-                    case_number_clean,
-                    case["date"],
-                    case["court"],
-                    serial,
-                ))
-                updated += 1
-            else:
-                cur.execute("""
-                    INSERT INTO cases
-                        (serial, case_name, case_number, case_number_clean, date, court)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    serial,
-                    case["case_name"],
-                    case["case_number"],
-                    case_number_clean,
-                    case["date"],
-                    case["court"],
-                ))
-                inserted += 1
+                # 존재 여부 확인
+                existing = cur.execute(
+                    "SELECT serial FROM cases WHERE serial = ?", (serial,)
+                ).fetchone()
 
-        self.conn.commit()
-        return inserted, updated, skipped
+                if existing:
+                    cur.execute("""
+                        UPDATE cases SET
+                            case_name = COALESCE(NULLIF(?, ''), case_name),
+                            case_number = COALESCE(NULLIF(?, ''), case_number),
+                            case_number_clean = COALESCE(
+                                NULLIF(?, ''), case_number_clean
+                            ),
+                            date = COALESCE(NULLIF(?, ''), date),
+                            court = COALESCE(NULLIF(?, ''), court)
+                        WHERE serial = ?
+                    """, (
+                        case["case_name"],
+                        case["case_number"],
+                        case_number_clean,
+                        case["date"],
+                        case["court"],
+                        serial,
+                    ))
+                    updated += 1
+                else:
+                    cur.execute("""
+                        INSERT INTO cases
+                            (serial, case_name, case_number, case_number_clean, date, court)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        serial,
+                        case["case_name"],
+                        case["case_number"],
+                        case_number_clean,
+                        case["date"],
+                        case["court"],
+                    ))
+                    inserted += 1
+
+            self.conn.commit()
+            return inserted, updated, skipped
+        except Exception:
+            self.conn.rollback()
+            raise
+        finally:
+            cur.close()
 
     # ════════════════════════════════════════════════
     # 조회
@@ -255,49 +269,3 @@ class MasterDB:
             "newest_date": newest,
             "size_mb": round(size_mb, 2),
         }
-
-
-# 자체 테스트 (직접 실행 시)
-if __name__ == "__main__":
-    def _test():
-        """간단한 통합 테스트. 완료 후 테스트 DB 자동 삭제."""
-        test_db = "test_master.db"
-        db = MasterDB(test_db)
-
-        test_cases = [
-            {"serial": "100001", "case_name": "손해배상(기)",
-             "case_number": "2024다12345", "date": "20240115", "court": "대법원"},
-            {"serial": "100002", "case_name": "부과처분취소",
-             "case_number": "2023구합56789", "date": "20230610", "court": "서울행정법원"},
-        ]
-
-        ins, upd, skp = db.upsert_raw(test_cases)
-        log.info(f"Inserted: {ins}, Updated: {upd}, Skipped: {skp}")
-        log.info(f"Stats: {db.stats()}")
-
-        compressed, skipped = db.export_all()
-        log.info(f"Compressed keys: {len(compressed)}, Skipped: {skipped}")
-        log.info(json.dumps(compressed, ensure_ascii=False, indent=2))
-
-        # KIPRIS 테이블 테스트
-        test_kipris = [
-            {"serial": "2023당1234", "case_name": "거절결정취소",
-             "case_number": "2023당1234", "decision_date": "20230915",
-             "trial_type": "거절결정"},
-            {"serial": "2022원5678", "case_name": "무효심판",
-             "case_number": "2022원5678", "decision_date": "20220310",
-             "trial_type": "무효"},
-        ]
-        k_ins, k_upd = db.upsert_kipris(test_kipris)
-        log.info(f"KIPRIS Inserted: {k_ins}, Updated: {k_upd}")
-        log.info(f"KIPRIS Count: {db.kipris_count()}")
-
-        k_data, k_skip = db.export_kipris()
-        log.info(f"KIPRIS Compressed keys: {len(k_data)}, Skipped: {k_skip}")
-        log.info(json.dumps(k_data, ensure_ascii=False, indent=2))
-
-        db.close()
-        os.remove(test_db)
-        log.info("✅ Test passed")
-
-    _test()

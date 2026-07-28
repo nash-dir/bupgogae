@@ -539,7 +539,7 @@ if __name__ == "__main__":
 
     size_mb = save_output(data, stats, output_dir, court_map)
 
-    log.info(f"\n📊 변환 통계:")
+    log.info("\n📊 변환 통계:")
     log.info(f"   총 레코드:       {stats['total']:,}")
     log.info(f"   고유 키:         {len(data):,}")
     log.info(f"   건너뛴 레코드:   {stats['skipped']:,}")

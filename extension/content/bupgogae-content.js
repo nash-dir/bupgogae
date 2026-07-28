@@ -282,7 +282,8 @@ function onSettleTimer() {
  * 모든 LLM 응답 컨테이너를 스캔하고 판례번호를 처리.
  *
  * [Circuit Breaker 측정 범위]
- *   동기 처리 구간만 측정: 컨테이너 탐색 + 텍스트 노드 수집 + 정규식 추출
+ *   동기 처리 구간만 측정: 컨테이너 탐색 + 각 processContainer가 최초
+ *   DB 조회를 기다리기 전까지 수행하는 TreeWalker/정규식/검증 비용
  *   비동기 대기(IndexedDB batchLookup)는 측정에서 제외.
  *   → 정상적인 DB 초기 로딩 지연이 Circuit Breaker를 오발동시키지 않음.
  */
@@ -305,13 +306,16 @@ async function processAllResponses() {
       _isProcessing = false;
       return;
     }
-    // 동기 구간 스냅샷 (컨테이너 탐색 완료)
+    // 컨테이너 탐색 동기 비용
     syncDuration = performance.now() - syncStart;
 
     for (const container of containers) {
-      // processContainer 내부의 batchLookup은 비동기이므로
-      // 동기 처리 시간에 포함되지 않음
-      await processContainer(container);
+      // async 함수는 첫 await 전까지 동기로 실행된다. Promise를 만든 직후 시간을
+      // 재면 collectTextNodes(TreeWalker)와 정규식 추출을 포함하고 DB 대기는 제외된다.
+      const containerStart = performance.now();
+      const processing = processContainer(container);
+      syncDuration += performance.now() - containerStart;
+      await processing;
     }
   } catch (err) {
     console.error('[bupgogae] 처리 중 오류:', err);
@@ -331,8 +335,8 @@ async function processAllResponses() {
  *   브라우저 탭이 영구 프리징되는 것을 방지하는 안전장치.
  *
  * [측정 대상]
- *   동기 처리 시간만 측정 (컨테이너 탐색 + TreeWalker + 정규식).
- *   IndexedDB 비동기 조회 시간은 포함하지 않음.
+ *   컨테이너 탐색과 processContainer의 최초 비동기 DB 조회 전까지 실행되는
+ *   TreeWalker·정규식·동기 검증 시간. IndexedDB 대기와 조회 후 렌더 시간은 제외.
  *   → 정상적인 첫 로딩(DB cold start ~20초)에서 오발동 없음.
  *
  * [발동 조건]
@@ -511,10 +515,10 @@ async function processContainer(container) {
   }
 
   // ── 배치 조회 + L13 재시도 (타임아웃/에러 키만 재조회) ──
-  const courtCodeMap = window.bupgogaeCaseRegex.getCourtCodeMap();
   let keysToLookup = Array.from(keyToEntries.keys());
   for (let attempt = 1; attempt <= LOOKUP_MAX_ATTEMPTS && keysToLookup.length > 0; attempt++) {
-    const results = await batchLookup(keysToLookup);
+    const lookup = await batchLookup(keysToLookup);
+    const results = lookup.results;
     const unresolved = [];
     for (const key of keysToLookup) {
       const result = results[key];
@@ -526,6 +530,10 @@ async function processContainer(container) {
       }
       if (result && result.found) {
         const greenEntries = buildGreenEntries(result.data, entries[0]?.parsed);
+        // key를 조회한 바로 그 readonly snapshot의 map을 사용한다. 여러 chunk 사이에
+        // pointer가 전환되어도 records와 court code 해석이 섞이지 않는다.
+        const courtCodeMap = lookup.courtMapByKey[key] ||
+          window.bupgogaeCaseRegex.getCourtCodeMap();
         for (const e of entries) {
           e.level = 'green';
           e.options = { greenEntries, caseCode: e.parsed.code, caseType: e.parsed.type, courtCodeMap };
@@ -660,13 +668,14 @@ function collectTextNodes(root) {
  * Service Worker에 배치 조회 요청.
  * MAX_BATCH_SIZE 초과 시 분할 처리.
  * @param {string[]} keys
- * @returns {Promise<Object>}
+ * @returns {Promise<{results: Object, courtMapByKey: Object}>}
  */
 async function batchLookup(keys) {
-  if (keys.length === 0) return {};
+  if (keys.length === 0) return { results: {}, courtMapByKey: {} };
 
   // 분할 처리
   const allResults = {};
+  const courtMapByKey = {};
   for (let i = 0; i < keys.length; i += MAX_BATCH_SIZE) {
     const chunk = keys.slice(i, i + MAX_BATCH_SIZE);
 
@@ -678,7 +687,7 @@ async function batchLookup(keys) {
         for (const k of chunk) {
           fallback[k] = { found: false, data: null, error: true };
         }
-        resolve(fallback);
+        resolve({ results: fallback, snapshotMap: null });
       };
 
       // SW 컨텍스트 무효화 등으로 콜백이 끝내 호출되지 않는 경우를 대비한 타임아웃 가드
@@ -698,7 +707,22 @@ async function batchLookup(keys) {
           resolveFallback();
           return;
         }
-        resolve(response || {});
+        // 신 SW는 결과와 같은 snapshot의 version/court map을 함께 보낸다.
+        // 구 SW의 flat 응답도 계속 허용한다.
+        if (response && response.results && typeof response.results === 'object') {
+          const isV2Snapshot = response.snapshot?.storeName === 'cases_a' ||
+            response.snapshot?.storeName === 'cases_b';
+          // 검증된 v2 payload에는 map이 필수다. metadata 손상으로 누락된 경우에는
+          // 기존 session map을 섞지 않고 빈 map으로 fail-closed한다.
+          const snapshotMap = response.snapshot?.courtCodeMap ||
+            (isV2Snapshot ? {} : null);
+          if (snapshotMap && window.bupgogaeCaseRegex?.updateCourtCodeMap) {
+            window.bupgogaeCaseRegex.updateCourtCodeMap(snapshotMap);
+          }
+          resolve({ results: response.results, snapshotMap: snapshotMap || null });
+        } else {
+          resolve({ results: response || {}, snapshotMap: null });
+        }
       };
 
       try {
@@ -712,10 +736,12 @@ async function batchLookup(keys) {
       }
     });
 
-    Object.assign(allResults, result);
+    Object.assign(allResults, result.results);
+    const mapForChunk = result.snapshotMap || window.bupgogaeCaseRegex.getCourtCodeMap();
+    for (const key of chunk) courtMapByKey[key] = mapForChunk;
   }
 
-  return allResults;
+  return { results: allResults, courtMapByKey };
 }
 
 

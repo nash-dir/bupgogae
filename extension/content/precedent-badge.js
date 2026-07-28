@@ -519,7 +519,7 @@ const TOOLTIP_BUILDERS = {
     frag.appendChild(_el('span', 'bgae-tooltip-body',
       reason || '대한민국 사건번호 체계를 벗어난 형식입니다.'));
     frag.appendChild(_el('span', 'bgae-tooltip-footer',
-      'AI 환각(Hallucination)일 가능성이 높습니다.'));
+      '형식 오류만으로 인용의 진위 여부를 확정할 수 없습니다.'));
     return frag;
   },
 
@@ -531,7 +531,7 @@ const TOOLTIP_BUILDERS = {
     const frag = document.createDocumentFragment();
     frag.appendChild(_el('span', 'bgae-tooltip-title', 'DB 미확인 사건번호'));
     frag.appendChild(_el('span', 'bgae-tooltip-body',
-      '공개된 판례 데이터베이스에서 검증되지 않은 사건번호입니다.'));
+      '현재 브라우저의 로컬 공개 DB에서 찾지 못한 사건번호입니다.'));
 
     // 사법정보공개포털 링크가 포함된 본문
     const bodyWithLink = _el('span', 'bgae-tooltip-body');
@@ -540,7 +540,7 @@ const TOOLTIP_BUILDERS = {
     portalLink.target = '_blank';
     portalLink.rel = 'noopener';
     bodyWithLink.appendChild(portalLink);
-    bodyWithLink.appendChild(document.createTextNode('에서 허위 사건번호 여부를 판별하십시오.'));
+    bodyWithLink.appendChild(document.createTextNode('과 원문·추가 자료에서 직접 확인하십시오.'));
     frag.appendChild(bodyWithLink);
 
     frag.appendChild(_el('span', 'bgae-tooltip-footer',

@@ -287,6 +287,13 @@ function getCourtCodeMap() {
   return _courtCodeMap || {};
 }
 
+/** 조회 snapshot과 함께 온 court map으로 원자적으로 교체한다. */
+function updateCourtCodeMap(courtCodeMap) {
+  if (!courtCodeMap || typeof courtCodeMap !== 'object' || Array.isArray(courtCodeMap)) return false;
+  _courtCodeMap = { ...courtCodeMap };
+  return true;
+}
+
 
 // ============================================================
 // 6. 외부 인터페이스
@@ -300,6 +307,7 @@ if (typeof window !== 'undefined') {
     compressCaseKey,
     isMetaReady,
     getCourtCodeMap,
+    updateCourtCodeMap,
   };
 }
 
@@ -312,6 +320,7 @@ if (typeof module !== 'undefined' && module.exports) {
     compressCaseKey,
     isMetaReady,
     getCourtCodeMap,
+    updateCourtCodeMap,
     /**
      * 테스트 전용: 메타데이터(case_code_map / court_code_map)를 직접 주입.
      * Service Worker 메시지 없이 화이트리스트 정규식·압축 로직을 검증하기 위함.

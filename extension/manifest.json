@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "법고개 (Bupgogae)",
-  "version": "0.8.2",
-  "description": "LLM 환각 판례를 실시간으로 탐지합니다",
+  "version": "0.9.0",
+  "description": "AI 답변의 한국 사건번호를 공개 판례 DB와 로컬에서 대조합니다",
   "permissions": ["alarms", "storage", "unlimitedStorage"],
   "host_permissions": [
     "https://www.law.go.kr/*",

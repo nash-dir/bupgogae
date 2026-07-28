@@ -1,120 +1,70 @@
 #!/bin/sh
 #
-# 법고개(Bupgogae) — Pre-Push Hook
-# =================================
-# push 전 보안 금칙어, 테스트, 번들 크기를 검증한다.
-# 실패 시 push를 차단한다.
-#
-# [설치]
-#   git config core.hooksPath .githooks
-#
+# 법고개(Bupgogae) — 로컬 pre-push gate
+# 전체 Playwright E2E는 push 전 수동 검증과 원격 CI가 담당한다.
 
-set -e
-
-echo "╔══════════════════════════════════════════╗"
-echo "║  법고개 Pre-Push Hook                    ║"
-echo "╚══════════════════════════════════════════╝"
-echo ""
+set -eu
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+if [ -x "$REPO_ROOT/.venv/Scripts/python.exe" ]; then
+  PYTHON="$REPO_ROOT/.venv/Scripts/python.exe"
+elif [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+  PYTHON="$REPO_ROOT/.venv/bin/python"
+else
+  PYTHON="${PYTHON:-python}"
+fi
+
 FAILED=0
 
-# ──────────────────────────────────────────
-# 1. 보안 금칙어 검사 (MV3 CSP / XSS 차단)
-# ──────────────────────────────────────────
-echo "🔒 [1/4] 보안 금칙어 검사..."
-
+echo "🔒 [1/5] 확장 보안 금칙어·평문 WARP key 검사"
 FORBIDDEN_PATTERNS='innerHTML\s*=|outerHTML\s*=|eval\s*\(|new\s+Function\s*\(|document\.write\s*\(|\.insertAdjacentHTML\s*\('
-
-# extension/ 내 모든 JS 파일 검사 (테스트 제외)
-MATCHES=$(grep -rnE "$FORBIDDEN_PATTERNS" \
-  "$REPO_ROOT/extension/background/"*.js \
-  "$REPO_ROOT/extension/content/"*.js \
-  "$REPO_ROOT/extension/popup/"*.js \
-  2>/dev/null | grep -v '\.test\.js' | grep -v '// safe:' || true)
-
+MATCHES="$(
+  grep -rnE "$FORBIDDEN_PATTERNS" \
+    "$REPO_ROOT/extension/background/"*.js \
+    "$REPO_ROOT/extension/content/"*.js \
+    "$REPO_ROOT/extension/popup/"*.js \
+    2>/dev/null |
+    grep -v '\.test\.js' |
+    grep -v '// safe:' || true
+)"
 if [ -n "$MATCHES" ]; then
-  echo "  ❌ 보안 금칙어 감지:"
   echo "$MATCHES"
-  echo ""
-  echo "  innerHTML, eval, new Function, document.write 등은"
-  echo "  Chrome Web Store 심사 탈락 + XSS 경로입니다."
-  echo "  DOM API(createElement/textContent)를 사용하세요."
-  echo "  의도적 사용이면 해당 줄에 '// safe:' 주석을 추가하세요."
   FAILED=1
-else
-  echo "  ✅ 금칙어 없음"
 fi
-
-# ──────────────────────────────────────────
-# 2. Jest 단위 테스트 (case-regex)
-# ──────────────────────────────────────────
-echo ""
-echo "🧪 [2/4] Jest 단위 테스트..."
-
-if [ -f "$REPO_ROOT/package.json" ]; then
-  cd "$REPO_ROOT"
-  # jest 설정은 루트 package.json에 있으며 e2e/는 testPathIgnorePatterns로 제외됨
-  if npx jest --silent; then
-    echo "  ✅ Jest 통과"
-  else
-    echo "  ❌ Jest 실패"
-    FAILED=1
-  fi
-  cd "$REPO_ROOT"
-else
-  echo "  ⏭  package.json 없음 — 스킵"
-fi
-
-# ──────────────────────────────────────────
-# 3. PyTest 단위 테스트 (pipeline)
-# ──────────────────────────────────────────
-echo ""
-echo "🐍 [3/4] PyTest 단위 테스트..."
-
-# pipeline/test_*.py 가 하나라도 있으면 전체 실행
-if ls "$REPO_ROOT/pipeline"/test_*.py >/dev/null 2>&1; then
-  cd "$REPO_ROOT/pipeline"
-  if python -m pytest -q; then
-    echo "  ✅ PyTest 통과"
-  else
-    echo "  ❌ PyTest 실패"
-    FAILED=1
-  fi
-  cd "$REPO_ROOT"
-else
-  echo "  ⏭  pipeline 테스트 없음 — 스킵"
-fi
-
-# ──────────────────────────────────────────
-# 4. 번들 크기 가드
-# ──────────────────────────────────────────
-echo ""
-echo "📦 [4/4] 번들 크기 검사..."
-
-MAX_BUNDLE_MB=10
-OVERSIZED=$(find "$REPO_ROOT/extension/data" -name "*.json" -size +${MAX_BUNDLE_MB}M 2>/dev/null || true)
-
-if [ -n "$OVERSIZED" ]; then
-  echo "  ❌ 번들 JSON ${MAX_BUNDLE_MB}MB 초과:"
-  echo "$OVERSIZED"
+if grep -Eq 'PrivateKey[[:space:]]*=[[:space:]]*[A-Za-z0-9+/]{43}=' \
+  "$REPO_ROOT/.github/scripts/connect-warp.sh"; then
+  echo "평문 WireGuard private key가 connect-warp.sh에 있습니다."
   FAILED=1
-else
-  echo "  ✅ 번들 크기 정상"
 fi
 
-# ──────────────────────────────────────────
-# 최종 판정
-# ──────────────────────────────────────────
-echo ""
-if [ $FAILED -ne 0 ]; then
-  echo "══════════════════════════════════════════"
-  echo "  ❌ Pre-Push 검증 실패 — push 차단됨"
-  echo "══════════════════════════════════════════"
+echo "🧹 [2/5] JavaScript lint"
+if ! npm run lint:js; then
+  FAILED=1
+fi
+
+echo "🧪 [3/5] Jest"
+if ! npm test -- --runInBand; then
+  FAILED=1
+fi
+
+echo "🐍 [4/5] Python lint + unittest"
+if ! "$PYTHON" -m ruff check --no-cache pipeline scripts; then
+  FAILED=1
+fi
+if ! "$PYTHON" -m unittest discover -s pipeline -p "test_*.py" -v; then
+  FAILED=1
+fi
+
+echo "📦 [5/5] 0.9.0 release bundle 검증"
+if ! "$PYTHON" scripts/package.py; then
+  FAILED=1
+fi
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "❌ pre-push gate 실패"
   exit 1
-else
-  echo "══════════════════════════════════════════"
-  echo "  ✅ Pre-Push 검증 통과"
-  echo "══════════════════════════════════════════"
-  exit 0
 fi
+
+echo "✅ pre-push gate 통과 (Playwright E2E는 CI에서도 재검증)"

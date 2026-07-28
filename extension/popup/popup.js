@@ -242,28 +242,28 @@ function updateOrangeToastDesc() {
 
 function updateCourtFilterDesc() {
   $courtFilterDesc.textContent = _filterCourt
-    ? '법원 판례 검증 활성'
-    : '법원 판례 검증 비활성';
+    ? '법원 판례 DB 대조 활성'
+    : '법원 판례 DB 대조 비활성';
 }
 
 function updateConstitutionalFilterDesc() {
   $constitutionalFilterDesc.textContent = _filterConstitutional
-    ? '헌재 결정 검증 활성'
-    : '헌재 결정 검증 비활성';
+    ? '헌재 결정 DB 대조 활성'
+    : '헌재 결정 DB 대조 비활성';
 }
 
 
 
 function updateSiteDesc(enabled) {
   $siteToggleDesc.textContent = enabled
-    ? '현재 사이트에서 판례 검증 활성'
-    : '현재 사이트에서 판례 검증 해제됨';
+    ? '현재 사이트에서 사건번호 확인 활성'
+    : '현재 사이트에서 사건번호 확인 해제됨';
 }
 
 function updateGlobalDesc() {
   $globalToggleDesc.textContent = _disabledGlobal
-    ? '모든 사이트에서 판례 검증 해제됨'
-    : '모든 사이트에서 판례 검증 활성';
+    ? '모든 사이트에서 사건번호 확인 해제됨'
+    : '모든 사이트에서 사건번호 확인 활성';
 }
 
 function updateStatusText() {
@@ -396,6 +396,7 @@ async function onGlobalToggle() {
 const LEDGER_OUTCOME_LABELS = {
   replaced:         { label: '교체 완료',   ok: true },
   not_modified:     { label: '변경 없음',   ok: true },
+  downgrade_blocked:{ label: '다운그레이드 차단', ok: true },
   fetch_failed:     { label: '다운로드 실패', ok: false },
   invalid_payload:  { label: '응답 불량',   ok: false },
   integrity_failed: { label: '무결성 실패', ok: false },

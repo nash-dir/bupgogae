@@ -146,6 +146,15 @@ describe('shouldLoadBundled', () => {
     expect(d.reason).toBe('bundled_newer');
   });
 
+  test('새 버전 표식이 있어도 로컬 건수가 건강 하한 미달이면 정상 번들로 복구한다', () => {
+    const d = shouldLoadBundled(
+      '20260601',
+      { localVer: '20260701', coreCount: 99_999 },
+      { minCoreKeys: 100_000 },
+    );
+    expect(d).toEqual({ load: true, reason: 'local_unhealthy' });
+  });
+
   test('번들 버전이 YYYYMMDD 형식이 아니면(예: "bundled") 빈 DB에만 허용', () => {
     expect(shouldLoadBundled('bundled', { localVer: '20260601', coreCount: 150_000 }).load).toBe(false);
     expect(shouldLoadBundled('bundled', { localVer: null, coreCount: 0 }).load).toBe(true);
@@ -157,6 +166,10 @@ describe('shouldLoadBundled', () => {
 // ============================================================
 
 describe('validateManifest', () => {
+  const VALIDATION_OPTS = {
+    nowMs: Date.parse('2026-06-07T00:00:00.000Z'),
+    futureSkewDays: 1,
+  };
   const VALID = {
     schema: 1,
     built_at: '2026-06-06T03:12:45Z',
@@ -168,7 +181,18 @@ describe('validateManifest', () => {
   };
 
   test('유효한 manifest 통과', () => {
-    expect(validateManifest(VALID).ok).toBe(true);
+    expect(validateManifest(VALID, VALIDATION_OPTS).ok).toBe(true);
+  });
+
+  test('sha와 결합된 immutable core.object_path를 허용한다', () => {
+    const manifest = {
+      ...VALID,
+      core: {
+        ...VALID.core,
+        object_path: `objects/${VALID.core.sha256}.json.gz`,
+      },
+    };
+    expect(validateManifest(manifest, VALIDATION_OPTS).ok).toBe(true);
   });
 
   test.each([
@@ -176,15 +200,20 @@ describe('validateManifest', () => {
     ['schema 불일치', { ...VALID, schema: 2 }],
     ['core 없음', { schema: 1, built_at: VALID.built_at }],
     ['version 형식 오류 (대시 포함)', { ...VALID, core: { ...VALID.core, version: '2026-06-06' } }],
+    ['version 실재 날짜 오류', { ...VALID, core: { ...VALID.core, version: '20260230' } }],
+    ['version 허용 미래 초과', { ...VALID, core: { ...VALID.core, version: '20260609' } }],
     ['sha256 길이 오류', { ...VALID, core: { ...VALID.core, sha256: 'abc' } }],
     ['sha256 비 hex 문자', { ...VALID, core: { ...VALID.core, sha256: 'z'.repeat(64) } }],
+    ['object_path 절대 URL', { ...VALID, core: { ...VALID.core, object_path: `https://evil.test/objects/${VALID.core.sha256}.json.gz` } }],
+    ['object_path 상위 경로', { ...VALID, core: { ...VALID.core, object_path: `../objects/${VALID.core.sha256}.json.gz` } }],
+    ['object_path hash 불일치', { ...VALID, core: { ...VALID.core, object_path: `objects/${'b'.repeat(64)}.json.gz` } }],
     ['total 0', { ...VALID, core: { ...VALID.core, total: 0 } }],
     ['total 음수', { ...VALID, core: { ...VALID.core, total: -1 } }],
     ['total 비정수', { ...VALID, core: { ...VALID.core, total: 1.5 } }],
     ['total 상한 초과', { ...VALID, core: { ...VALID.core, total: 10_000_001 } }],
     ['built_at 파싱 불가', { ...VALID, built_at: 'not-a-date' }],
   ])('거부: %s', (_label, m) => {
-    expect(validateManifest(m).ok).toBe(false);
+    expect(validateManifest(m, VALIDATION_OPTS).ok).toBe(false);
   });
 });
 

@@ -1,9 +1,14 @@
 {
   "name": "bupgogae-extension",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "description": "Bupgogae Extension Tests",
   "scripts": {
+    "lint": "npm run lint:js",
+    "lint:js": "eslint extension e2e jest.setup.js playwright.config.js eslint.config.js",
+    "lint:python": "python -m ruff check pipeline",
     "test": "jest",
+    "test:python": "python -m unittest discover -s pipeline -p \"test_*.py\" -v",
+    "bundle:meta": "python scripts/refresh_bundle_meta.py",
     "package": "python scripts/package.py",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
@@ -12,8 +17,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "eslint": "^9.0.0",
+    "fake-indexeddb": "^6.0.0",
     "jest": "^29.7.0",
-    "jest-environment-jsdom": "^30.3.0"
+    "jest-environment-jsdom": "^29.7.0"
   },
   "jest": {
     "testEnvironment": "jsdom",

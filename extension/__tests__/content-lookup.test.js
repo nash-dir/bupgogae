@@ -142,6 +142,34 @@ describe('processContainer — 룩업 결과 렌더링 (L13)', () => {
     expect(badge.className).not.toContain('bgae-orange');
   });
 
+  test('조회 record는 같은 snapshot 응답의 court map으로 렌더링한다', async () => {
+    caseRegex.__setMetaForTest(CASE_CODE_MAP, { '구법원': 2 });
+    global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+      if (msg && msg.type === 'LOOKUP_BATCH') {
+        cb({
+          results: {
+            '15Da6302': { found: true, data: [[1, 2, 150115, '테스트사건']] },
+          },
+          snapshot: {
+            version: '20260720',
+            courtCodeMap: { '신법원': 2 },
+          },
+        });
+      } else if (cb) {
+        cb({});
+      }
+    });
+
+    const container = makeContainer('판례 2015다6302 인용');
+    await content.processContainer(container);
+    const badge = container.querySelector('.bgae-badge');
+    badge.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+
+    const citation = document.querySelector('.bgae-main-link');
+    expect(citation.textContent).toContain('신법원');
+    expect(citation.textContent).not.toContain('구법원');
+  });
+
   test('M2: 한 텍스트노드 내 여러 사건번호가 단일 처리로 전부 배지된다', async () => {
     // 전부 miss/red — 한 텍스트노드에 4개(valid 2 + red 2)
     global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {

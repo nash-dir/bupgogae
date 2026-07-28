@@ -7,6 +7,7 @@ Dockerfile*
 
 # ===== 개발 환경 =====
 venv/
+.venv/
 __pycache__/
 .env
 .env.*
@@ -67,7 +68,6 @@ htmlcov/
 *.db-wal
 *.sqlite
 *.sqlite3
-extension/data/db.json
 
 # ===== 빌드 산출물 =====
 dist/
@@ -81,6 +81,7 @@ build/
 *.log
 *.tmp
 *.txt
+!requirements-dev.txt
 
 # ===== 에이전트 설정 =====
 AGENTS.md

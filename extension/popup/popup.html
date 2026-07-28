@@ -12,7 +12,7 @@
     <img src="../icons/icon48.png" alt="법고개" class="popup-logo" width="28" height="28">
     <div class="popup-title-group">
       <h1 class="popup-title">법고개</h1>
-      <span class="popup-subtitle">LLM 환각 판례 탐지기</span>
+      <span class="popup-subtitle">AI 답변 사건번호 확인 도구</span>
     </div>
   </header>
 
@@ -28,7 +28,7 @@
     <div class="popup-toggle-row" id="siteToggleRow">
       <div class="popup-toggle-info">
         <span class="popup-toggle-label">이 사이트에서 적용</span>
-        <span class="popup-toggle-desc" id="siteToggleDesc">현재 사이트에서 판례 검증 활성</span>
+        <span class="popup-toggle-desc" id="siteToggleDesc">현재 사이트에서 사건번호 확인 활성</span>
       </div>
       <label class="toggle-switch" for="siteToggle">
         <input type="checkbox" id="siteToggle" checked>
@@ -42,7 +42,7 @@
     <div class="popup-toggle-row">
       <div class="popup-toggle-info">
         <span class="popup-toggle-label">모든 사이트에서 적용</span>
-        <span class="popup-toggle-desc" id="globalToggleDesc">모든 사이트에서 판례 검증 활성</span>
+        <span class="popup-toggle-desc" id="globalToggleDesc">모든 사이트에서 사건번호 확인 활성</span>
       </div>
       <label class="toggle-switch" for="globalToggle">
         <input type="checkbox" id="globalToggle" checked>
@@ -65,11 +65,11 @@
     </div>
   </div>
 
-  <!-- 검증 범위 -->
+  <!-- 확인 범위 -->
   <div class="popup-dlc-section">
     <button class="popup-dlc-header" id="dlcToggleBtn" type="button">
       <span class="popup-dlc-icon">⚖️</span>
-      <span class="popup-dlc-title">검증 범위</span>
+      <span class="popup-dlc-title">확인 범위</span>
       <span class="popup-dlc-arrow" id="dlcArrow">▾</span>
     </button>
     <div class="popup-dlc-body" id="dlcBody">
@@ -77,7 +77,7 @@
       <div class="popup-toggle-row popup-dlc-row">
         <div class="popup-toggle-info">
           <span class="popup-toggle-label">법원</span>
-          <span class="popup-toggle-desc" id="courtFilterDesc">법원 판례 검증 활성</span>
+          <span class="popup-toggle-desc" id="courtFilterDesc">법원 판례 DB 대조 활성</span>
         </div>
         <label class="toggle-switch" for="courtFilterToggle">
           <input type="checkbox" id="courtFilterToggle" checked>
@@ -89,7 +89,7 @@
       <div class="popup-toggle-row popup-dlc-row">
         <div class="popup-toggle-info">
           <span class="popup-toggle-label">헌법재판소</span>
-          <span class="popup-toggle-desc" id="constitutionalFilterDesc">헌재 결정 검증 활성</span>
+          <span class="popup-toggle-desc" id="constitutionalFilterDesc">헌재 결정 DB 대조 활성</span>
         </div>
         <label class="toggle-switch" for="constitutionalFilterToggle">
           <input type="checkbox" id="constitutionalFilterToggle" checked>

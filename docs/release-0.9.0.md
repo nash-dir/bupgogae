@@ -51,9 +51,11 @@ conversation**으로 한다. 사용자 prompt를 제출하거나 개인 대화·
 - [ ] `npm run package`로 `dist/bupgogae-0.9.0.zip` 생성
 - [ ] ZIP SHA-256 기록 및 manifest·bundle·필수 실행 파일 존재 확인
 - [ ] 신규 권한이 없는지 0.8.2 manifest와 비교
-- [ ] `WARP_PRIVATE_KEY` GitHub Actions secret 준비
+- [ ] 권한 있는 저장소 관리자가 Cloudflare Application Terms를 검토하고
+      `CLOUDFLARE_WARP_TOS_ACCEPTED=true` repository variable 설정
+- [ ] 고정된 공식 WARP package version·SHA-256과 `ubuntu-24.04` runner 확인
 
-Go: 버전·bundle·ZIP·권한·secret precondition이 모두 일치한다.
+Go: 버전·bundle·ZIP·권한·WARP 약관 승인 precondition이 모두 일치한다.
 No-go: clean checkout package가 로컬 package와 다르거나 실제 credential이
 저장소에 포함된다.
 
@@ -70,13 +72,16 @@ No-go: clean checkout package가 로컬 package와 다르거나 실제 credentia
 
 같은 source tree에서 ZIP을 연속 두 번 생성해 SHA 일치를 확인했다. 이 값은
 commit 후 clean-checkout CI가 다시 생성한 값과 일치해야 M0가 완료된다.
-`WARP_PRIVATE_KEY` secret 존재 여부는 저장소 밖 GitHub 설정이므로 별도 확인이
-필요하다.
+WARP consumer 등록에는 private key나 대체 Cloudflare credential이 필요하지
+않다. 단, `CLOUDFLARE_WARP_TOS_ACCEPTED`는 법적 승인을 대신하는 자동값이
+아니므로 권한 있는 저장소 관리자가 약관을 검토한 뒤 직접 설정해야 한다.
 
 ## M1 — Branch, CI, merge
 
 - [ ] 감사 변경을 별도 branch에 push하고 Draft PR 생성
 - [ ] Jest, Ruff, Python unittest, Playwright E2E를 PR commit SHA에서 통과
+- [ ] secret이 없는 격리 `Official WARP local-proxy smoke` job에서 공식
+      client 설치·ephemeral registration·MASQUE 연결·`warp=on|plus` 검증 통과
 - [ ] v1 → v2 persistent-profile migration E2E 통과
 - [ ] flaky test가 없고 실패 artifact에 secret·사건 원문이 없는지 확인
 - [ ] 승인된 commit에서 release ZIP을 다시 생성해 SHA가 같은지 확인
@@ -97,7 +102,8 @@ staffed window에서 main merge 후 `full_bootstrap=false`로 workflow를 수동
 - [ ] legacy mirror raw SHA도 manifest와 일치
 - [ ] 기존 0.8.2 QA 프로필이 legacy mirror로 계속 동기화
 - [ ] 0.9.0 QA 프로필이 `object_path`로 동기화
-- [ ] WARP, law.go.kr 403/429, finalize 오류 없음
+- [ ] 공식 WARP client registration/connect/trace 성공
+- [ ] law.go.kr 403/429 및 finalize 오류 없음
 
 Go: 연속 두 번 성공 후 24시간 이상 안정 상태.
 No-go: pointer pair, object/manifest/mirror 중 하나라도 불일치하거나 backlog가

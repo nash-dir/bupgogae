@@ -10,6 +10,36 @@ permissions:
   contents: read
 
 jobs:
+  warp-smoke:
+    name: Official WARP local-proxy smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # Secret이 없는 격리 job에서만 root WARP daemon과 실제 route를 검증한다.
+      # 승인된 저장소 관리자가 Cloudflare 약관을 검토한 뒤 variable을 설정한다.
+      - name: SHA-pinned official WARP client 연결 검증
+        run: bash .github/scripts/connect-warp.sh
+        env:
+          CLOUDFLARE_WARP_TOS_ACCEPTED: ${{ vars.CLOUDFLARE_WARP_TOS_ACCEPTED }}
+          WARP_ROUTE_MODE: proxy
+
+      - name: WARP smoke registration 정리
+        if: always()
+        continue-on-error: true
+        run: |
+          if command -v warp-cli >/dev/null 2>&1; then
+            timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi --ipc-timeout 10 disconnect || true
+            timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi --ipc-timeout 10 registration delete || true
+          fi
+          timeout 15s sudo systemctl stop warp-svc || true
+          systemctl --user disable --now warp-taskbar.service >/dev/null 2>&1 || true
+
   unit:
     name: Jest 단위 테스트
     runs-on: ubuntu-latest

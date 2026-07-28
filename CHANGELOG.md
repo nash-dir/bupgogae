@@ -31,8 +31,8 @@
 
 - GitHub Actions secret을 필요한 step으로 한정하고 공식 Action과 production
   의존성을 commit/digest/hash로 고정했습니다.
-- WARP private key를 저장소에서 제거하고 WARP step 전용 GitHub secret으로
-  외부화했습니다.
+- 수동 WARP WireGuard identity와 private-key secret을 제거하고, SHA-256으로
+  고정한 공식 Cloudflare client의 ephemeral consumer 등록으로 교체했습니다.
 - 개인정보처리방침·스토어 설명을 실제 보조 네트워크 요청과 배지 의미에 맞게
   정정했습니다.
 - ESLint, Ruff, Jest, Python unittest, Playwright E2E를 CI gate에 연결했습니다.

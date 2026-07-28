@@ -22,7 +22,7 @@ concurrency:
 jobs:
   prepare-state:
     name: Trusted state 준비
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: 저장소 Checkout
@@ -72,7 +72,7 @@ jobs:
   crawl:
     name: Secret 최소화 crawl
     needs: prepare-state
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - name: 저장소 Checkout
@@ -96,13 +96,13 @@ jobs:
           name: crawler-input-state
           path: pipeline/data
 
-      # Marketplace action을 실행하지 않는다. 저장소에서 검토한 짧은 스크립트가
-      # Ubuntu 공식 패키지와 kernel WireGuard만 준비한 뒤 종료하고, 그 다음
-      # step에서만 법제처 API key를 주입한다.
-      - name: 저장소 검토 WARP WireGuard 연결 (IP 차단 우회)
+      # Marketplace action이나 수동 WireGuard key를 쓰지 않는다. 저장소에서
+      # 검토한 스크립트가 SHA-256으로 고정한 공식 Cloudflare client를 설치하고
+      # WARP route를 검증한다. 다음 step에서만 법제처 API key를 주입한다.
+      - name: 공식 Cloudflare WARP Client 연결 (IP 차단 우회)
         run: bash .github/scripts/connect-warp.sh
         env:
-          WARP_PRIVATE_KEY: ${{ secrets.WARP_PRIVATE_KEY }}
+          CLOUDFLARE_WARP_TOS_ACCEPTED: ${{ vars.CLOUDFLARE_WARP_TOS_ACCEPTED }}
 
       - name: 크롤러 실행 (API key 외 credential 없음)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true }}
@@ -115,6 +115,20 @@ jobs:
         run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data --full-bootstrap
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
+
+      # 공식 warp-svc는 root daemon으로 crawler와 같은 runner에 남으므로,
+      # crawl 직후 registration을 지우고 service를 정지한다. 이 cleanup 실패가
+      # 원래 crawl 결과나 재개 state 보존을 가리지 않게 best-effort로 실행한다.
+      - name: WARP 연결 및 ephemeral 등록 정리
+        if: always()
+        continue-on-error: true
+        run: |
+          if command -v warp-cli >/dev/null 2>&1; then
+            timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi --ipc-timeout 10 disconnect || true
+            timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi --ipc-timeout 10 registration delete || true
+          fi
+          timeout 15s sudo systemctl stop warp-svc || true
+          systemctl --user disable --now warp-taskbar.service >/dev/null 2>&1 || true
 
       - name: 재개 state 전달
         if: always()
@@ -144,7 +158,7 @@ jobs:
     name: Trusted state/public 게시
     needs: [prepare-state, crawl]
     if: ${{ always() && needs.prepare-state.result == 'success' && needs.crawl.result != 'cancelled' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: 저장소 Checkout

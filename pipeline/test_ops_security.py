@@ -884,35 +884,96 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertTrue(action_refs)
         self.assertTrue(all(ref.startswith("actions/") for ref in action_refs))
         self.assertNotIn("warp-on-actions", crawl_section)
-        for forbidden_secret in (
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-            "R2_BUCKET",
-            "CF_ACCOUNT_ID",
-            "TELEGRAM_BOT_TOKEN",
-            "TELEGRAM_CHAT_ID",
-        ):
-            self.assertNotIn(forbidden_secret, crawl_section)
+        secret_names = set(
+            re.findall(r"secrets\.([A-Z0-9_]+)", crawl_section)
+        )
+        self.assertEqual(secret_names, {"BUPGOGAE_API_KEY"})
+        self.assertNotIn("WARP_PRIVATE_KEY", workflow)
         self.assertLess(
             crawl_section.index("bash .github/scripts/connect-warp.sh"),
             crawl_section.index("BUPGOGAE_API_KEY"),
         )
         warp_step = crawl_section.split(
-            "- name: 저장소 검토 WARP WireGuard 연결", 1
+            "- name: 공식 Cloudflare WARP Client 연결", 1
         )[1].split("- name: 크롤러 실행", 1)[0]
-        self.assertIn("WARP_PRIVATE_KEY", warp_step)
+        self.assertIn(
+            "vars.CLOUDFLARE_WARP_TOS_ACCEPTED",
+            warp_step,
+        )
+        self.assertNotRegex(warp_step, r"\${{\s*secrets\.")
         self.assertNotIn("BUPGOGAE_API_KEY", warp_step)
+        self.assertLess(
+            crawl_section.index("명시적 full historical bootstrap 실행"),
+            crawl_section.index("WARP 연결 및 ephemeral 등록 정리"),
+        )
+        self.assertLess(
+            crawl_section.index("WARP 연결 및 ephemeral 등록 정리"),
+            crawl_section.index("재개 state 전달"),
+        )
 
         warp_script = (
             self.REPO_ROOT / ".github/scripts/connect-warp.sh"
         ).read_text(encoding="utf-8")
         self.assertNotIn("${{", warp_script)
         self.assertNotIn("curl | bash", warp_script)
-        self.assertIn("${WARP_PRIVATE_KEY}", warp_script)
-        self.assertNotRegex(
+        for forbidden in (
+            "WARP_PRIVATE_KEY",
+            "wg-quick",
+            "wireguard-tools",
+            "/etc/wireguard",
+            "[Interface]",
+            "PrivateKey",
+            "engage.cloudflareclient.com",
+        ):
+            self.assertNotIn(forbidden, warp_script)
+        self.assertIn("CLOUDFLARE_WARP_TOS_ACCEPTED", warp_script)
+        self.assertIn(
+            'WARP_PACKAGE_VERSION="2026.6.880.0"',
             warp_script,
-            r"PrivateKey\s*=\s*[A-Za-z0-9+/]{43}=",
         )
+        self.assertIn(
+            "pkg.cloudflareclient.com/pool/noble/main/c/cloudflare-warp/",
+            warp_script,
+        )
+        self.assertIn(
+            "648a7c7e9085f8e50d32a2adcacb0c2049fb72ebeb02ebe913becadee3ab0d4c",
+            warp_script,
+        )
+        self.assertIn("sha256sum --check --strict", warp_script)
+        self.assertIn(
+            "registration new",
+            warp_script,
+        )
+        self.assertIn(
+            "tunnel protocol set MASQUE",
+            warp_script,
+        )
+        self.assertIn(
+            "--ipc-timeout 20 connect",
+            warp_script,
+        )
+        self.assertIn("socks5h://127.0.0.1:40000", warp_script)
+        self.assertIn(
+            "https://www.cloudflare.com/cdn-cgi/trace",
+            warp_script,
+        )
+        self.assertIn("for _ in {1..30}", warp_script)
+
+        ci_workflow = (
+            self.REPO_ROOT / ".github/workflows/ci.yml"
+        ).read_text(encoding="utf-8")
+        smoke_section = ci_workflow.split("\n  warp-smoke:\n", 1)[1].split(
+            "\n  unit:\n", 1
+        )[0]
+        self.assertIn("Official WARP local-proxy smoke", smoke_section)
+        self.assertIn("runs-on: ubuntu-24.04", smoke_section)
+        self.assertIn(
+            "bash .github/scripts/connect-warp.sh",
+            smoke_section,
+        )
+        self.assertIn("WARP_ROUTE_MODE: proxy", smoke_section)
+        self.assertNotRegex(smoke_section, r"\${{\s*secrets\.")
+        self.assertNotIn("warp-diag", smoke_section)
 
     def test_production_install_and_base_are_content_locked(self):
         workflow = (
@@ -933,6 +994,8 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertGreaterEqual(lock.count("--hash=sha256:"), len(requirements))
         self.assertEqual(workflow.count("--require-hashes"), 3)
         self.assertEqual(workflow.count("--only-binary=:all:"), 3)
+        self.assertNotIn("runs-on: ubuntu-latest", workflow)
+        self.assertEqual(workflow.count("runs-on: ubuntu-24.04"), 3)
 
         dockerfile = (self.REPO_ROOT / "Dockerfile.crawler").read_text(
             encoding="utf-8"

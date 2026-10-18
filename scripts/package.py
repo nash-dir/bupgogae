@@ -195,6 +195,8 @@ def main() -> int:
         f"sha256={details['bundle_sha256']}"
     )
     print("✅ 자가 검증 통과")
+    with open(out, "rb") as package_stream:
+        print(f"   ZIP SHA-256: {hashlib.sha256(package_stream.read()).hexdigest()}")
     return 0
 
 

@@ -72,13 +72,16 @@ No-go: clean checkout package가 로컬 package와 다르거나 실제 credentia
 - DB SHA-256:
   `40bc539ccd6796ee0639e67ade19290a81720a7e2f7f54ad878149a7cad01b17`
 - 내장 DB 파생 4글자 canonical key: 861건
-- 결정적 ZIP: 19 entries, 2,700,438 bytes
+- 결정적 ZIP: 19 entries, 2,700,134 bytes (Git의 LF 바이트 기준)
 - ZIP SHA-256:
-  `b5dde8b791f48a7e5a30ed97bc35d2899d3d5ba42b4cb2f2cf797d9507ab4dec`
+  `9e71f81ee9280cb4fd12d8ff50fc471d6c61452acef3bb116f494422e1fb12cd`
 - 0.8.2 대비 일반 permission 추가 없음. host permission은 위 Copilot 두 도메인만 추가.
 
 같은 source tree에서 ZIP을 연속 두 번 생성해 SHA 일치를 확인했다. 이 값은
 commit 후 clean-checkout CI가 다시 생성한 값과 일치해야 M0가 완료된다.
+`.gitattributes`로 텍스트 소스의 LF를 고정하고 고정 consumer fixture는
+하위 속성으로 원래 바이트를 보존한다. packager가 출력한 ZIP SHA로 플랫폼 간
+동일성을 대조하며, 과거 CRLF 작업트리에서 만든 ZIP은 이 RC와 구분한다.
 WARP consumer 등록에는 private key나 대체 Cloudflare credential이 필요하지
 않다. 단, `CLOUDFLARE_WARP_TOS_ACCEPTED`는 법적 승인을 대신하는 자동값이
 아니므로 권한 있는 저장소 관리자가 약관을 검토한 뒤 직접 설정해야 한다.

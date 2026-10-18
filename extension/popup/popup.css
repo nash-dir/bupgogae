@@ -244,7 +244,8 @@ body {
   100% { transform: rotate(360deg); }
 }
 
-.popup-db-count {
+.popup-db-count,
+.popup-data-source {
   display: block;
   margin-top: 2px;
   font-size: 10px;
@@ -281,12 +282,12 @@ body {
   color: #555;
 }
 
-/* --- DLC Section (Accordion) --- */
-.popup-dlc-section {
+/* --- Section (Accordion) --- */
+.popup-section-section {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.popup-dlc-header {
+.popup-section-header {
   display: flex;
   align-items: center;
   width: 100%;
@@ -300,70 +301,53 @@ body {
   transition: background 0.15s ease;
 }
 
-.popup-dlc-header:hover {
+.popup-section-header:hover {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.popup-dlc-icon {
+.popup-section-icon {
   margin-right: 6px;
   font-size: 14px;
 }
 
-.popup-dlc-title {
+.popup-section-title {
   flex: 1;
   text-align: left;
 }
 
-.popup-dlc-arrow {
+.popup-section-arrow {
   font-size: 11px;
   transition: transform 0.2s ease;
   color: #666688;
 }
 
-.popup-dlc-arrow.open {
+.popup-section-arrow.open {
   transform: rotate(180deg);
 }
 
-.popup-dlc-body {
+.popup-section-body {
   max-height: 0;
   overflow: hidden;
   transition: max-height 0.25s ease;
 }
 
-.popup-dlc-body.open {
+.popup-section-body.open {
   max-height: 400px;
 }
 
-.popup-dlc-row {
+.popup-section-row {
   padding: 8px 18px 8px 28px;
 }
 
-.popup-dlc-row .popup-toggle-label {
+.popup-section-row .popup-toggle-label {
   font-size: 12px;
 }
 
-.popup-dlc-row .popup-toggle-desc {
+.popup-section-row .popup-toggle-desc {
   font-size: 10px;
 }
 
-.popup-dlc-delete-btn {
-  display: block;
-  width: calc(100% - 36px);
-  margin: 6px 18px 12px;
-  padding: 6px 0;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: 6px;
-  color: #ef4444;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
 
-.popup-dlc-delete-btn:hover {
-  background: rgba(239, 68, 68, 0.2);
-}
 
 /* ===== 동기화 이력 (sync ledger) ===== */
 

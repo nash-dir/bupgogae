@@ -25,6 +25,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: WARP 약관 승인 설정 사전 확인
+        env:
+          CLOUDFLARE_WARP_TOS_ACCEPTED: ${{ vars.CLOUDFLARE_WARP_TOS_ACCEPTED }}
+        run: |
+          if [[ "${CLOUDFLARE_WARP_TOS_ACCEPTED}" != "true" ]]; then
+            echo '::error title=WARP configuration missing::Repository owner must review https://www.cloudflare.com/application/terms/ and set CLOUDFLARE_WARP_TOS_ACCEPTED=true. See docs/release-0.9.0.md.'
+            exit 2
+          fi
+
       - name: 저장소 Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -47,6 +56,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: 명시적 full bootstrap용 state 확인
@@ -56,6 +66,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: crawl 입력 state 전달
@@ -100,21 +111,25 @@ jobs:
       # 검토한 스크립트가 SHA-256으로 고정한 공식 Cloudflare client를 설치하고
       # WARP route를 검증한다. 다음 step에서만 법제처 API key를 주입한다.
       - name: 공식 Cloudflare WARP Client 연결 (IP 차단 우회)
+        timeout-minutes: 15
         run: bash .github/scripts/connect-warp.sh
         env:
           CLOUDFLARE_WARP_TOS_ACCEPTED: ${{ vars.CLOUDFLARE_WARP_TOS_ACCEPTED }}
+          WARP_ROUTE_MODE: proxy
 
       - name: 크롤러 실행 (API key 외 credential 없음)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true }}
         run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
+          BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000
 
       - name: 명시적 full historical bootstrap 실행
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true }}
         run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data --full-bootstrap
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
+          BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000
 
       # 공식 warp-svc는 root daemon으로 crawler와 같은 runner에 남으므로,
       # crawl 직후 registration을 지우고 service를 정지한다. 이 cleanup 실패가
@@ -142,6 +157,10 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: 계약별 public 파일 생성·검증 (게시 없음)
+        if: success()
+        run: python pipeline/publish_outputs.py --prepare-only --dir ./pipeline/data
+
       - name: 완전 성공한 public 출력 전달
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -151,6 +170,8 @@ jobs:
             pipeline/data/db.json
             pipeline/data/db.json.gz
             pipeline/data/manifest.json
+            pipeline/data/db-v0.9.0.json.gz
+            pipeline/data/manifest-v0.9.0.json
           if-no-files-found: error
           retention-days: 1
 
@@ -189,6 +210,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: 명시적 full bootstrap 재개 snapshot generation 및 pointer 게시
@@ -198,6 +220,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: 완전 성공한 public 출력 다운로드

@@ -119,11 +119,20 @@ class SiteAdapter {
    * @returns {Element[]}
    */
   findResponseContainers() {
-    for (const selector of this.resolveResponseSelectors()) {
+    // A syntactically valid remote config can still be stale after a UI change.
+    // Fall back to the shipped selectors when that tier finds no usable replies.
+    const selectors = [...new Set([
+      ...this.resolveResponseSelectors(),
+      ...(this._bundledSelectors || []),
+      ...this.getResponseSelectors(),
+    ])];
+    for (const selector of selectors) {
       try {
-        const elements = document.querySelectorAll(selector);
+        const elements = [...document.querySelectorAll(selector)].filter(element =>
+          !element.closest('[data-message-role="user"], [data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"], [data-testid="user-message"], [role="article"][aria-labelledby^="user-message-"], user-query') &&
+          !element.matches('main, body, html, form, textarea, input, [contenteditable="true"]'));
         if (elements.length > 0) {
-          return Array.from(elements);
+          return elements;
         }
       } catch (e) {
         // 잘못된 셀렉터 무시 (예: 원격 업데이트된 잘못된 셀렉터)
@@ -191,6 +200,8 @@ class SiteAdapter {
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: ['data-message-role', 'data-message-author-role', 'data-message-complete', 'data-chatgpt-search-unit-key', 'data-talvt-turn-state'],
     };
   }
 }

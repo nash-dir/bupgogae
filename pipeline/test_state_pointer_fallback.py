@@ -104,7 +104,7 @@ class StatePointerFallbackTests(unittest.TestCase):
         with (
             mock.patch.object(sync_state, "get_r2_client", return_value=client),
             mock.patch.object(sync_state, "_verify_incremental_health"),
-            mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+            mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
         ):
             sync_state.upload_state(data_dir)
 
@@ -133,7 +133,7 @@ class StatePointerFallbackTests(unittest.TestCase):
     def _download(self, client, data_dir):
         with (
             mock.patch.object(sync_state, "get_r2_client", return_value=client),
-            mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+            mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
         ):
             sync_state.download_state(data_dir)
 

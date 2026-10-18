@@ -170,6 +170,37 @@ class RangeFetchTests(unittest.TestCase):
 
 
 class BacklogLifecycleTests(unittest.TestCase):
+    def test_compact_checkpoint_roundtrips_full_bootstrap_state(self):
+        items = [{"start": "20260101", "end": "20260101", "attempts": 2,
+                  "failed_pages": [3], "last_error": "request_failed"}]
+        with tempfile.TemporaryDirectory() as data_dir:
+            crawler_runner.save_failed_dates(
+                data_dir, items, mode=crawler_runner.BACKLOG_MODE_FULL_BOOTSTRAP
+            )
+            with open(os.path.join(data_dir, "failed_dates.json"), encoding="utf-8") as stream:
+                raw = stream.read()
+            backlog, mode = crawler_runner.load_failed_dates_state(data_dir)
+        self.assertNotIn("\n", raw)
+        self.assertEqual(backlog, items)
+        self.assertEqual(mode, crawler_runner.BACKLOG_MODE_FULL_BOOTSTRAP)
+
+    def test_failed_checkpoint_replace_keeps_previous_authoritative_state(self):
+        old = [{"start": "20260101", "end": "20260101", "attempts": 1,
+                "failed_pages": [2], "last_error": "request_failed"}]
+        new = [{**old[0], "attempts": 2, "failed_pages": [3]}]
+        with tempfile.TemporaryDirectory() as data_dir:
+            crawler_runner.save_failed_dates(data_dir, old)
+            path = os.path.join(data_dir, "failed_dates.json")
+            with open(path, "rb") as stream:
+                before = stream.read()
+            with mock.patch.object(crawler_runner.os, "replace", side_effect=OSError("injected")):
+                with self.assertRaises(OSError):
+                    crawler_runner.save_failed_dates(data_dir, new)
+            with open(path, "rb") as stream:
+                self.assertEqual(stream.read(), before)
+            backlog, _mode = crawler_runner.load_failed_dates_state(data_dir)
+            self.assertEqual(backlog, old)
+
     def test_full_bootstrap_resume_uses_only_authoritative_pending_work(self):
         prior = [
             {
@@ -479,6 +510,12 @@ class DetcBacklogTests(unittest.TestCase):
 
 
 class PublicationGateTests(unittest.TestCase):
+    def test_integrity_reasons_remain_classified_without_exposing_unknown_text(self):
+        for reason in ("quarantined_raw_changed_requires_review", "merged_case_members_removed",
+                       "unsupported_publication_serial", "unreviewed_unexportable_case"):
+            self.assertEqual(crawler_runner._safe_failure_reason(ValueError(reason)), reason)
+        self.assertEqual(crawler_runner._safe_failure_reason(ValueError("OC=private-token")), "internal_error")
+
     def test_empty_baseline_requires_explicit_full_bootstrap(self):
         with tempfile.TemporaryDirectory() as data_dir:
             empty_path = os.path.join(data_dir, "master.db")

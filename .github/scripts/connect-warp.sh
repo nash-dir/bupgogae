@@ -14,9 +14,10 @@ readonly WARP_PACKAGE_VERSION="2026.6.880.0"
 readonly WARP_PACKAGE_SHA256="648a7c7e9085f8e50d32a2adcacb0c2049fb72ebeb02ebe913becadee3ab0d4c"
 readonly WARP_PACKAGE_URL="https://pkg.cloudflareclient.com/pool/noble/main/c/cloudflare-warp/cloudflare-warp_${WARP_PACKAGE_VERSION}_amd64.deb"
 readonly WARP_TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
-readonly WARP_ROUTE_MODE="${WARP_ROUTE_MODE:-full}"
+readonly WARP_ROUTE_MODE="${WARP_ROUTE_MODE:-proxy}"
 
 if [[ "${CLOUDFLARE_WARP_TOS_ACCEPTED:-}" != "true" ]]; then
+  echo '::error title=WARP configuration missing::Repository owner must review Cloudflare Application Terms and set CLOUDFLARE_WARP_TOS_ACCEPTED=true. See docs/release-0.9.0.md.' >&2
   cat >&2 <<'EOF'
 Cloudflare WARP terms have not been acknowledged for this repository.
 An authorized repository owner must review:
@@ -26,8 +27,8 @@ Then set the non-secret GitHub Actions repository variable:
 EOF
   exit 2
 fi
-if [[ "${WARP_ROUTE_MODE}" != "full" && "${WARP_ROUTE_MODE}" != "proxy" ]]; then
-  echo "WARP_ROUTE_MODE must be 'full' or 'proxy'" >&2
+if [[ "${WARP_ROUTE_MODE}" != "proxy" ]]; then
+  echo "WARP_ROUTE_MODE must be 'proxy' to preserve runner connectivity" >&2
   exit 1
 fi
 
@@ -124,27 +125,18 @@ fi
 timeout --kill-after=5s 15s \
   warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
     tunnel protocol set MASQUE >/dev/null
-if [[ "${WARP_ROUTE_MODE}" == "proxy" ]]; then
-  timeout --kill-after=5s 15s \
-    warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
-      proxy port 40000 >/dev/null
-  timeout --kill-after=5s 15s \
-    warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
-      mode proxy >/dev/null
-else
-  timeout --kill-after=5s 15s \
-    warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
-      mode warp+doh >/dev/null
-fi
+timeout --kill-after=5s 15s \
+  warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
+    proxy port 40000 >/dev/null
+timeout --kill-after=5s 15s \
+  warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
+    mode proxy >/dev/null
 timeout --kill-after=5s 30s \
   warp-cli --accept-tos --no-ansi --ipc-timeout 20 connect >/dev/null
 
 route_verified=false
 for _ in {1..30}; do
-  proxy_args=()
-  if [[ "${WARP_ROUTE_MODE}" == "proxy" ]]; then
-    proxy_args=(--noproxy '' --proxy socks5h://127.0.0.1:40000)
-  fi
+  proxy_args=(--noproxy '' --proxy socks5h://127.0.0.1:40000)
   warp_status="$(
     curl \
       --fail \

@@ -27,8 +27,6 @@ def _i(name: str, default: int) -> int:
 
 
 # ── 법제처 API (api.py) ──
-LAW_DELAY_MIN = _f("LAW_DELAY_MIN", 0.8)
-LAW_DELAY_MAX = _f("LAW_DELAY_MAX", 1.0)
 LAW_TIMEOUT = _i("LAW_TIMEOUT", 20)
 
 # ── 크롤러 러너 (crawler_runner.py) ──

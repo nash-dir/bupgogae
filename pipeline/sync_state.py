@@ -11,7 +11,7 @@ Usage:
   python pipeline/sync_state.py upload --dir ./pipeline/data
 
 환경변수:
-  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / R2_BUCKET / CF_ACCOUNT_ID
+  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / R2_BUCKET / R2_STATE_BUCKET / CF_ACCOUNT_ID
 """
 
 import argparse
@@ -25,7 +25,7 @@ import sys
 import tempfile
 import uuid
 
-import boto3
+from r2_client import get_r2_client
 from botocore.exceptions import ClientError
 
 from log_setup import get_logger
@@ -61,21 +61,6 @@ REQUIRED_CASE_COLUMNS = {
 }
 _GENERATION_RE = re.compile(r"^[0-9]{8}T[0-9]{12}Z-[0-9a-f]{32}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-
-
-def get_r2_client():
-    """Cloudflare R2 S3 호환 클라이언트 반환."""
-    account_id = os.environ.get("CF_ACCOUNT_ID")
-    if not account_id:
-        log.error("❌ CF_ACCOUNT_ID 환경변수가 설정되지 않았습니다.")
-        sys.exit(1)
-
-    return boto3.client(
-        "s3",
-        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
-        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-    )
 
 
 def _client_error_code(error: ClientError) -> str:
@@ -121,33 +106,9 @@ def _verify_sqlite(path: str):
 def _verify_incremental_health(path: str, today: date | None = None) -> dict:
     """증분 state가 충분한 역사/최근/헌재 범위를 보존하는지 확인."""
     today = today or date.today()
-    conn = sqlite3.connect(path)
-    try:
-        precedent_count, oldest, newest = conn.execute(
-            "SELECT COUNT(*), MIN(date), MAX(date) FROM cases "
-            "WHERE serial NOT LIKE 'D%'"
-        ).fetchone()
-        detc_count = conn.execute(
-            "SELECT COUNT(*) FROM cases WHERE serial LIKE 'D%'"
-        ).fetchone()[0]
-    finally:
-        conn.close()
-
-    if precedent_count < MIN_HEALTHY_PRECEDENTS:
-        raise ValueError("insufficient_precedent_count")
-    if not oldest or oldest > EARLIEST_PRECEDENT_CUTOFF:
-        raise ValueError("historical_coverage_missing")
-    recent_cutoff = f"{today.year - 2}0101"
-    if not newest or newest < recent_cutoff:
-        raise ValueError("recent_coverage_missing")
-    if detc_count < 1:
-        raise ValueError("detc_coverage_missing")
-    return {
-        "precedent_count": precedent_count,
-        "detc_count": detc_count,
-        "oldest": oldest,
-        "newest": newest,
-    }
+    from baseline_health import core_coverage, require_coverage
+    return require_coverage(core_coverage(path, today), minimum_precedents=MIN_HEALTHY_PRECEDENTS,
+                            earliest_cutoff=EARLIEST_PRECEDENT_CUTOFF, today=today)
 
 
 def _valid_backlog_item(item) -> bool:
@@ -285,6 +246,9 @@ def _create_verified_snapshot(db_path: str) -> str:
         destination = sqlite3.connect(snapshot_path)
         source.backup(destination)
         destination.commit()
+        # A published backup is a standalone file. Inheriting the live WAL
+        # header makes later readonly verification leave orphan -wal/-shm files.
+        destination.execute("PRAGMA journal_mode=DELETE")
         destination.close()
         destination = None
         source.close()
@@ -545,13 +509,20 @@ def _download_legacy_state(client, bucket: str, data_dir: str,
                 os.remove(temp_path)
 
 
+def _state_bucket():
+    """Never infer a state destination from the public distribution bucket."""
+    bucket = os.environ.get("R2_STATE_BUCKET", "").strip()
+    public_bucket = os.environ.get("R2_BUCKET", "").strip()
+    if not bucket or not public_bucket or bucket == public_bucket:
+        log.error("❌ 별도의 비공개 R2_STATE_BUCKET 설정이 필요합니다.")
+        sys.exit(1)
+    return bucket
+
+
 def download_state(data_dir: str, allow_empty_bootstrap: bool = False):
     """current, previous 순서로 완전한 state pair를 검증해 활성화."""
     os.makedirs(data_dir, exist_ok=True)
-    bucket = os.environ.get("R2_BUCKET")
-    if not bucket:
-        log.error("❌ R2_BUCKET 환경변수가 설정되지 않았습니다.")
-        sys.exit(1)
+    bucket = _state_bucket()
 
     client = get_r2_client()
     try:
@@ -626,10 +597,7 @@ def upload_state(data_dir: str, *, allow_partial_bootstrap: bool = False):
         log.error(f"❌ 업로드할 로컬 상태 파일이 없습니다: {db_path}")
         sys.exit(1)
 
-    bucket = os.environ.get("R2_BUCKET")
-    if not bucket:
-        log.error("❌ R2_BUCKET 환경변수가 설정되지 않았습니다.")
-        sys.exit(1)
+    bucket = _state_bucket()
 
     snapshot_path = None
     try:
@@ -639,7 +607,10 @@ def upload_state(data_dir: str, *, allow_partial_bootstrap: bool = False):
         try:
             _verify_incremental_health(snapshot_path)
         except ValueError as error:
-            if not allow_partial_bootstrap:
+            if (not allow_partial_bootstrap or str(error) not in {
+                "insufficient_precedent_count", "historical_coverage_missing",
+                "recent_coverage_missing", "detc_coverage_missing",
+            }):
                 raise
             # 이 예외는 신뢰된 수동 full-bootstrap 입력으로만 열어야 한다.
             # backlog/state-mode 같은 비신뢰 artifact 내용으로 추론하지 않는다.

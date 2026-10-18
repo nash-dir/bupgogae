@@ -2,7 +2,7 @@
  * IndexedDB snapshot/single-flight 회귀 테스트.
  * 실제 db-sync.js를 fake IndexedDB와 Service Worker API mock 위에서 실행한다.
  */
-const { IDBFactory, IDBKeyRange } = require('fake-indexeddb');
+const { IDBFactory, IDBKeyRange, IDBObjectStore } = require('fake-indexeddb');
 const { createHash, webcrypto } = require('crypto');
 const { TextEncoder, TextDecoder } = require('util');
 
@@ -81,7 +81,7 @@ function sha256(text) {
 
 function manifestForPayload(payload, payloadText = JSON.stringify(payload)) {
   return {
-    schema: 1,
+    schema: 1, contract: 'v0.9.0',
     built_at: '2020-01-01T00:00:00.000Z',
     core: {
       version: payload.version,
@@ -102,6 +102,214 @@ function requiredAdapters() {
   );
 }
 
+describe('versioned DB contract isolation', () => {
+  let sync;
+  afterEach(() => {
+    sync?.resetConnectionForTest();
+    jest.restoreAllMocks();
+    delete global.fetch;
+    delete global.importScripts;
+  });
+
+  test.each([undefined, 'v1.0.0'])('rejects contract %s without requesting a remote DB or legacy endpoint', async contract => {
+    ({ sync } = loadDbSync());
+    const manifest = manifestForPayload({ version: '20261019', total: 100001 });
+    if (contract === undefined) delete manifest.contract;
+    else manifest.contract = contract;
+    global.fetch = jest.fn(async () => jsonResponse(manifest));
+    expect(await sync.syncDatabase({ trigger: 'force', force: true })).toMatchObject({
+      success: false, outcome: 'integrity_failed',
+    });
+    const urls = global.fetch.mock.calls.map(([url]) => String(url));
+    expect(urls.filter(url => url.startsWith('https://api.bup.live/bupgogae/') && !url.endsWith('/adapters.json')))
+      .toEqual(['https://api.bup.live/bupgogae/manifest-v0.9.0.json']);
+    expect(sync.constants.DB_URL).toBe('https://api.bup.live/bupgogae/db-v0.9.0.json.gz');
+  });
+});
+
+describe('older mixed-format server and strict court-only client', () => {
+  let sync;
+  const cases = Object.fromEntries(Array.from({ length: 100002 }, (_, i) =>
+    [`26Da${i + 1}`, [[i + 1, 1, 260101, '합성']]]));
+  const bundle = { version: '20261018', total: 100002, court_code_map: { 대법원: 1 }, cases };
+  afterEach(() => {
+    sync?.resetConnectionForTest();
+    jest.restoreAllMocks();
+    delete global.fetch;
+    delete global.importScripts;
+  });
+  function serve(remoteVersion = '20261017', badBundle = false) {
+    const remote = { ...bundle, version: remoteVersion, total: bundle.total + 1,
+      cases: { ...cases, TX90서1671: [['T123', 900101, '구형 심판']] } };
+    const body = JSON.stringify(remote);
+    const requests = [];
+    global.fetch = jest.fn(async (url) => {
+      requests.push(String(url));
+      if (String(url).includes('/manifest-v0.9.0.json')) return jsonResponse(manifestForPayload(remote, body));
+      if (String(url).includes('bupgogae_meta.json')) {
+        return jsonResponse({ version: '2026.10.18', case_code_map: { 다: 'Da' } });
+      }
+      if (String(url).endsWith('/data/db.json')) {
+        return jsonResponse(badBundle ? { ...bundle, cases: { ...cases, '26Da1': [[-1, 1, 260101, '불량']] } } : bundle);
+      }
+      if (String(url).includes('/adapters.json')) return jsonResponse({ adapters: requiredAdapters() });
+      if (String(url).startsWith(sync.constants.DB_URL)) {
+        const bytes = new TextEncoder().encode(body);
+        let delivered = false;
+        return { ok: true, status: 200, headers: { get: () => null }, body: { getReader: () => ({
+          read: async () => delivered ? { done: true } : (delivered = true, { done: false, value: bytes }),
+          cancel: jest.fn(),
+        }) } };
+      }
+      throw new Error('unexpected fixture URL');
+    });
+    return requests;
+  }
+  async function seed() {
+    const db = await sync.openDB();
+    const installed = await sync.stageAndActivateSnapshot(db, cases, {
+      version: bundle.version, totalCount: bundle.total, contentHash: 'b'.repeat(64),
+      courtCodeMap: bundle.court_code_map, shortCaseKeys: [],
+    });
+    return { db, installed };
+  }
+  test.each(['healthy', 'empty', 'partial'])('%s local uses the fully validated newer snapshot without downloading old mixed data', async mode => {
+    ({ sync } = loadDbSync());
+    if (mode !== 'empty') {
+      const { db, installed } = await seed();
+      if (mode === 'partial') {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(installed.activeStore, 'readwrite');
+          tx.objectStore(installed.activeStore).delete('26Da1');
+          tx.oncomplete = resolve;
+          tx.onerror = reject;
+        });
+      }
+    }
+    const requests = serve();
+    expect(await sync.syncDatabase({ trigger: 'force', force: true })).toMatchObject({
+      success: true, outcome: 'downgrade_blocked', version: '20261018',
+    });
+    expect(requests.filter(url => url.startsWith(sync.constants.DB_URL))).toHaveLength(0);
+    expect(await sync.readLocalSyncState()).toMatchObject({
+      coreCount: bundle.total, totalCount: bundle.total, snapshotMetadataValid: true,
+    });
+    expect(await sync.lookupCase('26Da1')).toMatchObject({ found: true });
+  }, 20_000); // 100k-row seed + full repair; this asserts correctness, not a 5s timing budget.
+  test('a corrupt newer bundle cannot turn an invalid old payload into success', async () => {
+    ({ sync } = loadDbSync());
+    serve('20261017', true);
+    expect(await sync.syncDatabase({ trigger: 'force', force: true })).toMatchObject({
+      success: false, outcome: 'integrity_failed', reason: expect.stringContaining('TX90서1671'),
+    });
+    expect((await sync.readLocalSyncState()).coreCount).toBe(0);
+  });
+  test.each(['20261018', '20261019'])('same/newer mixed payload %s still fails full integrity validation', async version => {
+    ({ sync } = loadDbSync());
+    await seed();
+    const before = await sync.readLocalSyncState();
+    serve(version);
+    expect(await sync.syncDatabase({ trigger: 'force', force: true })).toMatchObject({
+      success: false, outcome: 'integrity_failed', reason: expect.stringContaining('TX90서1671'),
+    });
+    expect(await sync.readLocalSyncState()).toMatchObject({
+      activeStore: before.activeStore, contentHash: before.contentHash, coreCount: before.coreCount,
+    });
+  });
+});
+
+describe('법원·헌재 snapshot의 전수 건수와 건강성', () => {
+  let sync;
+  afterEach(() => {
+    jest.restoreAllMocks();
+    sync?.resetConnectionForTest();
+    delete global.fetch;
+    delete global.importScripts;
+  });
+
+  test('이전 범위 snapshot은 재검증 전 정상으로 인정하지 않고 기존 내용을 보존한다', async () => {
+    ({ sync } = loadDbSync());
+    const db = await sync.openDB();
+    const installed = await sync.stageAndActivateSnapshot(db, { '26Da1': [[1, 1, 260101, '법원']] }, {
+      version: '20261018', totalCount: 1, contentHash: 'a'.repeat(64), courtCodeMap: { 대법원: 1 },
+    });
+    expect((await sync.readLocalSyncState()).snapshotMetadataValid).toBe(true);
+    const key = `snapshot_meta:${installed.activeStore}`;
+    const old = await sync.dbGet(db, 'metadata', key);
+    delete old.caseScope;
+    await sync.dbPut(db, 'metadata', key, old);
+    expect(await sync.readLocalSyncState()).toMatchObject({
+      snapshotMetadataValid: false, physicalTotalCount: 1, contentHash: 'a'.repeat(64),
+    });
+    expect(await sync.lookupCase('26Da1')).toMatchObject({ found: true });
+  });
+
+  test('20개 GET_META는 legacy migration을 한 번만 수행하고 snapshot map에 결합한다', async () => {
+    const loaded = loadDbSync();
+    sync = loaded.sync;
+    await loaded.storage.api.set({ bupgogae_meta: {
+      case_code_map: { 두: 'Du' }, court_code_map: { 잘못된법원: 1 }, short_case_keys: [],
+    } });
+    const db = await seedLegacy(sync, { '89Du1': [[1, 1, 890101, '합성']] });
+    await sync.dbPut(db, 'metadata', 'court_code_map', { legacy법원: 1 });
+    const getKeys = jest.spyOn(IDBObjectStore.prototype, 'getAllKeys');
+    const results = await Promise.all(Array.from({ length: 20 }, () => sync.getMetadata()));
+    expect(getKeys).toHaveBeenCalledTimes(1);
+    for (const value of results) expect(value.short_case_keys).toEqual(['89Du1']);
+    await sync.getMetadata();
+    expect(getKeys).toHaveBeenCalledTimes(1);
+    await sync.stageAndActivateSnapshot(db, { '90Du2': [[2, 2, 900101, '합성']] }, {
+      version: '20260303', totalCount: 1, courtCodeMap: { 새법원: 2 }, shortCaseKeys: ['90Du2'],
+      contentHash: 'b'.repeat(64), lastSuccessAt: Date.now(),
+    });
+    const next = await sync.getMetadata();
+    expect(next.short_case_keys).toEqual(['90Du2']);
+    expect(next.court_code_map).toEqual({ 새법원: 2 });
+    expect(next.active_snapshot).toMatchObject({ version: '20260303', contentHash: 'b'.repeat(64) });
+  });
+
+  test('동일 법원·헌재 snapshot은 304, 일부 key 삭제 후에는 무조건 full fetch', async () => {
+    ({ sync } = loadDbSync());
+    const db = await sync.openDB();
+    const cases = Object.fromEntries(Array.from({ length: 100005 }, (_, i) =>
+      [`25Da${i + 10}`, [[i + 1, 1, 250101, '합성']]]));
+    const manifest = {
+      schema: 1, contract: 'v0.9.0', built_at: '2020-01-01T00:00:00.000Z',
+      core: { version: '20260922', sha256: 'a'.repeat(64), total: 100005 },
+    };
+    const installed = await sync.stageAndActivateSnapshot(db, cases, {
+      version: '20260922', totalCount: 100005, contentHash: 'a'.repeat(64),
+      lastSuccessAt: Date.now(), etag: '"same"', courtCodeMap: { 합성: 1 }, shortCaseKeys: [],
+    });
+    const conditional = [];
+    global.fetch = jest.fn(async (url, opts) => {
+      if (String(url).includes('/manifest-v0.9.0.json')) return jsonResponse(manifest);
+      if (String(url).startsWith(sync.constants.DB_URL)) {
+        conditional.push(opts.headers['If-None-Match']);
+        return { ok: false, status: 304, headers: { get: () => '"same"' } };
+      }
+      if (String(url).includes('bupgogae_meta.json')) return jsonResponse({ version: '2026.09.22' });
+      if (String(url).includes('/adapters.json')) return jsonResponse({ adapters: requiredAdapters() });
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    expect(await sync.readLocalSyncState()).toMatchObject({ coreCount: 100005, physicalTotalCount: 100005 });
+    expect(await sync.syncDatabase({ trigger: 'alarm' })).toMatchObject({ success: true, outcome: 'not_modified' });
+    global.fetch.mockClear();
+    await sync.maybeLoadBundledDB();
+    expect(global.fetch.mock.calls.map(([url]) => String(url)))
+      .toEqual(['chrome-extension://test/data/bupgogae_meta.json']);
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(installed.activeStore, 'readwrite');
+      tx.objectStore(installed.activeStore).delete('25Da10');
+      tx.oncomplete = resolve;
+      tx.onerror = reject;
+    });
+    expect(await sync.readLocalSyncState()).toMatchObject({ coreCount: 100004, physicalTotalCount: 100004 });
+    expect(await sync.syncDatabase({ trigger: 'alarm' })).toMatchObject({ success: false, outcome: 'fetch_failed' });
+    expect(conditional).toEqual(['"same"', undefined]);
+  }, 30000);
+});
+
 describe('dual-store snapshot installation', () => {
   let sync;
 
@@ -114,6 +322,28 @@ describe('dual-store snapshot installation', () => {
     delete global.fetch;
     delete global.importScripts;
     delete global.validateDbIntegrity;
+  });
+
+  test.each([true, false])('번들 사전 gate는 stale storage version을 신뢰하지 않으며 meta 유효=%s', async (validMeta) => {
+    const db = await seedLegacy(sync, { '15Da1': [[1, 1, 150101, 'old']] });
+    await chrome.storage.local.set({ bupgogae_meta: {
+      version: '2099.01.01', case_code_map: { 다: 'Da' }, short_case_keys: [],
+    } });
+    const bundle = {
+      version: '20260922', total: 1,
+      cases: { '15Da2': [[2, 1, 150101, 'new']] }, court_code_map: { 합성: 1 },
+    };
+    global.validateDbIntegrity = jest.fn(() => ({ ok: true, keyCount: 1 }));
+    global.fetch = jest.fn(async (url) => jsonResponse(
+      String(url).endsWith('bupgogae_meta.json')
+        ? { version: validMeta ? '2026.09.22' : 'broken' } : bundle
+    ));
+    await sync.maybeLoadBundledDB();
+    expect(global.validateDbIntegrity).toHaveBeenCalledWith(bundle, expect.any(Object));
+    expect(await sync.lookupCase('15Da2')).toMatchObject({ found: true });
+    expect(await sync.lookupCase('15Da1')).toEqual({ found: false, data: null });
+    expect(await sync.dbGet(db, sync.constants.STORE_META, sync.constants.ACTIVE_STORE_KEY))
+      .not.toBe(sync.constants.STORE_CASES_LEGACY);
   });
 
   test('staging 중간 예외가 나면 기존 snapshot이 그대로 조회된다', async () => {
@@ -178,6 +408,23 @@ describe('dual-store snapshot installation', () => {
     expect((await sync.getSyncStatus()).localVer).toBe('20260202');
   });
 
+  test('4글자 canonical key 목록은 사건 데이터와 같은 snapshot metadata로 전환된다', async () => {
+    const db = await seedLegacy(sync, { '99Da1': [['old']] });
+    await sync.stageAndActivateSnapshot(
+      db,
+      { '89Du1': [['new']] },
+      { ...metadata('20260202', 1), shortCaseKeys: ['89Du1'] },
+      { chunkSize: 1 },
+    );
+
+    const activeStore = await sync.getActiveStoreName(db);
+    const snapshotMeta = await sync.dbGet(
+      db, sync.constants.STORE_META, `snapshot_meta:${activeStore}`,
+    );
+    expect(snapshotMeta.shortCaseKeys).toEqual(['89Du1']);
+    expect(await sync.dbGet(db, activeStore, '89Du1')).toEqual([['new']]);
+  });
+
   test('v1 legacy cases store는 복사 없이 비파괴적으로 계속 조회된다', async () => {
     await seedLegacy(sync, { legacy: [['preserved']] }, '20251231');
     sync.resetConnectionForTest();
@@ -188,7 +435,7 @@ describe('dual-store snapshot installation', () => {
     });
   });
 
-  test('첫 v2 snapshot 전환 뒤에도 기존 v1 legacy rows를 보존한다', async () => {
+  test('첫 검증된 snapshot 전환 뒤에는 기존 legacy rows를 정리한다', async () => {
     const db = await seedLegacy(sync, {
       legacyA: [['v1-a']],
       legacyB: [['v1-b']],
@@ -203,9 +450,9 @@ describe('dual-store snapshot installation', () => {
 
     expect(await sync.getActiveStoreName(db)).toBe(sync.constants.STORE_CASES_A);
     expect(await sync.dbGet(db, sync.constants.STORE_CASES_LEGACY, 'legacyA'))
-      .toEqual([['v1-a']]);
+      .toBeUndefined();
     expect(await sync.dbGet(db, sync.constants.STORE_CASES_LEGACY, 'legacyB'))
-      .toEqual([['v1-b']]);
+      .toBeUndefined();
   });
 });
 
@@ -239,7 +486,7 @@ describe('syncDatabase single-flight', () => {
     // 작은 fixture에서도 실제 install 경로를 실행하도록 무결성 결과만 대체한다.
     global.validateDbIntegrity = jest.fn(() => ({ ok: true, keyCount: 2 }));
     global.fetch = jest.fn(async (url) => {
-      if (String(url).includes('/manifest.json')) {
+      if (String(url).includes('/manifest-v0.9.0.json')) {
         return jsonResponse(manifestForPayload(payload, payloadText));
       }
       if (url.startsWith(sync.constants.DB_URL)) {
@@ -283,6 +530,11 @@ describe('syncDatabase single-flight', () => {
       a: { found: true, data: [['new-a']] },
       b: { found: true, data: [['new-b']] },
     });
+    expect(storage.state.bupgogae_meta_generation).toMatchObject({
+      version: '20260202',
+      activeStore: sync.constants.STORE_CASES_A,
+      shortCaseCount: 0,
+    });
   });
 
   test('manifest core.object_path가 있으면 same-origin immutable object를 fetch한다', async () => {
@@ -297,7 +549,7 @@ describe('syncDatabase single-flight', () => {
     const objectUrl = `https://api.bup.live/bupgogae/objects/${hash}.json.gz`;
     global.validateDbIntegrity = jest.fn(() => ({ ok: true, keyCount: 1 }));
     global.fetch = jest.fn(async (url) => {
-      if (String(url).includes('/manifest.json')) {
+      if (String(url).includes('/manifest-v0.9.0.json')) {
         const manifest = manifestForPayload(payload, payloadText);
         manifest.core.object_path = `objects/${hash}.json.gz`;
         return jsonResponse(manifest);
@@ -340,7 +592,7 @@ describe('syncDatabase single-flight', () => {
     const bytes = new TextEncoder().encode(payloadText);
     global.validateDbIntegrity = jest.fn(() => ({ ok: true, keyCount: 1 }));
     global.fetch = jest.fn(async (url) => {
-      if (String(url).includes('/manifest.json')) {
+      if (String(url).includes('/manifest-v0.9.0.json')) {
         return jsonResponse(manifestForPayload(payload, payloadText));
       }
       if (url.startsWith(sync.constants.DB_URL)) {
@@ -386,10 +638,10 @@ describe('syncDatabase single-flight', () => {
     const bytes = new TextEncoder().encode(JSON.stringify(payload));
     global.validateDbIntegrity = jest.fn(() => ({ ok: true, keyCount: 1 }));
     global.fetch = jest.fn(async (url) => {
-      if (String(url).includes('/manifest.json')) {
+      if (String(url).includes('/manifest-v0.9.0.json')) {
         // publisher가 DB PUT에는 성공했지만 manifest PUT 전/실패 상태인 게시 레이스.
         return jsonResponse({
-          schema: 1,
+          schema: 1, contract: 'v0.9.0',
           built_at: '2020-01-01T00:00:00.000Z',
           core: { version: '20260201', sha256: 'b'.repeat(64), total: 1 },
         });
@@ -431,7 +683,7 @@ describe('syncDatabase single-flight', () => {
   test('manifest를 사용할 수 없으면 DB URL을 요청하지 않고 기존 snapshot을 보존한다', async () => {
     await seedLegacy(sync, { a: [['preserved']] }, '20260201');
     global.fetch = jest.fn(async (url) => {
-      if (String(url).includes('/manifest.json')) return { ok: false, status: 503 };
+      if (String(url).includes('/manifest-v0.9.0.json')) return { ok: false, status: 503 };
       if (String(url).startsWith('chrome-extension://test/')) return { ok: false };
       if (String(url).includes('/adapters.json')) return jsonResponse({ adapters: {} });
       throw new Error(`DB must not be fetched without a manifest: ${url}`);
@@ -473,7 +725,7 @@ describe('syncDatabase single-flight', () => {
     let dbHeaders;
     global.validateDbIntegrity = jest.fn(() => ({ ok: true, keyCount: 1 }));
     global.fetch = jest.fn(async (url, opts) => {
-      if (String(url).includes('/manifest.json')) {
+      if (String(url).includes('/manifest-v0.9.0.json')) {
         return jsonResponse(manifestForPayload(payload, payloadText));
       }
       if (String(url).startsWith(sync.constants.DB_URL)) {
@@ -514,9 +766,9 @@ describe('syncDatabase single-flight', () => {
     let dbFetches = 0;
     global.validateDbIntegrity = jest.fn(() => ({ ok: true, keyCount: 1 }));
     global.fetch = jest.fn(async (url) => {
-      if (String(url).includes('/manifest.json')) {
+      if (String(url).includes('/manifest-v0.9.0.json')) {
         return jsonResponse({
-          schema: 1,
+          schema: 1, contract: 'v0.9.0',
           built_at: '2020-01-01T00:00:00.000Z',
           core: { version: '20260202', sha256: 'a'.repeat(64), total: 1 },
         });
@@ -730,7 +982,7 @@ describe('remote helper observability and outage coalescing', () => {
     const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
     let manifestFetches = 0;
     global.fetch = jest.fn(async (url) => {
-      if (String(url).includes('/manifest.json')) {
+      if (String(url).includes('/manifest-v0.9.0.json')) {
         manifestFetches += 1;
         await fetchGate;
         return { ok: false, status: 503 };
@@ -856,11 +1108,11 @@ describe('remote helper observability and outage coalescing', () => {
     const dbUrls = [];
     global.validateDbIntegrity = jest.fn(() => ({ ok: true, keyCount: 1 }));
     global.fetch = jest.fn(async (url) => {
-      if (String(url).includes('/manifest.json')) {
+      if (String(url).includes('/manifest-v0.9.0.json')) {
         return {
           ok: true,
           json: async () => ({
-            schema: 1,
+            schema: 1, contract: 'v0.9.0',
             built_at: '2020-01-01T00:00:00.000Z',
             core: { version: '20260202', sha256: payloadHash, total: 1 },
           }),

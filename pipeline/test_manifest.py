@@ -4,8 +4,8 @@ manifest.py 명세 (SDD) — Drift 안전망용 manifest 빌더
 클라이언트(확장프로그램)가 로컬 DB와 대조할 "정답지" manifest.json을 생성한다.
 
 [명세 계약]
-  build_manifest(core_bytes, tax_bytes=None, built_at=None) -> dict
-    - core_bytes / tax_bytes: 업로드되는 비압축 db.json / db_tax.json의 바이트.
+  build_manifest(core_bytes, built_at=None) -> dict
+    - core_bytes: 업로드되는 비압축 db.json의 바이트.
       (클라이언트 fetch는 Content-Encoding: gzip을 자동 해제하므로,
        클라이언트가 해시하는 대상 = 비압축 바이트. 반드시 같은 것을 해시할 것)
     - 반환 스키마:
@@ -14,7 +14,6 @@ manifest.py 명세 (SDD) — Drift 안전망용 manifest 빌더
           "built_at": "<ISO-8601 UTC, 'Z' suffix>",
           "core": {"version": "YYYYMMDD", "sha256": "<64 hex>",
                     "total": <cases 키 수>, "bytes_raw": <len(core_bytes)>},
-          "tax":  {...}   # tax_bytes가 주어진 경우에만
         }
     - payload의 total과 len(cases)가 정확히 같아야 하며 manifest에도 그 키 수를 기록.
     - payload의 version이 YYYYMMDD 형식이 아니면 ValueError
@@ -79,17 +78,6 @@ class TestBuildManifest(unittest.TestCase):
         self.assertTrue(m["built_at"].endswith("Z"))
         datetime.fromisoformat(m["built_at"].replace("Z", "+00:00"))  # 파싱 가능해야 함
 
-    def test_tax_생략시_키_없음(self):
-        m = build_test_manifest(make_payload())
-        self.assertNotIn("tax", m)
-
-    def test_tax_제공시_같은_스키마로_포함(self):
-        tax = make_payload(version="20260606", n_keys=2)
-        m = build_test_manifest(make_payload(), tax_bytes=tax)
-        self.assertEqual(m["tax"]["version"], "20260606")
-        self.assertEqual(m["tax"]["total"], 2)
-        self.assertEqual(m["tax"]["sha256"], hashlib.sha256(tax).hexdigest())
-
     def test_version_형식_불량은_ValueError(self):
         bad = make_payload(version="2026.06.07")
         with self.assertRaises(ValueError):
@@ -128,6 +116,22 @@ class TestBuildManifest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "case name"):
             build_test_manifest(
                 json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            )
+
+    def test_source_serial_prefix는_사건군에_맞게_제한(self):
+        payload = json.loads(make_payload(n_keys=1).decode("utf-8"))
+        payload["cases"] = {
+            "TX90서1671": [["T18430", 1, 900929, "조세심판"]]
+        }
+        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        with self.assertRaisesRegex(ValueError, "키 형식"):
+            validate_payload(encoded, min_keys=1)
+
+        payload["cases"] = {"15Da1": [["T18430", 1, 900929, "잘못된 군"]]}
+        with self.assertRaisesRegex(ValueError, "serial"):
+            validate_payload(
+                json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                min_keys=1,
             )
 
     def test_production_최소_키_하한을_강제(self):

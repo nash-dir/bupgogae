@@ -62,7 +62,7 @@ const PAYLOAD_V2 = buildDbPayload(VER_V2);
 function buildManifest(payloadText) {
   const payload = JSON.parse(payloadText);
   return JSON.stringify({
-    schema: 1,
+    schema: 1, contract: 'v0.9.0',
     built_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
     core: {
       version: payload.version,
@@ -86,11 +86,11 @@ async function mockBupApi(context, handlers) {
     if (url.includes('/adapters.json')) {
       return route.fulfill({ contentType: 'application/json', body: '{"adapters":{}}' });
     }
-    if (url.includes('/manifest.json')) {
+    if (url.includes('/manifest-v0.9.0.json')) {
       if (handlers.onManifest) return handlers.onManifest(route);
       return route.fulfill({ contentType: 'application/json', body: buildManifest(PAYLOAD_V1) });
     }
-    if (url.includes('/db.json.gz')) {
+    if (url.includes('/db-v0.9.0.json.gz')) {
       return handlers.onDb(route, route.request());
     }
     return route.fulfill({ status: 404, body: 'not found' });
@@ -151,6 +151,61 @@ function wipeLocalDb(sw) {
       tx.oncomplete = res;
       tx.onerror = () => rej(tx.error);
     });
+  });
+}
+
+for (const state of ['healthy', 'empty', 'partial']) {
+  test(`compat: old mixed server preserves or restores the newer verified bundle (${state})`, async ({ context, extensionPage, extensionId }) => {
+    test.setTimeout(120_000);
+    const sw = await getBackground(context);
+    const original = await readLocalState(sw);
+    if (state === 'empty') await wipeLocalDb(sw);
+    if (state === 'partial') {
+      await sw.evaluate(async () => {
+        const db = await getCachedDB();
+        const local = await readLocalSyncState();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(local.activeStore, 'readwrite');
+          tx.objectStore(local.activeStore).delete('16Do10912');
+          tx.oncomplete = resolve;
+          tx.onerror = reject;
+        });
+      });
+    }
+    const old = JSON.parse(PAYLOAD_V1);
+    // The installed bundle may predate today. "Yesterday" could equal or exceed
+    // it after midnight, so derive the older version from the actual snapshot.
+    const bundleDate = new Date(`${original.localVer.slice(0, 4)}-${original.localVer.slice(4, 6)}-${original.localVer.slice(6, 8)}T00:00:00Z`);
+    bundleDate.setUTCDate(bundleDate.getUTCDate() - 1);
+    old.version = bundleDate.toISOString().slice(0, 10).replaceAll('-', '');
+    old.cases.TX90서1671 = [['T123', 900101, '구형 심판']];
+    old.total += 1;
+    const body = JSON.stringify(old);
+    let dbRequests = 0;
+    await mockBupApi(context, {
+      onManifest: route => route.fulfill({ contentType: 'application/json', body: buildManifest(body) }),
+      onDb: route => { dbRequests += 1; return route.fulfill({ contentType: 'application/json', body }); },
+    });
+    expect(await forceSync(extensionPage)).toMatchObject({ success: true, outcome: 'downgrade_blocked' });
+    expect(dbRequests).toBe(0);
+    const after = await readLocalState(sw);
+    expect(after.localVer).toBe(original.localVer);
+    expect(after.caseCount).toBe(original.caseCount);
+    expect(after.lastSuccessAt).toBe(original.lastSuccessAt);
+    const lookup = await sw.evaluate(() => lookupCase('16Do10912'));
+    expect(lookup.found).toBe(true);
+    expect(lookup.data.some(row => row[0] === 206264)).toBe(true);
+    if (state === 'healthy') {
+      const popup = await context.newPage();
+      await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+      const dialogs = [];
+      popup.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.dismiss(); });
+      await popup.locator('#dbRefreshBtn').click();
+      await expect(popup.locator('#dbRefreshBtn')).toHaveAttribute('title', /최신인 검증된 로컬 DB/);
+      expect(dialogs).toEqual([]);
+      expect(dbRequests).toBe(0);
+      await popup.close();
+    }
   });
 }
 
@@ -464,7 +519,7 @@ test('S2-1: manifest와 버전이 어긋나면 캐시 버스터로 강제 재동
 
   // 서버에 v2 manifest 게시 (built_at은 grace window를 지난 24시간 전)
   manifestState.body = JSON.stringify({
-    schema: 1,
+    schema: 1, contract: 'v0.9.0',
     built_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
     core: { version: VER_V2, sha256: sha256(PAYLOAD_V2), total: 100_500 },
   });

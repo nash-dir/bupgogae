@@ -10,7 +10,7 @@ DB 동기화 견고성·Drift 안전망의 핵심 플로우를 검증한다.
 | `playwright.config.js` (루트) | E2E 전용 설정 — SW 네트워크 인터셉트 플래그, 워커 1개 고정, CI에서만 headless |
 | `e2e/fixtures.js` | 커스텀 픽스쳐: 확장 로드된 Persistent Context / 동적 `extensionId` / `extensionPage` + 법제처·R2 모킹 |
 | `e2e/sync.spec.js` | 동기화 견고성 + drift 안전망 11개 시나리오 |
-| `e2e/render.spec.js` | Gemini 형태 DOM의 다중 사건번호 렌더링 2개 시나리오 |
+| `e2e/render.spec.js` | Gemini 형태 DOM의 다중 렌더링과 DB-canonical 4글자·긴 숫자열 경계 3개 시나리오 |
 | `e2e/migration.spec.js` | 동일 확장 경로·브라우저 프로필에서 실제 v1 legacy IndexedDB를 v2로 올리고, 비파괴 fallback 조회와 재시작 보존을 검증 |
 
 > Intelligent Document Reader(viewer)는 이번 0.9.0 무결성 릴리스 범위에
@@ -74,6 +74,20 @@ Remove-Item Env:BUPGOGAE_EXTENSION_PATH
    origin이 유지된다. 원격 호스트와 번들 교체는 차단해 테스트를 hermetic하게 유지한다.
 
 ## 주의사항
+
+- 기본 fixture는 worker마다 전체 번들 DB를 설치한 템플릿 프로필을 만들고,
+  브라우저를 종료한 뒤 매 테스트의 별도 디렉터리로 복사한다. 살아 있는
+  프로필이나 파일을 공유하지 않는다. 각 테스트는 별도 브라우저와 storage/IDB를
+  사용하며 격리 marker 회귀시험이 이를 확인한다.
+- `freshInstall: true`인 새 설치 시험은 템플릿을 복사하지 않는다.
+  `$env:BUPGOGAE_E2E_REUSE_PROFILE = '0'`으로 전체 suite의 재사용을 끌 수 있다.
+  DB 준비와 정리는 각각 fixture timeout 60초 안에서 수행하고 테스트 본문의
+  기존 60초 예산과 분리한다. retry 수를 늘리지 않았다.
+- `fixture-timing` JSON 첨부에는 fresh/copy, copyMs, prepareMs, teardownMs를 남긴다.
+  migration 시험도 `BUPGOGAE_EXTENSION_PATH`의 Store ZIP 내용을 사용한다.
+- `optimization.spec.js`는 실제 27초 timeout 뒤 mutation drain, 고정 tooltip 삭제,
+  조회 중 navigation/DOM 삭제, CDP 서비스 워커 재시작, fresh install과 프로필
+  격리를 검사한다. 합성 페이지만 사용하며 실제 계정 smoke를 대신 인증하지 않는다.
 
 - SW가 확장 설치 직후 route 등록보다 먼저 요청할 수 있으므로 DNS를 loopback에
   고정한다. 이 fail-closed launch 인자를 제거하면 PR E2E가 production endpoint에

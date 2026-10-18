@@ -10,6 +10,7 @@
  *   sanitizeAdaptersConfig(config, opts)     → config (in-place 정제)
  *   validateVersionDate(version, opts)        → { ok, error? }
  *   validateDbIntegrity(data, opts)          → { ok, error?, keyCount? }
+ *   deriveShortCaseKeys(cases, caseCodeMap)  → string[]
  *
  * 동기화 정책 함수 (0.8.0 "DB 2달 정체" 사고 재발 방지 — 명세는
  * __tests__/sync-policy.test.js 헤더가 SSOT):
@@ -142,7 +143,6 @@
   }
 
   const CORE_CASE_KEY_REGEX = /^\d{2}(?:[A-Za-z][A-Za-z0-9]*|[가-힣]{1,4})\d+$/;
-  const DLC_CASE_KEY_REGEX = /^(?:TX|KP)\d{2}[가-힣]{1,4}\d+$/;
   const CONSTITUTIONAL_SERIAL_REGEX = /^D\d+$/;
 
   function isPlainObject(value) {
@@ -153,7 +153,7 @@
 
   function isValidCompressedCaseKey(key) {
     return typeof key === 'string' && key.length <= 64 &&
-      (CORE_CASE_KEY_REGEX.test(key) || DLC_CASE_KEY_REGEX.test(key));
+      CORE_CASE_KEY_REGEX.test(key);
   }
 
   function isValidCaseRecord(entry) {
@@ -206,6 +206,10 @@
       return { ok: false, error: `total(${data.total}) ≠ keys(${keyCount})` };
     }
 
+    if (data.keys !== undefined && (!Number.isSafeInteger(data.keys) || data.keys !== keyCount)) {
+      return { ok: false, error: 'keys 불일치' };
+    }
+
     if (!isPlainObject(data.court_code_map) || Object.keys(data.court_code_map).length === 0) {
       return { ok: false, error: 'court_code_map 누락 또는 형식 오류' };
     }
@@ -227,7 +231,7 @@
         return { ok: false, error: `cases["${key}"]가 비어있거나 배열이 아님` };
       }
       for (const entry of val) {
-        if (!isValidCaseRecord(entry)) {
+        if (!isValidCaseRecord(entry, key)) {
           return { ok: false, error: `cases["${key}"] 엔트리 형식 불량` };
         }
         if (entry[1] !== 0 && !knownCourtCodes.has(entry[1])) {
@@ -237,6 +241,41 @@
     }
 
     return { ok: true, keyCount };
+  }
+
+  /**
+   * 활성 DB snapshot에서 원문 길이가 정확히 4자인 사건번호의 압축 키를 파생한다.
+   *
+   * 4글자 문법은 "2자리 연도 + 한글 1글자 사건부호 + 1자리 일련번호"뿐이다.
+   * 가능한 문법 전체를 허용하면 일반 문장 오탐이 커지므로, 실제 DB에 존재하는
+   * 키만 content script가 탐지하도록 snapshot과 함께 저장할 allowlist를 만든다.
+   * 입력을 변이하지 않으며 결과는 재현 가능하도록 정렬한다.
+   *
+   * @param {Object|string[]} cases - 압축 사건번호 key → records 또는 key 배열
+   * @param {Object} caseCodeMap - 한글 사건부호 → 압축 로마자
+   * @returns {string[]}
+   */
+  function deriveShortCaseKeys(cases, caseCodeMap) {
+    if ((!isPlainObject(cases) && !Array.isArray(cases)) || !isPlainObject(caseCodeMap)) return [];
+
+    const oneCharRomanCodes = new Set();
+    for (const [hangulCode, romanCode] of Object.entries(caseCodeMap)) {
+      if (typeof hangulCode === 'string' && hangulCode.length === 1 &&
+          typeof romanCode === 'string' && romanCode.length > 0) {
+        oneCharRomanCodes.add(romanCode);
+      }
+    }
+    if (oneCharRomanCodes.size === 0) return [];
+
+    const result = [];
+    const keys = Array.isArray(cases) ? cases : Object.keys(cases);
+    for (const key of keys) {
+      if (typeof key !== 'string') continue;
+      if (!/^\d{2}.+\d$/.test(key)) continue;
+      const romanCode = key.slice(2, -1);
+      if (oneCharRomanCodes.has(romanCode)) result.push(key);
+    }
+    return result.sort();
   }
 
   // ============================================================
@@ -300,13 +339,21 @@
       return { load: false, reason: 'bundled_not_newer' };
     }
 
+    if (local.snapshotMetadataValid === false && String(bundledVersion) >= String(localVer)) {
+      return { load: true, reason: 'scope_migration' };
+    }
+    if (Number.isSafeInteger(local.totalCount) && coreCount !== local.totalCount &&
+        String(bundledVersion) >= String(localVer)) {
+      return { load: true, reason: 'local_count_mismatch' };
+    }
+
     return String(bundledVersion) > String(localVer)
       ? { load: true, reason: 'bundled_newer' }
       : { load: false, reason: 'bundled_not_newer' };
   }
 
   /**
-   * manifest 엔트리(core/tax 공용) 검증.
+   * 판례 manifest 엔트리 검증.
    * @returns {string|null} 오류 메시지 (정상이면 null)
    */
   function validateManifestEntry(entry, label, opts) {
@@ -420,6 +467,7 @@
     sanitizeAdaptersConfig,
     validateVersionDate,
     validateDbIntegrity,
+    deriveShortCaseKeys,
     buildFetchPlan,
     shouldLoadBundled,
     validateManifest,

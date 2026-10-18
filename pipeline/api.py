@@ -20,6 +20,7 @@ from requests.adapters import HTTPAdapter
 
 from log_setup import get_logger
 from config import LAW_TIMEOUT
+from law_normalization import normalize_decision_date
 
 log = get_logger(__name__)
 
@@ -70,13 +71,22 @@ def reset_network_stats():
 
 # ── 커넥션 풀 세션 (TCP/TLS 핸드셰이크 재사용) ──
 _session = None
+WARP_LAW_PROXY = "socks5h://127.0.0.1:40000"
 
 
 def _get_session() -> requests.Session:
     """자동 재시도 없이 커넥션 풀링만 제공하는 세션 반환."""
     global _session
     if _session is None:
+        proxy = os.getenv("BUPGOGAE_LAW_PROXY", "")
+        if proxy and proxy != WARP_LAW_PROXY:
+            raise ValueError("BUPGOGAE_LAW_PROXY must use the approved local WARP proxy")
         _session = requests.Session()
+        if proxy:
+            # Only the law API uses WARP. Ignore ambient HTTP_PROXY/NO_PROXY
+            # so a failed proxy cannot silently fall back to the runner route.
+            _session.trust_env = False
+            _session.proxies["https://www.law.go.kr"] = proxy
         adapter = HTTPAdapter(
             # 재시도는 fetch_xml_safe 한 곳에서만 수행한다. urllib3의 숨은
             # 재시도와 중첩하지 않아 실제 요청 횟수와 telemetry를 일치시킨다.
@@ -150,7 +160,7 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
     """법제처 API 호출 (지수 백오프 재시도 포함).
 
     Args:
-        date_str: 검색 날짜 (YYYYMMDD) — prec 전용
+        date_str: 검색 날짜 또는 범위 (YYYYMMDD[~YYYYMMDD]) — prec 전용
         page: 페이지 번호 (기본 1)
         target: API 대상 ("prec"=판례, "detc"=헌재결정례 등)
         query: 검색어 — detc 등 query 기반 API용
@@ -168,7 +178,14 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
         "page": page,
     }
     if date_str:
-        params["date"] = date_str
+        # Official API: date is a single date; ranges use prncYd. Sending a
+        # range in date produces a valid-looking totalCnt=0, not an API error.
+        parts = date_str.split("~")
+        if (target != "prec" or len(parts) not in (1, 2)
+                or any(normalize_decision_date(part) != part for part in parts)
+                or parts[0] > parts[-1]):
+            raise ValueError("invalid precedent date filter")
+        params["prncYd" if len(parts) == 2 else "date"] = date_str
         params["mobileYn"] = "Y"
     if query:
         params["query"] = query

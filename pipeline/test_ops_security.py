@@ -32,35 +32,38 @@ class MemoryR2:
     def __init__(self):
         self.objects = {}
         self.operations = []
+        self.buckets = []
         self.fail_pointer = False
 
     def upload_file(self, path, bucket, key, ExtraArgs=None):
-        del bucket, ExtraArgs
+        self.buckets.append(bucket)
+        del ExtraArgs
         with open(path, "rb") as stream:
             self.objects[key] = stream.read()
         self.operations.append(("upload", key))
 
     def put_object(self, Bucket, Key, Body, **kwargs):
-        del Bucket, kwargs
+        self.buckets.append(Bucket)
+        del kwargs
         if self.fail_pointer and Key == sync_state.STATE_POINTER_KEY:
             raise RuntimeError("pointer write failed")
         self.objects[Key] = bytes(Body)
         self.operations.append(("put", Key))
 
     def get_object(self, Bucket, Key):
-        del Bucket
+        self.buckets.append(Bucket)
         if Key not in self.objects:
             raise _missing()
         return {"Body": BytesIO(self.objects[Key])}
 
     def head_object(self, Bucket, Key):
-        del Bucket
+        self.buckets.append(Bucket)
         if Key not in self.objects:
             raise _missing("HeadObject")
         return {"ContentLength": len(self.objects[Key])}
 
     def download_file(self, bucket, key, path):
-        del bucket
+        self.buckets.append(bucket)
         if key not in self.objects:
             raise _missing("DownloadFile")
         with open(path, "wb") as stream:
@@ -279,6 +282,18 @@ class ApiRetrySecurityTests(unittest.TestCase):
 
 
 class AtomicStateSyncTests(unittest.TestCase):
+    def test_missing_or_public_state_bucket_blocks_before_r2_access(self):
+        for state_bucket in ("", "bucket", " bucket "):
+            with self.subTest(state_bucket=state_bucket), tempfile.TemporaryDirectory() as data_dir:
+                conn = _create_master(os.path.join(data_dir, "master.db"))
+                conn.close()
+                with mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": state_bucket}), mock.patch.object(sync_state, "get_r2_client") as client:
+                    with self.assertRaises(SystemExit):
+                        sync_state.upload_state(data_dir)
+                    with self.assertRaises(SystemExit):
+                        sync_state.download_state(data_dir)
+                client.assert_not_called()
+
     def test_empty_schema_valid_state_is_rejected_before_r2_access(self):
         client_factory = mock.Mock(return_value=MemoryR2())
         with tempfile.TemporaryDirectory() as data_dir:
@@ -291,7 +306,7 @@ class AtomicStateSyncTests(unittest.TestCase):
                 mock.patch.object(
                     sync_state, "get_r2_client", client_factory
                 ),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
                 self.assertRaises(SystemExit),
             ):
                 sync_state.upload_state(data_dir)
@@ -310,7 +325,7 @@ class AtomicStateSyncTests(unittest.TestCase):
                 mock.patch.object(
                     sync_state, "get_r2_client", client_factory
                 ),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
                 self.assertRaises(SystemExit),
             ):
                 sync_state.upload_state(data_dir)
@@ -347,7 +362,7 @@ class AtomicStateSyncTests(unittest.TestCase):
                 mock.patch.object(
                     sync_state, "get_r2_client", return_value=client
                 ),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
             ):
                 sync_state.upload_state(
                     data_dir, allow_partial_bootstrap=True
@@ -371,7 +386,7 @@ class AtomicStateSyncTests(unittest.TestCase):
                 mock.patch.object(
                     sync_state, "get_r2_client", client_factory
                 ),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
                 self.assertRaises(SystemExit),
             ):
                 sync_state.upload_state(data_dir)
@@ -389,7 +404,7 @@ class AtomicStateSyncTests(unittest.TestCase):
 
             with (
                 mock.patch.object(sync_state, "get_r2_client", return_value=client),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
             ):
                 sync_state.upload_state(
                     source_dir, allow_partial_bootstrap=True
@@ -415,7 +430,7 @@ class AtomicStateSyncTests(unittest.TestCase):
                     mock.patch.object(
                         sync_state, "get_r2_client", return_value=client
                     ),
-                    mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                    mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
                 ):
                     sync_state.download_state(download_dir)
 
@@ -428,6 +443,7 @@ class AtomicStateSyncTests(unittest.TestCase):
                 self.assertTrue(os.path.exists(
                     os.path.join(download_dir, "failed_dates.json")
                 ))
+                self.assertEqual(set(client.buckets), {"private-state"})
 
     def test_pointer_failure_keeps_previous_generation_and_cleans_snapshot(self):
         client = MemoryR2()
@@ -439,7 +455,7 @@ class AtomicStateSyncTests(unittest.TestCase):
             conn.close()
             with (
                 mock.patch.object(sync_state, "get_r2_client", return_value=client),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
                 self.assertRaises(SystemExit),
             ):
                 sync_state.upload_state(
@@ -466,13 +482,26 @@ class AtomicStateSyncTests(unittest.TestCase):
                     side_effect=sqlite3.DatabaseError("checkpoint/backup failed"),
                 ),
                 mock.patch.object(sync_state, "get_r2_client", get_client),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
                 self.assertRaises(SystemExit),
             ):
                 sync_state.upload_state(
                     data_dir, allow_partial_bootstrap=True
                 )
             get_client.assert_not_called()
+
+    def test_partial_bootstrap_cannot_bypass_serving_integrity_failure(self):
+        for reason in ("quarantined_raw_changed_requires_review", "reference_record_removed_or_changed",
+                       "unreviewed_unexportable_case"):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as data_dir:
+                conn = _create_master(os.path.join(data_dir, "master.db"))
+                conn.close()
+                get_client = mock.Mock()
+                with (mock.patch.object(sync_state, "_verify_incremental_health", side_effect=ValueError(reason)),
+                      mock.patch.object(sync_state, "get_r2_client", get_client),
+                      mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}), self.assertRaises(SystemExit)):
+                    sync_state.upload_state(data_dir, allow_partial_bootstrap=True)
+                get_client.assert_not_called()
 
     def test_wrong_cases_schema_is_rejected(self):
         with tempfile.TemporaryDirectory() as data_dir:
@@ -545,7 +574,7 @@ class AtomicStateSyncTests(unittest.TestCase):
                 }, stream)
             with (
                 mock.patch.object(sync_state, "get_r2_client", return_value=client),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
                 self.assertRaises(SystemExit),
             ):
                 sync_state.upload_state(
@@ -570,14 +599,14 @@ class AtomicStateSyncTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as data_dir:
             with (
                 mock.patch.object(sync_state, "get_r2_client", return_value=client),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
                 self.assertRaises(SystemExit),
             ):
                 sync_state.download_state(data_dir)
 
             with (
                 mock.patch.object(sync_state, "get_r2_client", return_value=client),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
             ):
                 sync_state.download_state(
                     data_dir, allow_empty_bootstrap=True
@@ -597,7 +626,7 @@ class AtomicStateSyncTests(unittest.TestCase):
             conn.close()
             with (
                 mock.patch.object(sync_state, "get_r2_client", return_value=client),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
             ):
                 sync_state.upload_state(
                     source_dir, allow_partial_bootstrap=True
@@ -609,7 +638,7 @@ class AtomicStateSyncTests(unittest.TestCase):
                 stream.write("{}")
             with (
                 mock.patch.object(sync_state, "get_r2_client", return_value=client),
-                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket"}),
+                mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
             ):
                 sync_state.download_state(download_dir)
             self.assertFalse(os.path.exists(stale))
@@ -633,6 +662,7 @@ class PublishOutputTests(unittest.TestCase):
         store = {
             publish_outputs.R2_KEY: old_fixed,
             publish_outputs.MANIFEST_R2_KEY: old_manifest,
+            publish_outputs.VERSIONED_MANIFEST_R2_KEY: old_manifest,
         }
         operations = []
 
@@ -792,6 +822,8 @@ class PublishOutputTests(unittest.TestCase):
             result["object_key"],
             publish_outputs.MANIFEST_R2_KEY,
             publish_outputs.R2_KEY,
+            publish_outputs.VERSIONED_R2_KEY,
+            publish_outputs.VERSIONED_MANIFEST_R2_KEY,
         ])
         self.assertEqual(
             result["store"][result["object_key"]], result["gzip_bytes"]
@@ -806,6 +838,28 @@ class PublishOutputTests(unittest.TestCase):
         self.assertEqual(
             result["store"][publish_outputs.R2_KEY], result["gzip_bytes"]
         )
+        self.assertEqual(result["store"][publish_outputs.VERSIONED_R2_KEY], result["gzip_bytes"])
+        versioned = json.loads(result["store"][publish_outputs.VERSIONED_MANIFEST_R2_KEY])
+        self.assertEqual(versioned["contract"], "v0.9.0")
+        self.assertEqual(versioned["core"], manifest["core"])
+
+    def test_new_contract_cannot_silently_overwrite_legacy_files(self):
+        with mock.patch.object(publish_outputs, "PUBLIC_CONTRACT", "v1.0.0"), mock.patch.object(publish_outputs, "upload_db_to_r2") as upload:
+            with self.assertRaisesRegex(ValueError, "legacy serializer required"):
+                publish_outputs.publish_outputs("unused")
+        upload.assert_not_called()
+
+    def test_versioned_alias_failure_does_not_commit_its_manifest(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            result = self._publish_with_store(data_dir, fail_key=publish_outputs.VERSIONED_R2_KEY)
+        self.assertNotIn(publish_outputs.VERSIONED_MANIFEST_R2_KEY, result["operations"])
+        self.assertEqual(result["store"][publish_outputs.VERSIONED_MANIFEST_R2_KEY], result["old_manifest"])
+
+    def test_versioned_manifest_failure_does_not_affect_legacy_payload(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            result = self._publish_with_store(data_dir, fail_key=publish_outputs.VERSIONED_MANIFEST_R2_KEY)
+        self.assertEqual(result["store"][publish_outputs.VERSIONED_MANIFEST_R2_KEY], result["old_manifest"])
+        self.assertEqual(result["store"][publish_outputs.R2_KEY], result["gzip_bytes"])
 
     def test_immutable_upload_failure_preserves_manifest_and_fixed_lkg(self):
         with tempfile.TemporaryDirectory() as data_dir:
@@ -902,6 +956,11 @@ class DeploymentSecurityTests(unittest.TestCase):
         )
         self.assertNotRegex(warp_step, r"\${{\s*secrets\.")
         self.assertNotIn("BUPGOGAE_API_KEY", warp_step)
+        self.assertIn("WARP_ROUTE_MODE: proxy", warp_step)
+        self.assertIn("timeout-minutes: 15", warp_step)
+        self.assertEqual(crawl_section.count(
+            "BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000"
+        ), 2)
         self.assertLess(
             crawl_section.index("명시적 full historical bootstrap 실행"),
             crawl_section.index("WARP 연결 및 ephemeral 등록 정리"),
@@ -927,6 +986,11 @@ class DeploymentSecurityTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, warp_script)
         self.assertIn("CLOUDFLARE_WARP_TOS_ACCEPTED", warp_script)
+        self.assertIn('WARP_ROUTE_MODE:-proxy', warp_script)
+        self.assertNotIn("mode warp+doh", warp_script)
+        self.assertIn("::error title=WARP configuration missing", warp_script)
+        self.assertLess(workflow.index("WARP 약관 승인 설정 사전 확인"),
+                        workflow.index("기존 generation state R2에서 다운로드"))
         self.assertIn(
             'WARP_PACKAGE_VERSION="2026.6.880.0"',
             warp_script,

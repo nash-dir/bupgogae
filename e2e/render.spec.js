@@ -52,3 +52,23 @@ test('R2: 사건번호별 분리 노드는 정상 배지된다 (M2 미해당 —
     .poll(() => page.locator('.bgae-badge').count(), { timeout: 20_000, intervals: [500] })
     .toBe(CASES.length);
 });
+
+test('R3: DB canonical 4글자만 배지화하고 비canonical/8자리 일련번호는 배지화하지 않는다', async ({ context }) => {
+  await context.route('https://gemini.google.com/**', (route) => route.fulfill({
+    contentType: 'text/html',
+    body: '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><main><message-content>'
+      + '<p class="resp"><strong>89두1</strong></p>'
+      + '<p class="resp">99다1</p>'
+      + '<p class="resp">2015다12345678</p>'
+      + '</message-content></main></body></html>',
+  }));
+  const page = await context.newPage();
+  await page.goto('https://gemini.google.com/');
+
+  await expect
+    .poll(() => page.locator('.bgae-badge').count(), { timeout: 20_000, intervals: [500] })
+    .toBe(1);
+  await expect(page.locator('.bgae-badge')).toHaveAttribute('data-bgae-case', '89두1');
+  await expect(page.locator('message-content')).toContainText('99다1');
+  await expect(page.locator('message-content')).toContainText('2015다12345678');
+});

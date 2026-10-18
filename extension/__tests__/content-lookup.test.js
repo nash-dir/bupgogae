@@ -6,7 +6,7 @@
  *
  * DB 콜드 스타트(~20s)·SW 일시 정지로 인한 지연을 'DB 미확인'으로 단정하면
  * 진짜 판례가 orange로 오표시된다. 목표 동작:
- *   - 타임아웃/시스템 에러 → gray 유지 + 재조회(늦게 온 응답 회복)
+ *   - 타임아웃/시스템 에러 → 재조회 후에도 실패하면 gray(검증 미완료)
  *   - genuine miss(found:false, error 아님) → orange
  *   - DB hit(found:true) → green
  *
@@ -31,9 +31,9 @@ function makeContainer(text) {
 
 beforeEach(() => {
   // jest.setup.js가 global.chrome를 새로 만들어 두므로 메타/필터만 주입
-  caseRegex.__setMetaForTest(CASE_CODE_MAP, COURT_CODE_MAP);
+  caseRegex.__setMetaForTest(CASE_CODE_MAP, COURT_CODE_MAP, ['89Du1']);
   content.__resetForTest();
-  content.__setCategoryFiltersForTest({ court: true, constitutional: true, tax: false });
+  content.__setCategoryFiltersForTest({ court: true, constitutional: true });
   document.body.innerHTML = '';
 });
 
@@ -42,6 +42,31 @@ afterEach(() => {
 });
 
 describe('processContainer — 룩업 결과 렌더링 (L13)', () => {
+  test('조회 중 제거된 메시지 subtree에 stale 응답으로 배지를 만들지 않는다', async () => {
+    let reply;
+    chrome.runtime.sendMessage = jest.fn((_message, callback) => { reply = callback; });
+    const container = makeContainer('2015다6302');
+    const pending = content.processContainer(container);
+    await Promise.resolve();
+    container.remove();
+    reply({ '15Da6302': { found: true, data: [[1, 1, 150115, '합성']] } });
+    await pending;
+    expect(container.querySelector('.bgae-badge')).toBeNull();
+  });
+
+  test('조회 중 Text가 바뀌면 과거 startIdx를 새 문자열에 적용하지 않는다', async () => {
+    let reply;
+    chrome.runtime.sendMessage = jest.fn((_message, callback) => { reply = callback; });
+    const container = makeContainer('2015다6302');
+    const pending = content.processContainer(container);
+    await Promise.resolve();
+    container.firstChild.textContent = '새 응답 2015다7777';
+    reply({ '15Da6302': { found: true, data: [[1, 1, 150115, '합성']] } });
+    await pending;
+    expect(container.querySelector('.bgae-badge')).toBeNull();
+    expect(container.textContent).toBe('새 응답 2015다7777');
+  });
+
   test('타임아웃/에러는 orange로 오탐하지 않고(평문 유지), 재조회로 늦게 온 진짜 응답(green)을 반영한다', async () => {
     jest.useFakeTimers();
 
@@ -104,6 +129,71 @@ describe('processContainer — 룩업 결과 렌더링 (L13)', () => {
     expect(badge.className).toContain('bgae-green');
     expect(badge.className).not.toContain('bgae-orange');
     expect(lookupCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  test('재조회가 모두 실패하면 orange가 아닌 gray 검증 미완료 상태를 표시한다', async () => {
+    jest.useFakeTimers();
+    global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+      if (!msg || msg.type !== 'LOOKUP_BATCH') {
+        if (cb) cb({});
+        return;
+      }
+      global.chrome.runtime.lastError = { message: 'Extension context busy' };
+      cb({});
+      global.chrome.runtime.lastError = null;
+    });
+
+    const container = makeContainer('판례 2015다6302 인용');
+    const pending = content.processContainer(container);
+    await jest.advanceTimersByTimeAsync(20_000);
+    const metrics = await pending;
+
+    const badge = container.querySelector('.bgae-badge');
+    expect(badge).not.toBeNull();
+    expect(badge.className).toContain('bgae-gray');
+    expect(badge.className).not.toContain('bgae-orange');
+    expect(metrics.unresolved).toBe(1);
+    badge.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    expect(document.querySelector('.bgae-global-tooltip').textContent).toContain('검증 미완료');
+  });
+
+  test.each([
+    ['독립 텍스트 노드', () => makeContainer('89두1')],
+    ['강조 태그 안 독립 텍스트 노드', () => {
+      const container = document.createElement('div');
+      const strong = document.createElement('strong');
+      strong.textContent = '89두1';
+      container.appendChild(strong);
+      document.body.appendChild(container);
+      return container;
+    }],
+  ])('4글자 사건번호를 누락하지 않음: %s', async (_label, buildContainer) => {
+    global.chrome.runtime.sendMessage = jest.fn((msg, cb) => {
+      if (msg && msg.type === 'LOOKUP_BATCH') {
+        cb({ '89Du1': { found: true, data: [[1, 1, 890101, '테스트사건']] } });
+      } else if (cb) {
+        cb({});
+      }
+    });
+
+    const container = buildContainer();
+    await content.processContainer(container);
+    const badge = container.querySelector('.bgae-badge');
+    expect(badge).not.toBeNull();
+    expect(badge.getAttribute('data-bgae-case')).toBe('89두1');
+    expect(badge.className).toContain('bgae-green');
+  });
+
+  test('DB에 없는 4글자 후보는 배지와 LOOKUP_BATCH 없이 평문으로 남긴다', async () => {
+    global.chrome.runtime.sendMessage = jest.fn((_msg, cb) => { if (cb) cb({}); });
+    const container = makeContainer('99다1');
+    const metrics = await content.processContainer(container);
+
+    expect(container.querySelector('.bgae-badge')).toBeNull();
+    expect(metrics.detected).toBe(0);
+    expect(global.chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'LOOKUP_BATCH' }), expect.any(Function),
+    );
   });
 
   test('genuine miss(found:false)는 orange로 렌더링한다 (회귀 없음)', async () => {

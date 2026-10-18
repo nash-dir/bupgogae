@@ -2,7 +2,7 @@
  * 법고개(Bupgogae) — Content Script 통합 컨트롤러
  * ========================================================
  * LLM 채팅 응답에서 판례번호를 실시간으로 감지하고
- * 3단 신호등(Green/Orange/Red) 배지를 렌더링하는 메인 모듈.
+ * 4상태(Green/Orange/Red/Gray) 배지를 렌더링하는 메인 모듈.
  *
  * 멀티 플랫폼 지원: Gemini, ChatGPT, Claude, Copilot, Perplexity, Grok
  * 사이트별 DOM 차이는 어댑터(adapters/)에서 추상화.
@@ -14,7 +14,7 @@
  *   ④ validateCaseNumber() → Red 즉시 렌더링
  *   ⑤ compressCaseKey() → 압축 키 배열
  *   ⑥ chrome.runtime.sendMessage({ type: 'LOOKUP_BATCH' })
- *   ⑦ 결과 순회 → Green/Orange 렌더링
+ *   ⑦ 결과 순회 → Green/Orange/Gray 렌더링
  *
  * [의존성]
  *   - adapters/*.js   (SiteAdapter 구현체 + 레지스트리)
@@ -33,6 +33,8 @@ const MAX_BATCH_SIZE = 50; // 한 번에 조회할 최대 키 수
 const LOOKUP_TIMEOUT_MS = 8000; // 배치 조회 응답 대기 한도 (SW 컨텍스트 무효화 시 무한 대기 방지)
 const LOOKUP_MAX_ATTEMPTS = 3;        // 타임아웃/에러 시 최대 재조회 횟수 (gray 유지, orange 오탐 방지)
 const LOOKUP_RETRY_BACKOFF_MS = 1000; // 재조회 백오프 (시도 횟수 배수: 1s, 2s, ...)
+const DOM_WORK_CHUNK_SIZE = 200;       // DOM/정규식 작업 후 메인 스레드 양보 기준
+const DOM_WORK_SLICE_MS = 16;          // 한 동기 slice의 목표 상한(약 1 frame)
 
 // ── Settle(정지 감지) 처리 게이트 ──
 // Gemini/Grok/Copilot 등은 응답 생성 중 프레임워크가 응답 서브트리를 재렌더하며
@@ -50,6 +52,8 @@ const ORANGE_TOAST_AFTER_COPY_MS = 3000;  // '복사됨' 표시 후 자동 닫�
 
 let _debounceTimer = null;
 let _isProcessing = false;
+let _processingPending = false;
+let _processingPaused = false;
 let _adapter = null; // 현재 사이트 어댑터
 let _adapterFetchRequested = false; // Auto-Fetch 쓰로틀링 플래그 (세션당 1회)
 let _hasShownOrangeToast = false; // Orange 배지 토스트 알림을 한 번만 띄우기 위한 플래그
@@ -57,7 +61,6 @@ let _showOrangeToast = true;     // 미확인 사건번호 팝업(토스트) 표
 let _categoryFilters = {         // 카테고리별 필터 (기본값)
   court: true,
   constitutional: true,
-  tax: false,
 };
 
 /**
@@ -123,13 +126,11 @@ async function init() {
     const filterData = await chrome.storage.local.get([
       'bupgogae_filter_court',
       'bupgogae_filter_constitutional',
-      'bupgogae_dlc_tax',
       'bupgogae_show_orange_toast',
     ]);
     _categoryFilters = {
       court: filterData.bupgogae_filter_court !== false,         // 기본 ON
       constitutional: filterData.bupgogae_filter_constitutional !== false, // 기본 ON
-      tax: filterData.bupgogae_dlc_tax === true,                 // 기본 OFF
     };
     _showOrangeToast = filterData.bupgogae_show_orange_toast !== false; // 기본 ON
     console.log('[bupgogae] 카테고리 필터:', _categoryFilters);
@@ -143,6 +144,12 @@ async function init() {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'local' && changes.bupgogae_show_orange_toast) {
           _showOrangeToast = changes.bupgogae_show_orange_toast.newValue !== false;
+        }
+        if (area === 'local' && changes.bupgogae_meta_generation &&
+            window.bupgogaeCaseRegex?.refreshMeta) {
+          window.bupgogaeCaseRegex.refreshMeta()
+            .then(() => scheduleProcessing())
+            .catch((err) => console.warn('[bupgogae] snapshot 메타 갱신 실패:', err?.message));
         }
       });
     }
@@ -179,6 +186,8 @@ function startObserver() {
   if (_observer) return;
 
   _observer = new MutationObserver((mutations) => {
+    // 삭제만 있는 mutation도 고정 tooltip의 detached subtree 참조를 해제한다.
+    window.bupgogae?.clearDetachedTooltip?.();
     // 배지 렌더링으로 인한 DOM 변경은 무시
     const hasRelevantChanges = mutations.some(m => {
       // addedNodes 중 배지가 아닌 실제 콘텐츠 변경이 있는지 확인
@@ -200,6 +209,7 @@ function startObserver() {
       }
       // characterData 변경도 감지
       if (m.type === 'characterData') return true;
+      if (m.type === 'attributes') return true;
       return false;
     });
 
@@ -242,6 +252,8 @@ function _nowMs() {
 }
 
 function scheduleProcessing() {
+  if (_processingPaused) return;
+  _processingPending = true;
   const now = _nowMs();
   if (_settlePendingSince === 0) _settlePendingSince = now;
   if (_debounceTimer) clearTimeout(_debounceTimer);
@@ -261,34 +273,35 @@ function onSettleTimer() {
     if (_rescheduleCount <= MAX_RESCHEDULE) {
       _debounceTimer = setTimeout(onSettleTimer, DEBOUNCE_MS);
     } else {
-      console.warn(`[bupgogae] 재스케줄 상한 초과 (${MAX_RESCHEDULE}회) — 다음 Mutation 대기`);
+      console.warn(`[bupgogae] 재스케줄 상한 초과 (${MAX_RESCHEDULE}회) — 진행 중 처리 완료 후 재개`);
       _rescheduleCount = 0;
-      _settlePendingSince = 0;
+      // 타이머 polling만 멈춘다. pending 변경과 starvation 기준 시각은 보존한다.
     }
     return;
   }
 
   _rescheduleCount = 0;
   _settlePendingSince = 0;
+  _processingPending = false;
   _runProcess();
 }
 
 
 // ============================================================
-// 5. 핵심 처리 로직 — 3단 파이프라인
+// 5. 핵심 처리 로직 — 4상태 파이프라인
 // ============================================================
 
 /**
  * 모든 LLM 응답 컨테이너를 스캔하고 판례번호를 처리.
  *
  * [Circuit Breaker 측정 범위]
- *   동기 처리 구간만 측정: 컨테이너 탐색 + 각 processContainer가 최초
- *   DB 조회를 기다리기 전까지 수행하는 TreeWalker/정규식/검증 비용
- *   비동기 대기(IndexedDB batchLookup)는 측정에서 제외.
+ *   동기 처리 구간만 측정: 컨테이너 탐색 + TreeWalker/정규식/검증/렌더 비용.
+ *   긴 DOM 작업은 chunk마다 이벤트 루프에 양보하고, 그 대기 및
+ *   IndexedDB batchLookup 대기는 측정에서 제외한다.
  *   → 정상적인 DB 초기 로딩 지연이 Circuit Breaker를 오발동시키지 않음.
  */
 async function processAllResponses() {
-  if (_isProcessing) return;
+  if (_isProcessing || _processingPaused) return;
   // 메타데이터 준비 완료 전에는 실행 건너뛰기
   if (window.bupgogaeCaseRegex && !window.bupgogaeCaseRegex.isMetaReady()) {
     console.debug('[bupgogae] 처리 스킵: 메타데이터 준비 안됨');
@@ -298,57 +311,93 @@ async function processAllResponses() {
   // 동기 처리 시간만 측정 (비동기 IndexedDB 대기 제외)
   const syncStart = performance.now();
   let syncDuration = 0;
+  let containerCount = 0;
+  let detected = 0;
+  let maxMeasuredSliceMs = 0;
 
   try {
     // 동기 구간: 컨테이너 탐색
     const containers = findResponseContainers();
     if (containers.length === 0) {
-      _isProcessing = false;
       return;
     }
     // 컨테이너 탐색 동기 비용
     syncDuration = performance.now() - syncStart;
+    containerCount = containers.length;
+    maxMeasuredSliceMs = syncDuration;
 
     for (const container of containers) {
-      // async 함수는 첫 await 전까지 동기로 실행된다. Promise를 만든 직후 시간을
-      // 재면 collectTextNodes(TreeWalker)와 정규식 추출을 포함하고 DB 대기는 제외된다.
-      const containerStart = performance.now();
-      const processing = processContainer(container);
-      syncDuration += performance.now() - containerStart;
-      await processing;
+      const metrics = await processContainer(container);
+      syncDuration += metrics?.syncDuration || 0;
+      detected += metrics?.detected || 0;
+      maxMeasuredSliceMs = Math.max(maxMeasuredSliceMs, metrics?.maxSyncSliceMs || 0);
     }
   } catch (err) {
     console.error('[bupgogae] 처리 중 오류:', err);
   } finally {
-    _isProcessing = false;
+    // Local console only; never log conversation text or extracted case strings.
+    // This is measured synchronous work, not a browser Long Tasks/INP trace.
+    if (detected > 0 || maxMeasuredSliceMs > 50) {
+      console.debug('[bupgogae] scan ' + JSON.stringify({
+        containers: containerCount, detected,
+        syncMs: Number(syncDuration.toFixed(2)),
+        maxMeasuredSliceMs: Number(maxMeasuredSliceMs.toFixed(2)),
+        elapsedMs: Number((performance.now() - syncStart).toFixed(2)),
+      }));
+    }
     // 동기 처리 시간 기준으로 Circuit Breaker 판단
     await handleCircuitBreaker(syncDuration);
+    _isProcessing = false;
+    if (_processingPending && !_processingPaused) scheduleProcessing();
   }
 }
 
 /**
- * 서킷 브레이커 (Circuit Breaker): DOM 동기 처리 이상(5초 초과) 감지 및 비상 정지.
+ * 서킷 브레이커 (Circuit Breaker): 누적 DOM 동기 처리 이상 감지 및 현재 탭 일시 정지.
  *
  * [설계 의도]
- *   이 브레이커는 단순한 UX 가드가 아니라, 잘못된 DB 패턴이나
- *   stale adapters.json으로 인해 광범위 DOM 스캔이 무한반복되어
- *   브라우저 탭이 영구 프리징되는 것을 방지하는 안전장치.
+ *   실제 긴 작업의 메인 스레드 독점은 chunk yield가 줄인다. 이 브레이커는
+ *   반복되는 비정상 비용을 사후 감지해 현재 탭의 observer만 중지하는 보조 장치다.
  *
  * [측정 대상]
- *   컨테이너 탐색과 processContainer의 최초 비동기 DB 조회 전까지 실행되는
- *   TreeWalker·정규식·동기 검증 시간. IndexedDB 대기와 조회 후 렌더 시간은 제외.
+ *   컨테이너 탐색과 TreeWalker·정규식·동기 검증·렌더링의 동기 slice 합계.
+ *   IndexedDB 대기와 chunk yield 대기는 제외.
  *   → 정상적인 첫 로딩(DB cold start ~20초)에서 오발동 없음.
  *
  * [발동 조건]
- *   5회 연속 동기 처리 5초 초과 → 영구 비활성화 + alert
+ *   누적 5회 동기 처리 5초 초과 → 현재 탭 observer 일시 정지 + 복구 안내
  *   5회 연속 정상 처리(500ms 이하) → 스트라이크 리셋
  *
  * @param {number} syncDuration 동기 처리 시간 (ms) — batchLookup 제외
  */
 const CIRCUIT_THRESHOLD_MS = 5000;  // 동기 처리 5초 초과 = 1 strike
-const CIRCUIT_MAX_STRIKES = 5;     // 5 strikes = 영구 비활성화
+const CIRCUIT_MAX_STRIKES = 5;     // 누적 5 strikes = 현재 탭 observer 일시 정지
 const CIRCUIT_RECOVERY_STREAK = 5; // 5회 연속 정상 = 리셋
 const CIRCUIT_FAST_MS = 500;       // 정상 판정 기준
+
+function evaluateCircuitBreakerState(state, syncDuration) {
+  let strikes = Number.isSafeInteger(state?.strikes) ? state.strikes : 0;
+  let fastStreak = Number.isSafeInteger(state?.fastStreak) ? state.fastStreak : 0;
+
+  if (syncDuration > CIRCUIT_THRESHOLD_MS) {
+    strikes += 1;
+    fastStreak = 0;
+    if (strikes >= CIRCUIT_MAX_STRIKES) {
+      return { strikes: 0, fastStreak: 0, action: 'pause' };
+    }
+    return { strikes, fastStreak, action: 'strike' };
+  }
+
+  if (syncDuration <= CIRCUIT_FAST_MS && (strikes > 0 || fastStreak > 0)) {
+    fastStreak += 1;
+    if (fastStreak >= CIRCUIT_RECOVERY_STREAK) {
+      return { strikes: 0, fastStreak: 0, action: 'recovered' };
+    }
+    return { strikes, fastStreak, action: 'recovering' };
+  }
+
+  return { strikes, fastStreak, action: 'none' };
+}
 
 async function handleCircuitBreaker(syncDuration) {
   try {
@@ -357,48 +406,39 @@ async function handleCircuitBreaker(syncDuration) {
       'bupgogae_circuit_fast_streak'
     ]);
     
-    let strikes = data.bupgogae_circuit_strikes || 0;
-    let fastStreak = data.bupgogae_circuit_fast_streak || 0;
-    let updated = false;
+    const next = evaluateCircuitBreakerState({
+      strikes: data.bupgogae_circuit_strikes || 0,
+      fastStreak: data.bupgogae_circuit_fast_streak || 0,
+    }, syncDuration);
 
-    if (syncDuration > CIRCUIT_THRESHOLD_MS) {
-      strikes += 1;
-      fastStreak = 0;
-      updated = true;
-      console.warn(`[bupgogae] ⚠️ 서킷 브레이커: 동기 처리 지연 (${syncDuration.toFixed(0)}ms > ${CIRCUIT_THRESHOLD_MS}ms). 스트라이크: ${strikes}/${CIRCUIT_MAX_STRIKES}`);
-
-      if (strikes >= CIRCUIT_MAX_STRIKES) {
-        // 비상 정지 요건 충족
-        if (_observer) {
-          _observer.disconnect();
-          _observer = null;
-        }
-        chrome.runtime.sendMessage({ type: 'EMERGENCY_DISABLE' });
-        alert('원격 설정 오류가 지속 감지되어 보호를 위해 확장프로그램을 영구 비활성화합니다.');
-        return; // 추가 업데이트 진행 안 함
+    if (next.action === 'strike') {
+      console.warn(`[bupgogae] ⚠️ 서킷 브레이커: 동기 처리 지연 (${syncDuration.toFixed(0)}ms > ${CIRCUIT_THRESHOLD_MS}ms). 스트라이크: ${next.strikes}/${CIRCUIT_MAX_STRIKES}`);
+    } else if (next.action === 'recovered') {
+      console.log('[bupgogae] 🔄 서킷 브레이커 복구: 정상 처리 연속 확인. 스트라이크 리셋.');
+    } else if (next.action === 'pause') {
+      pauseProcessing();
+      if (_observer) {
+        _observer.disconnect();
+        _observer = null;
       }
-    } else if (syncDuration <= CIRCUIT_FAST_MS) {
-      // 정상 처리 회복 카운트 (과거 strike 기록이 있을 때만)
-      if (strikes > 0 || fastStreak > 0) {
-        fastStreak += 1;
-        updated = true;
-        
-        if (fastStreak >= CIRCUIT_RECOVERY_STREAK) {
-          console.log(`[bupgogae] 🔄 서킷 브레이커 복구: 연속 ${fastStreak}회 정상 처리. 스트라이크 리셋.`);
-          strikes = 0;
-          fastStreak = 0;
-        }
-      }
+      alert('이 페이지의 DOM 처리가 반복해서 지연되어 현재 탭에서만 법고개 처리를 일시 중지했습니다. 페이지를 새로고침하면 다시 시도합니다.');
     }
 
-    if (updated) {
+    if (next.action !== 'none') {
       await chrome.storage.local.set({
-        bupgogae_circuit_strikes: strikes,
-        bupgogae_circuit_fast_streak: fastStreak
+        bupgogae_circuit_strikes: next.strikes,
+        bupgogae_circuit_fast_streak: next.fastStreak,
+        ...(next.action === 'pause' ? {
+          bupgogae_circuit_last_pause: {
+            at: Date.now(),
+            durationMs: Math.round(syncDuration),
+          },
+        } : {}),
       });
     }
   } catch (err) {
     if (err.message && err.message.includes('Extension context invalidated')) {
+      pauseProcessing();
       console.log('[bupgogae] 확장 프로그램이 업데이트되었습니다. 구버전 스크립트를 중지합니다. (새로고침 F5 필요)');
       if (_observer) {
         _observer.disconnect();
@@ -408,6 +448,14 @@ async function handleCircuitBreaker(syncDuration) {
       console.error('[bupgogae] 서킷 브레이커 상태 처리 실패:', err);
     }
   }
+}
+
+function pauseProcessing() {
+  _processingPaused = true;
+  _processingPending = false;
+  if (_debounceTimer) clearTimeout(_debounceTimer);
+  _debounceTimer = null;
+  _settlePendingSince = 0;
 }
 
 /**
@@ -457,43 +505,65 @@ function findResponseContainers() {
  * 단 한 번의 분할 렌더(renderPrecedentBadges)로 전부 배지한다. 사건번호별로
  * renderBadge를 반복하면 첫 분할에서 노드가 detach되어 나머지가 누락됐다.
  *
- * [렌더 시점] gray(pending) 단계 없이, 조회 결과가 확정된 뒤 최종색을 1회 렌더.
+ * [렌더 시점] 조회를 최대 3회 시도한 뒤 최종 상태를 한 번 렌더한다.
  * 조회 타임아웃/시스템 에러(L13)는 'DB 미확인(orange)'으로 단정하지 않고
- * 평문으로 남겨(plain) 재조회/다음 사이클에서 회복한다.
+ * gray(검증 미완료)로 구분한다.
  * @param {Element} container
  */
 async function processContainer(container) {
-  const textNodes = collectTextNodes(container);
-  if (textNodes.length === 0) return;
-
   // ── 텍스트노드별 매칭 수집 (같은 노드 매칭을 함께 모아 한 번에 렌더) ──
+  // TreeWalker 수집과 탐지를 같은 slice에서 수행한다. 매칭 없는 Text 배열은 보관하지 않는다.
+  const walker = createTextWalker(container);
+  let syncDuration = 0;
+  let maxSyncSliceMs = 0;
   const nodes = []; // [{ textNode, entries: [{ precedentString, startIdx, parsed, level, options, key }] }]
   let totalDetected = 0;
-  for (const textNode of textNodes) {
+  let processed = 0;
+  let sliceStart = performance.now();
+  while (true) {
+    const workStart = performance.now();
+    const hasNext = walker.nextNode();
+    if (!hasNext) {
+      syncDuration += performance.now() - workStart;
+      break;
+    }
+    const textNode = walker.currentNode;
     const text = textNode.textContent;
-    if (!text || text.length < 5) continue; // 최소 "99다1" 정도
-
-    const cases = window.bupgogaeCaseRegex.extractCaseNumbers(text)
-      .filter((p) => _categoryFilters[p.type] !== false);
-    if (cases.length === 0) continue;
-
-    const entries = cases.map((parsed) => ({
-      precedentString: parsed.raw,
-      startIdx: parsed.startIdx,
-      parsed,
-      level: null,    // 'red' | 'green' | 'orange' | null(미정→평문 유지)
-      options: {},
-      key: null,
-    }));
-    nodes.push({ textNode, entries });
-    totalDetected += entries.length;
+    if (text && text.length >= 4 &&
+        (text.length !== 4 || window.bupgogaeCaseRegex.isCanonicalShortCaseText(text))) {
+      // 고립된 4글자 노드는 활성 DB canonical 집합을 O(1)로 먼저 확인해
+      // 일반 문장 오탐과 불필요한 정규식/IndexedDB 조회를 피한다.
+      const cases = window.bupgogaeCaseRegex.extractCaseNumbers(text)
+        .filter((p) => _categoryFilters[p.type] !== false);
+      if (cases.length > 0) {
+        const entries = cases.map((parsed) => ({
+          precedentString: parsed.raw,
+          startIdx: parsed.startIdx,
+          parsed,
+          level: null,
+          options: {},
+          key: null,
+        }));
+        nodes.push({ textNode, text, entries });
+        totalDetected += entries.length;
+      }
+    }
+    syncDuration += performance.now() - workStart;
+    processed += 1;
+    if (shouldYieldDomWork(processed, sliceStart)) {
+      maxSyncSliceMs = Math.max(maxSyncSliceMs, performance.now() - sliceStart);
+      await yieldToMainThread();
+      sliceStart = performance.now();
+    }
   }
 
-  if (totalDetected === 0) return;
+  maxSyncSliceMs = Math.max(maxSyncSliceMs, performance.now() - sliceStart);
+  if (totalDetected === 0) return { syncDuration, maxSyncSliceMs, detected: 0, unresolved: 0 };
   console.log(`[bupgogae] ${totalDetected}개 사건번호 감지`);
 
   // ── 검증(Red) + 키 압축(조회 대상 수집) ──
   const keyToEntries = new Map(); // compressedKey → entry[]
+  let validationStart = performance.now();
   for (const node of nodes) {
     for (const e of node.entries) {
       const validation = window.bupgogaeCaseRegex.validateCaseNumber(e.parsed);
@@ -513,11 +583,20 @@ async function processContainer(container) {
       keyToEntries.get(key).push(e);
     }
   }
+  syncDuration += performance.now() - validationStart;
+  maxSyncSliceMs = Math.max(maxSyncSliceMs, performance.now() - validationStart);
 
   // ── 배치 조회 + L13 재시도 (타임아웃/에러 키만 재조회) ──
   let keysToLookup = Array.from(keyToEntries.keys());
   for (let attempt = 1; attempt <= LOOKUP_MAX_ATTEMPTS && keysToLookup.length > 0; attempt++) {
-    const lookup = await batchLookup(keysToLookup);
+    if (!container.isConnected) {
+      return { syncDuration, maxSyncSliceMs, detected: totalDetected, unresolved: keysToLookup.length, cancelled: true };
+    }
+    const lookup = await batchLookup(keysToLookup, container);
+    if (!container.isConnected) {
+      return { syncDuration, maxSyncSliceMs, detected: totalDetected, unresolved: keysToLookup.length, cancelled: true };
+    }
+    const applyStart = performance.now();
     const results = lookup.results;
     const unresolved = [];
     for (const key of keysToLookup) {
@@ -543,23 +622,50 @@ async function processContainer(container) {
       }
     }
     keysToLookup = unresolved;
+    const applyDuration = performance.now() - applyStart;
+    syncDuration += applyDuration;
+    maxSyncSliceMs = Math.max(maxSyncSliceMs, applyDuration);
     if (keysToLookup.length > 0 && attempt < LOOKUP_MAX_ATTEMPTS) {
       await new Promise((r) => setTimeout(r, LOOKUP_RETRY_BACKOFF_MS * attempt));
     }
   }
-  // 끝까지 미정인 키(타임아웃)는 level이 null로 남아 평문 유지 — orange 오탐 방지.
+  // 끝까지 미정인 키는 gray(검증 미완료)로 표시해 DB miss와 구분한다.
+  for (const key of keysToLookup) {
+    for (const e of keyToEntries.get(key) || []) {
+      e.level = 'gray';
+      e.options = {
+        grayReason: '로컬 DB 조회가 시간 초과 또는 시스템 오류로 완료되지 않았습니다.',
+      };
+    }
+  }
 
   // ── 렌더: 노드별로 level이 확정된 매칭만 한 번에 분할 렌더 ──
   let anyOrange = false;
-  for (const node of nodes) {
-    if (!node.textNode.parentNode) continue; // 노드가 사라졌으면 스킵
-    const ready = node.entries.filter((e) => e.level); // 미정(null)은 평문 유지
+  sliceStart = performance.now();
+  for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
+    const node = nodes[nodeIndex];
+    if (!node.textNode.isConnected || !container.contains(node.textNode)) continue;
+    // 조회 중 스트리밍/재렌더된 Text에 과거 위치의 매칭을 삽입하지 않는다.
+    if (node.textNode.textContent !== node.text) {
+      if (_isProcessing) scheduleProcessing();
+      continue;
+    }
+    const renderStart = performance.now();
+    const ready = node.entries.filter((e) => e.level);
     if (ready.length === 0) continue;
 
     renderBadges(node.textNode, ready);
     if (ready.some((e) => e.level === 'orange')) anyOrange = true;
+    syncDuration += performance.now() - renderStart;
+    if (shouldYieldDomWork(nodeIndex + 1, sliceStart)) {
+      maxSyncSliceMs = Math.max(maxSyncSliceMs, performance.now() - sliceStart);
+      await yieldToMainThread();
+      sliceStart = performance.now();
+    }
   }
+  maxSyncSliceMs = Math.max(maxSyncSliceMs, performance.now() - sliceStart);
   if (anyOrange) showOrangeToast();
+  return { syncDuration, maxSyncSliceMs, detected: totalDetected, unresolved: keysToLookup.length };
 }
 
 /**
@@ -584,15 +690,11 @@ function buildGreenEntries(data, parsed) {
         caseName: '',
         caseType: entryType || 'court',
         caseCode: caseCode || '',
-        trialType: '',
       };
 
-      if (row.length >= 2) entry.courtCode = row[1];
-      if (row.length >= 3 && typeof row[2] === 'number') entry.dateInt = row[2];
-      const nameIdx = (typeof row[2] === 'string') ? 2 : 3;
-      if (row.length > nameIdx && typeof row[nameIdx] === 'string') {
-        entry.caseName = row[nameIdx] || '';
-      }
+      entry.courtCode = row[1];
+      entry.dateInt = row[2];
+      entry.caseName = row[3] || '';
 
       greenEntries.push(entry);
     }
@@ -603,7 +705,7 @@ function buildGreenEntries(data, parsed) {
     greenEntries.push({
       serialNumber: '', courtCode: null, dateInt: null,
       caseName: '', caseType: entryType || 'court',
-      caseCode: caseCode || '', trialType: '',
+      caseCode: caseCode || '',
     });
   }
 
@@ -620,45 +722,42 @@ function buildGreenEntries(data, parsed) {
  * @param {Element} root
  * @returns {Text[]}
  */
-function collectTextNodes(root) {
-  const nodes = [];
-  const walker = document.createTreeWalker(
+function createTextWalker(root) {
+  return document.createTreeWalker(
     root,
     NodeFilter.SHOW_TEXT,
     {
       acceptNode(node) {
-        // 이미 처리된 노드 스킵
         const parent = node.parentElement;
         if (!parent) return NodeFilter.FILTER_REJECT;
-
-        // 편집 가능 영역 (프롬프트 입력창) 스킵
+        if (parent.closest('[data-message-role="user"], [data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"], [data-testid="user-message"], [role="article"][aria-labelledby^="user-message-"], user-query')) {
+          return NodeFilter.FILTER_REJECT;
+        }
         if (parent.isContentEditable) return NodeFilter.FILTER_REJECT;
         if (parent.closest('[contenteditable="true"], [contenteditable=""], textarea, [role="textbox"]')) {
           return NodeFilter.FILTER_REJECT;
         }
-
-        // 배지 내부 텍스트 스킵
         if (parent.closest('.bgae-badge')) return NodeFilter.FILTER_REJECT;
         if (parent.closest('#bupgogae-shadow-host')) return NodeFilter.FILTER_REJECT;
-
-        // 처리 완료 마킹된 부모 스킵
         if (parent.hasAttribute(PROCESSED_ATTR)) return NodeFilter.FILTER_REJECT;
-
-        // 빈 텍스트 스킵
         if (!node.textContent.trim()) return NodeFilter.FILTER_REJECT;
-
         return NodeFilter.FILTER_ACCEPT;
       },
     }
   );
-
-  while (walker.nextNode()) {
-    nodes.push(walker.currentNode);
-  }
-
-  return nodes;
 }
 
+function shouldYieldDomWork(processedCount, sliceStart) {
+  return processedCount % DOM_WORK_CHUNK_SIZE === 0 ||
+    performance.now() - sliceStart >= DOM_WORK_SLICE_MS;
+}
+
+function yieldToMainThread() {
+  if (globalThis.scheduler && typeof globalThis.scheduler.yield === 'function') {
+    return globalThis.scheduler.yield();
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 // ============================================================
 // 7. 배치 조회 래퍼
@@ -670,18 +769,20 @@ function collectTextNodes(root) {
  * @param {string[]} keys
  * @returns {Promise<{results: Object, courtMapByKey: Object}>}
  */
-async function batchLookup(keys) {
+async function batchLookup(keys, container = null) {
   if (keys.length === 0) return { results: {}, courtMapByKey: {} };
 
   // 분할 처리
   const allResults = {};
   const courtMapByKey = {};
   for (let i = 0; i < keys.length; i += MAX_BATCH_SIZE) {
+    // 이미 보낸 runtime message는 취소할 수 없다. detach 후 새 chunk/재시도를 멈춘다.
+    if (container && !container.isConnected) break;
     const chunk = keys.slice(i, i + MAX_BATCH_SIZE);
 
     const result = await new Promise((resolve) => {
       let settled = false;
-      // 에러/타임아웃 시 error: true 플래그로 렌더링 스킵 유도 (Orange 오탐 방지)
+      // 에러/타임아웃 시 error: true로 재시도 후 Gray 표시 (Orange 오탐 방지)
       const resolveFallback = () => {
         const fallback = {};
         for (const k of chunk) {
@@ -759,29 +860,6 @@ async function batchLookup(keys) {
  * @param {Object} [options]
  * @returns {HTMLElement|null} 생성된 배지 DOM 엘리먼트
  */
-function renderBadge(textNode, raw, level, options = {}) {
-  try {
-    // 이미 처리된 텍스트 노드 확인
-    if (!textNode.parentNode) return null;
-    if (textNode.parentNode.closest && textNode.parentNode.closest('.bgae-badge')) return null;
-
-    // 텍스트 노드 내에 해당 문자열이 여전히 있는지 확인
-    if (!textNode.textContent.includes(raw)) return null;
-
-    const badge = window.bupgogae.renderPrecedentBadge(textNode, raw, level, options);
-
-    if (badge) {
-      // 렌더링 성공 → 부모에 처리 완료 마킹
-      // (정확히는 배지 자체가 마킹 역할)
-      console.debug(`[bupgogae] ${level.toUpperCase()} 렌더링: ${raw}`);
-      return badge;
-    }
-  } catch (err) {
-    console.error(`[bupgogae] 렌더링 실패 (${raw}):`, err);
-  }
-  return null;
-}
-
 /**
  * renderPrecedentBadges(다중 매칭) 래퍼.
  * 한 텍스트노드의 매칭들을 1회 분할 렌더 (M2 수정).
@@ -1016,6 +1094,14 @@ if (typeof module !== 'undefined' && module.exports) {
     collectOrangeCases,
     copyOrangeCases,
     showOrangeToast,
+    processAllResponses,
+    evaluateCircuitBreakerState,
+    yieldToMainThread,
+    CIRCUIT_THRESHOLD_MS,
+    CIRCUIT_MAX_STRIKES,
+    CIRCUIT_RECOVERY_STREAK,
+    CIRCUIT_FAST_MS,
+    DOM_WORK_CHUNK_SIZE,
     SETTLE_MS,
     SETTLE_MAX_DEFER_MS,
     /** 테스트 전용: settle 스케줄러가 호출할 처리 함수를 스파이로 교체. */
@@ -1028,11 +1114,17 @@ if (typeof module !== 'undefined' && module.exports) {
       _debounceTimer = null;
       _settlePendingSince = 0;
       _rescheduleCount = 0;
+      _processingPending = false;
+      _processingPaused = false;
     },
     /** 테스트 전용: 모듈 전역 상태(orange 토스트 1회 플래그 등) 초기화. */
     __resetForTest() {
       _hasShownOrangeToast = false;
       _showOrangeToast = true;
+    },
+    __setAdapterForTest(adapter) {
+      _adapter = adapter;
+      _runProcess = processAllResponses;
     },
     /** 테스트 전용: '미확인 사건번호 팝업 표시' 설정 주입. */
     __setShowOrangeToastForTest(v) {

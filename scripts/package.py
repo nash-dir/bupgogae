@@ -14,13 +14,16 @@ import fnmatch
 import hashlib
 import json
 import os
-import re
 import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "extension")
 DIST = os.path.join(ROOT, "dist")
+sys.path.insert(0, os.path.join(ROOT, 'pipeline'))
+from public_contract import derive_short_case_keys  # noqa: E402
+from manifest import validate_payload  # noqa: E402
+
 MIN_BUNDLE_CASES = 100_000
 REQUIRED_ENTRIES = {
     "manifest.json",
@@ -71,12 +74,10 @@ def validate_release_sources(manifest_version: str) -> tuple[list[str], dict]:
     try:
         with open(db_path, "rb") as f:
             db_bytes = f.read()
-        db = json.loads(db_bytes)
+        db = validate_payload(db_bytes, min_keys=MIN_BUNDLE_CASES)
         cases = db.get("cases")
         court_map = db.get("court_code_map")
         total = db.get("total")
-        if not re.fullmatch(r"\d{8}", str(db.get("version", ""))):
-            errors.append("bundle DB version은 YYYYMMDD여야 함")
         if not isinstance(cases, dict) or len(cases) < MIN_BUNDLE_CASES:
             errors.append(
                 f"bundle DB cases가 {MIN_BUNDLE_CASES:,}건 미만이거나 객체가 아님"
@@ -93,8 +94,9 @@ def validate_release_sources(manifest_version: str) -> tuple[list[str], dict]:
             bundle_sha256=hashlib.sha256(db_bytes).hexdigest(),
             bundle_bytes=len(db_bytes),
             bundle_court_map=court_map,
+            bundle_cases=cases,
         )
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         errors.append(f"필수 bundle DB 검증 실패: {exc}")
 
     meta_path = os.path.join(SRC, "data", "bupgogae_meta.json")
@@ -121,6 +123,13 @@ def validate_release_sources(manifest_version: str) -> tuple[list[str], dict]:
             errors.append("bundle meta court_code_map이 DB snapshot과 다름")
         if not isinstance(meta.get("case_code_map"), dict) or not meta["case_code_map"]:
             errors.append("bundle meta case_code_map이 비어 있음")
+        else:
+            expected_short_keys = derive_short_case_keys(
+                details.get("bundle_cases", {}), meta["case_code_map"]
+            )
+            if meta.get("short_case_keys") != expected_short_keys:
+                errors.append("bundle meta short_case_keys가 DB snapshot과 다름")
+            details["bundle_short_cases"] = len(expected_short_keys)
     except (OSError, KeyError, json.JSONDecodeError) as exc:
         errors.append(f"bundle meta 검증 실패: {exc}")
 

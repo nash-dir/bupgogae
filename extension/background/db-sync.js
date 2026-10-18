@@ -17,17 +17,20 @@
  */
 
 // 순수 검증·정제 유틸 로드 (테스트 가능한 무부수효과 로직).
-// isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity를 전역에 제공.
+// isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity /
+// deriveShortCaseKeys를 전역에 제공.
 importScripts('sync-utils.js');
 
 // ============================================================
 // 상수
 // ============================================================
 const API_BASE_URL = 'https://api.bup.live/bupgogae/';
-const DB_URL = `${API_BASE_URL}db.json.gz`;
+// Contract introduction version; daily data dates do not change this suffix.
+const DB_CONTRACT = 'v0.9.0';
+const DB_URL = `${API_BASE_URL}db-${DB_CONTRACT}.json.gz`;
 
 const ADAPTERS_URL = 'https://api.bup.live/bupgogae/adapters.json'; // 원격 어댑터 셀렉터 설정
-const MANIFEST_URL = 'https://api.bup.live/bupgogae/manifest.json'; // Drift 안전망 정답지
+const MANIFEST_URL = `${API_BASE_URL}manifest-${DB_CONTRACT}.json`; // 계약별 commit marker
 const BUNDLED_DB_URL = 'data/db.json'; // 로컬 디버깅용 폴백
 const DB_NAME = 'bupgogae';
 const DB_VERSION = 2;
@@ -75,6 +78,7 @@ const DRIFT = {
   MANIFEST_TIMEOUT_MS: 10_000,          // manifest fetch 타임아웃
 };
 const DRIFT_STATE_KEY = 'bupgogae_drift_state'; // {lastCheckAt, strikes, lastResult}
+const META_GENERATION_KEY = 'bupgogae_meta_generation';
 
 // staging 중 idle DB 커넥션 닫기 방지 플래그
 let _syncActive = false;
@@ -87,7 +91,8 @@ let _adapterFetchInFlight = null;
 // sync와 drift가 동시에 요구하는 commit manifest 요청도 합친다.
 let _manifestFetchInFlight = null;
 
-// isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity는
+// isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity /
+// deriveShortCaseKeys는
 // sync-utils.js(importScripts)에서 전역으로 제공됨.
 
 // ============================================================
@@ -235,7 +240,8 @@ async function getActiveStoreName(db) {
 async function readActiveSnapshotMetadata(db, activeStore = null) {
   const storeName = activeStore || await getActiveStoreName(db);
   if (storeName === STORE_CASES_LEGACY) {
-    const [version, totalCount, contentHash, lastSuccessAt, lastSynced, courtCodeMap] =
+    const [version, totalCount, contentHash, lastSuccessAt, lastSynced, courtCodeMap,
+      shortCaseKeys] =
       await Promise.all([
         dbGet(db, STORE_META, 'local_ver').catch(() => null),
         dbGet(db, STORE_META, 'total_count').catch(() => null),
@@ -243,6 +249,7 @@ async function readActiveSnapshotMetadata(db, activeStore = null) {
         dbGet(db, STORE_META, 'last_success_at').catch(() => null),
         dbGet(db, STORE_META, 'last_synced').catch(() => null),
         dbGet(db, STORE_META, 'court_code_map').catch(() => null),
+        dbGet(db, STORE_META, 'short_case_keys').catch(() => null),
       ]);
     let etag = null;
     try {
@@ -256,6 +263,7 @@ async function readActiveSnapshotMetadata(db, activeStore = null) {
       lastSuccessAt: lastSuccessAt ?? null,
       lastSynced: lastSynced ?? null,
       courtCodeMap: courtCodeMap ?? null,
+      shortCaseKeys: Array.isArray(shortCaseKeys) ? shortCaseKeys : null,
       etag: typeof etag === 'string' ? etag : null,
       storeName,
       legacy: true,
@@ -294,7 +302,8 @@ function dbCount(db, storeName) {
  * @param {IDBDatabase} db
  * @param {string} storeName
  * @param {{version: string, totalCount: number, contentHash?: string|null,
- *          lastSuccessAt?: number|null, courtCodeMap?: Object, etag?: string|null}} metadata
+ *          lastSuccessAt?: number|null, courtCodeMap?: Object,
+ *          shortCaseKeys?: string[], etag?: string|null}} metadata
  * @returns {Promise<void>}
  */
 function activateSnapshot(db, storeName, metadata) {
@@ -303,6 +312,7 @@ function activateSnapshot(db, storeName, metadata) {
     const store = tx.objectStore(STORE_META);
     const snapshotMetadata = {
       version: metadata.version,
+      caseScope: 2,
       totalCount: metadata.totalCount,
       lastSynced: new Date().toISOString(),
       contentHash: metadata.contentHash ?? null,
@@ -311,6 +321,9 @@ function activateSnapshot(db, storeName, metadata) {
       courtCodeMap: metadata.courtCodeMap && typeof metadata.courtCodeMap === 'object'
         ? metadata.courtCodeMap
         : null,
+      shortCaseKeys: Array.isArray(metadata.shortCaseKeys)
+        ? metadata.shortCaseKeys.slice()
+        : [],
     };
 
     // A/B의 데이터와 메타는 같은 snapshot identity로 결합한다. 전역 local_ver 등은
@@ -330,7 +343,8 @@ function activateSnapshot(db, storeName, metadata) {
  * @param {IDBDatabase} db
  * @param {Object} data
  * @param {{version: string, totalCount: number, contentHash?: string|null,
- *          lastSuccessAt?: number|null, courtCodeMap?: Object, etag?: string|null}} metadata
+ *          lastSuccessAt?: number|null, courtCodeMap?: Object,
+ *          shortCaseKeys?: string[], etag?: string|null}} metadata
  * @param {{chunkSize?: number, afterChunk?: Function}} [opts]
  * @returns {Promise<{count: number, activeStore: string, previousStore: string}>}
  */
@@ -358,13 +372,16 @@ async function stageAndActivateSnapshot(db, data, metadata, opts = {}) {
 
     await activateSnapshot(db, stagingStore, metadata);
 
-    // v1 legacy store는 기존 사용자 데이터와 migration 복구 원본이므로 절대 지우지
-    // 않는다. (DB schema version 때문에 구 확장 바이너리 rollback 호환을 뜻하지는
-    // 않는다.) v2 이후의 A/B snapshot만 서로 recycle한다.
-    // pointer 전환 뒤의 A/B 정리는 best-effort다.
-    if (previousStore !== STORE_CASES_LEGACY && previousStore !== stagingStore) {
+    // 검증된 snapshot 전환 뒤에만 이전 데이터를 정리한다. 실패한 설치에서는
+    // legacy를 포함한 active 원본을 보존한다.
+    if (previousStore !== stagingStore) {
       dbClear(db, previousStore).catch((err) => {
         console.warn(`[bupgogae] 이전 snapshot 정리 실패 (${previousStore}):`, err.message);
+      });
+    }
+    if (previousStore !== STORE_CASES_LEGACY) {
+      dbClear(db, STORE_CASES_LEGACY).catch((err) => {
+        console.warn('[bupgogae] legacy snapshot 정리 실패:', err.message);
       });
     }
     return { count: stagedCount, activeStore: stagingStore, previousStore };
@@ -373,6 +390,26 @@ async function stageAndActivateSnapshot(db, data, metadata, opts = {}) {
     throw err;
   } finally {
     _syncActive = false;
+  }
+}
+
+/** 열린 content script가 snapshot 결합 메타를 즉시 다시 읽도록 알린다. */
+async function announceMetaGeneration(metadata, installed) {
+  try {
+    await chrome.storage.local.set({
+      [META_GENERATION_KEY]: {
+        version: metadata.version,
+        activeStore: installed.activeStore,
+        contentHash: metadata.contentHash ?? null,
+        shortCaseCount: Array.isArray(metadata.shortCaseKeys)
+          ? metadata.shortCaseKeys.length
+          : 0,
+        changedAt: Date.now(),
+      },
+    });
+  } catch (err) {
+    // 데이터/pointer 전환은 이미 성공했다. 알림 실패는 다음 페이지 로드에서 회복한다.
+    console.warn('[bupgogae] snapshot 메타 갱신 알림 실패:', err?.message);
   }
 }
 
@@ -477,55 +514,68 @@ async function fetchDB(url, cachedETag = null) {
 // ============================================================
 
 /**
- * Core 키 수 조회 — 전체 count에서 DLC 키(TX*, KP*)를 제외.
- * buildFetchPlan/shouldLoadBundled/evaluateDrift의 건강 판정 기준값.
- * @param {IDBDatabase} db
- * @returns {Promise<number>}
- */
-function countCoreKeys(db) {
-  return new Promise((resolve, reject) => {
-    const availableStores = SNAPSHOT_STORES.filter((name) => db.objectStoreNames.contains(name));
-    const tx = db.transaction([STORE_META, ...availableStores], 'readonly');
-    let total = 0, taxCount = 0, patentCount = 0;
-    const RANGE_END = String.fromCharCode(0xFFFF); // 'TX'~'TX￿' 키 범위 상한
-    const activeReq = tx.objectStore(STORE_META).get(ACTIVE_STORE_KEY);
-    activeReq.onsuccess = () => {
-      const candidate = activeReq.result;
-      const storeName = availableStores.includes(candidate) ? candidate : STORE_CASES_LEGACY;
-      const store = tx.objectStore(storeName);
-      const reqTotal = store.count();
-      reqTotal.onsuccess = () => { total = reqTotal.result; };
-      const reqTax = store.count(IDBKeyRange.bound('TX', 'TX' + RANGE_END));
-      reqTax.onsuccess = () => { taxCount = reqTax.result; };
-      const reqPatent = store.count(IDBKeyRange.bound('KP', 'KP' + RANGE_END));
-      reqPatent.onsuccess = () => { patentCount = reqPatent.result; };
-    };
-
-    tx.oncomplete = () => resolve(total - taxCount - patentCount);
-    tx.onerror = () => reject(new Error(`countCoreKeys failed: ${tx.error}`));
-  });
-}
-
-/**
  * 동기화/드리프트 판정에 필요한 로컬 상태 스냅샷.
  * @returns {Promise<{localVer, contentHash, lastSuccessAt, coreCount}>}
  */
 async function readLocalSyncState() {
   const db = await getCachedDB();
-  const activeStore = await getActiveStoreName(db);
-  const [metadata, coreCount] = await Promise.all([
-    readActiveSnapshotMetadata(db, activeStore).catch(() => null),
-    countCoreKeys(db).catch(() => 0),
-  ]);
+  // pointer・metadata・physical count를 한 readonly snapshot에서 읽는다.
+  const state = await new Promise((resolve, reject) => {
+    const stores = SNAPSHOT_STORES.filter(name => db.objectStoreNames.contains(name));
+    const tx = db.transaction([STORE_META, ...stores], 'readonly');
+    const meta = tx.objectStore(STORE_META);
+    let activeStore = STORE_CASES_LEGACY;
+    let metadata = null;
+    let total = 0;
+    const active = meta.get(ACTIVE_STORE_KEY);
+    active.onsuccess = () => {
+      if (stores.includes(active.result)) activeStore = active.result;
+      const store = tx.objectStore(activeStore);
+      const count = store.count();
+      count.onsuccess = () => { total = count.result; };
+      if (activeStore === STORE_CASES_LEGACY) {
+        metadata = {};
+        for (const [key, field] of Object.entries({
+          local_ver: 'version', total_count: 'totalCount', content_hash: 'contentHash',
+          last_success_at: 'lastSuccessAt',
+        })) {
+          const req = meta.get(key);
+          req.onsuccess = () => { metadata[field] = req.result ?? null; };
+        }
+      } else {
+        const req = meta.get(`${SNAPSHOT_META_PREFIX}${activeStore}`);
+        req.onsuccess = () => {
+          const value = req.result;
+          if (value && typeof value === 'object' && !Array.isArray(value) &&
+              typeof value.version === 'string' && Number.isSafeInteger(value.totalCount) &&
+              value.totalCount >= 0) metadata = value;
+        };
+      }
+    };
+    tx.oncomplete = () => resolve({
+      activeStore, metadata, coreCount: total, physicalTotalCount: total,
+    });
+    tx.onerror = () => reject(new Error(`readLocalSyncState failed: ${tx.error}`));
+    tx.onabort = () => reject(new Error(`readLocalSyncState aborted: ${tx.error}`));
+  });
+  const { activeStore, metadata, coreCount, physicalTotalCount } = state;
+  let legacyETag = null;
+  if (activeStore === STORE_CASES_LEGACY) {
+    try {
+      ({ bupgogae_etag: legacyETag = null } = await chrome.storage.local.get('bupgogae_etag'));
+    } catch {}
+  }
   return {
     localVer: metadata?.version ?? null,
     contentHash: metadata?.contentHash ?? null,
     lastSuccessAt: metadata?.lastSuccessAt ?? null,
-    etag: metadata?.etag ?? null,
+    etag: activeStore === STORE_CASES_LEGACY
+      ? (typeof legacyETag === 'string' ? legacyETag : null) : metadata?.etag ?? null,
     totalCount: metadata?.totalCount ?? null,
     activeStore,
-    snapshotMetadataValid: metadata !== null,
+    snapshotMetadataValid: metadata !== null && metadata.caseScope === 2,
     coreCount,
+    physicalTotalCount,
   };
 }
 
@@ -579,8 +629,8 @@ async function runSyncDatabase(opts = {}) {
     let manifest = opts.validatedManifest;
     if (manifest) {
       const validation = validateManifest(manifest);
-      if (!validation.ok) {
-        const err = new Error(`manifest 스키마 불량: ${validation.error}`);
+      if (!validation.ok || manifest.contract !== DB_CONTRACT) {
+        const err = new Error(`manifest 스키마 불량: ${validation.error || 'DB 계약 불일치'}`);
         err.outcome = 'integrity_failed';
         throw err;
       }
@@ -631,6 +681,34 @@ async function doSyncDatabase({ force, manifest }) {
     local = { localVer: null, contentHash: null, lastSuccessAt: null, coreCount: 0 };
   }
 
+  // The validated manifest already proves the remote version. A complete,
+  // validated newer snapshot must not download an older wire format just to
+  // rediscover that downgrading is forbidden. Bootstrap from the current bundle
+  // when it is newer, using the same full validation and atomic staging gate.
+  const healthyAhead = (state) => state.snapshotMetadataValid === true &&
+    validateVersionDate(state.localVer).ok && state.localVer > manifest.core.version &&
+    Number.isSafeInteger(state.totalCount) && state.totalCount >= MIN_KEYS_CORE &&
+    state.totalCount === state.physicalTotalCount;
+  if (!healthyAhead(local)) {
+    try {
+      const response = await fetch(chrome.runtime.getURL('data/bupgogae_meta.json'));
+      if (response.ok) {
+        const meta = await response.json();
+        const version = typeof meta.version === 'string' ? meta.version.replace(/\./g, '') : '';
+        if (validateVersionDate(version).ok && version > manifest.core.version) {
+          await maybeLoadBundledDB();
+          local = await readLocalSyncState();
+        }
+      }
+    } catch { /* An unavailable/bad bundle cannot authorize skipping remote validation. */ }
+  }
+  if (healthyAhead(local)) {
+    return {
+      success: true, outcome: 'downgrade_blocked', version: local.localVer,
+      reason: `서버(${manifest.core.version})보다 최신인 검증된 로컬 DB(${local.localVer}) 유지`,
+    };
+  }
+
   // ETag도 active snapshot metadata에 결합한다. 전역 storage ETag는 legacy에서만
   // readActiveSnapshotMetadata가 가져오므로 v1↔v2 전환 시 상태가 섞이지 않는다.
   const cachedETag = local.etag;
@@ -653,7 +731,7 @@ async function doSyncDatabase({ force, manifest }) {
     // 버전만 같은 재게시(hash 변경)나 부분/이전 snapshot이면 반드시 전체 다운로드한다.
     const localMatchesManifest = local.localVer === manifest.core.version &&
       local.contentHash === manifest.core.sha256 &&
-      local.coreCount === manifest.core.total;
+      local.physicalTotalCount === manifest.core.total && local.snapshotMetadataValid;
     if (!localMatchesManifest) {
       conditional = false;
       plan.reasons.push('manifest_mismatch');
@@ -679,9 +757,12 @@ async function doSyncDatabase({ force, manifest }) {
   const { data, etag, notModified, contentHash } = fetched;
 
   if (notModified) {
+    // 요청 중 다른 설치가 활성화됐을 수 있으므로 현재 snapshot을 다시 확인한다.
+    local = await readLocalSyncState();
     const localMatchesManifest = local.localVer === manifest.core.version &&
       local.contentHash === manifest.core.sha256 &&
-      local.coreCount === manifest.core.total;
+      local.physicalTotalCount === manifest.core.total && local.snapshotMetadataValid &&
+      local.coreCount >= MIN_KEYS_CORE;
     if (!localMatchesManifest) {
       return {
         success: false,
@@ -747,16 +828,21 @@ async function doSyncDatabase({ force, manifest }) {
 
   // ── Step 3~5: 비활성 store staging/검증 → active pointer 전환 → ETag 저장 ──
   try {
+    const staticMeta = await loadStaticMetadata();
+    const shortCaseKeys = deriveShortCaseKeys(data.cases, staticMeta.case_code_map);
     const db = await getCachedDB();
     const version = data.version;
-    const installed = await stageAndActivateSnapshot(db, data.cases, {
+    const snapshotMetadata = {
       version,
       totalCount: data.total,
       contentHash,
       lastSuccessAt: Date.now(),
       courtCodeMap: data.court_code_map,
+      shortCaseKeys,
       etag,
-    });
+    };
+    const installed = await stageAndActivateSnapshot(db, data.cases, snapshotMetadata);
+    await announceMetaGeneration(snapshotMetadata, installed);
     const count = installed.count;
     console.log(`[bupgogae] Core DB snapshot 전환: ${count}건, store=${installed.activeStore}`);
     if (data.court_code_map) {
@@ -926,8 +1012,8 @@ async function runFetchValidatedManifest() {
   }
 
   const validation = validateManifest(manifest);
-  if (!validation.ok) {
-    const err = new Error(`manifest 스키마 불량: ${validation.error}`);
+  if (!validation.ok || manifest.contract !== DB_CONTRACT) {
+    const err = new Error(`manifest 스키마 불량: ${validation.error || 'DB 계약 불일치'}`);
     err.outcome = 'integrity_failed';
     throw err;
   }
@@ -1120,6 +1206,21 @@ function maybeLoadBundledDB() {
 
 async function doMaybeLoadBundledDB() {
   try {
+    // bundle 파일을 직접 읽는다. storage cache의 version은 확장 업데이트 후 stale일 수 있다.
+    // meta가 없거나 잘못되면 기존 full payload 검증 경로로 내려간다.
+    try {
+      const metaRes = await fetch(chrome.runtime.getURL('data/bupgogae_meta.json'));
+      if (metaRes.ok) {
+        const bundledMeta = await metaRes.json();
+        if (typeof bundledMeta.version === 'string' &&
+            /^(?:\d{8}|\d{4}\.\d{2}\.\d{2})$/.test(bundledMeta.version)) {
+          const bundledVersion = bundledMeta.version.replace(/\./g, '');
+          const local = await readLocalSyncState();
+          const gate = shouldLoadBundled(bundledVersion, local, { minCoreKeys: MIN_KEYS_CORE });
+          if (!gate.load) return;
+        }
+      }
+    } catch { /* 사전 gate 실패는 payload 설치 검증을 생략하지 않는다. */ }
     const url = chrome.runtime.getURL(BUNDLED_DB_URL);
     const res = await fetch(url);
     if (!res.ok) {
@@ -1146,6 +1247,8 @@ async function doMaybeLoadBundledDB() {
     const gate = shouldLoadBundled(String(data.version || 'bundled'), {
       localVer: local.localVer,
       coreCount: local.coreCount,
+      totalCount: local.totalCount,
+      snapshotMetadataValid: local.snapshotMetadataValid,
     }, { minCoreKeys: MIN_KEYS_CORE });
     if (!gate.load) {
       console.log(`[bupgogae] 번들 폴백 게이트 차단 (${gate.reason}) — 로컬 DB 보존`);
@@ -1155,15 +1258,20 @@ async function doMaybeLoadBundledDB() {
 
     const db = await getCachedDB();
     const version = data.version || 'bundled';
+    const staticMeta = await loadStaticMetadata();
+    const shortCaseKeys = deriveShortCaseKeys(data.cases, staticMeta.case_code_map);
     // 번들도 inactive store에 완성한 뒤 전환한다. R2 성공 이력은 기록하지 않는다.
-    const installed = await stageAndActivateSnapshot(db, data.cases, {
+    const snapshotMetadata = {
       version,
       totalCount: data.total,
       contentHash: null,
       lastSuccessAt: null,
       courtCodeMap: data.court_code_map,
+      shortCaseKeys,
       etag: null,
-    });
+    };
+    const installed = await stageAndActivateSnapshot(db, data.cases, snapshotMetadata);
+    await announceMetaGeneration(snapshotMetadata, installed);
     const count = installed.count;
 
     console.log(`[bupgogae] ✅ 번들 DB 로드 완료: ${count}건, ver=${version}`);
@@ -1631,22 +1739,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // ── 비상 정지 (Circuit Breaker) 수신부 ──
-  if (message.type === 'EMERGENCY_DISABLE') {
-    console.error('[bupgogae] 🚨 서킷 브레이커: EMERGENCY_DISABLE 수신. 부하 방지를 위해 글로벌 비활성화를 실행합니다.');
-    chrome.storage.local.set({ bupgogae_disabled_global: true }, () => {
-      // 모든 활성 탭 아이콘 배지를 ERR로 무조건 업데이트
-      chrome.tabs.query({}, (tabs) => {
-        for (const tab of tabs) {
-          chrome.action.setBadgeText({ text: 'ERR', tabId: tab.id });
-          chrome.action.setBadgeBackgroundColor({ color: '#ef4444', tabId: tab.id });
-        }
-      });
-      sendResponse({ success: true });
-    });
-    return true;
-  }
-
   // ── 메타데이터 요청 (Content Script → case_code_map 전달) ──
   if (message.type === 'GET_META') {
     getMetadata()
@@ -1692,48 +1784,136 @@ async function getSyncStatus() {
  * 서버에서 최초 로드 후 chrome.storage.local에 캐시.
  * @returns {Promise<Object>}
  */
-async function getMetadata() {
-  // 먼저 로컬 캐시 확인
-  const cached = await chrome.storage.local.get(['bupgogae_meta', 'bupgogae_court_map']);
+let _metadataInFlight = null;
 
-  // 정적 번들 메타 로드
-  let meta;
-  if (cached.bupgogae_meta) {
-    meta = cached.bupgogae_meta;
-  } else {
-    try {
-      const url = chrome.runtime.getURL('data/bupgogae_meta.json');
-      const res = await fetch(url);
-      meta = await res.json();
-      await chrome.storage.local.set({ bupgogae_meta: meta });
-      console.log('[bupgogae] ✅ 번들 메타데이터 로드 완료');
-    } catch (bundledErr) {
-      console.error('[bupgogae] 번들 메타 로드 실패:', bundledErr);
-      meta = { case_code_map: {}, court_code_map: {} };
-    }
-  }
+function getMetadata() {
+  if (_metadataInFlight) return _metadataInFlight;
+  _metadataInFlight = doGetMetadata().finally(() => { _metadataInFlight = null; });
+  return _metadataInFlight;
+}
+
+/** pointer・map・canonical을 같은 transaction에서 읽고, 이행도 같은 snapshot에 쓴다. */
+function readCanonicalSnapshot(db, caseCodeMap, migrate = false) {
+  return new Promise((resolve, reject) => {
+    const stores = SNAPSHOT_STORES.filter(name => db.objectStoreNames.contains(name));
+    const tx = db.transaction([STORE_META, ...stores], migrate ? 'readwrite' : 'readonly');
+    const metaStore = tx.objectStore(STORE_META);
+    let storeName = STORE_CASES_LEGACY;
+    let metadata = null;
+    const finishMetadata = () => {
+      if (!metadata || Array.isArray(metadata.shortCaseKeys) || !migrate) return;
+      const keys = tx.objectStore(storeName).getAllKeys();
+      keys.onsuccess = () => {
+        const shortCaseKeys = deriveShortCaseKeys(keys.result, caseCodeMap);
+        metadata = { ...metadata, shortCaseKeys };
+        if (storeName === STORE_CASES_LEGACY) {
+          metaStore.put(shortCaseKeys, 'short_case_keys');
+        } else {
+          metaStore.put(metadata, `${SNAPSHOT_META_PREFIX}${storeName}`);
+        }
+      };
+    };
+    const active = metaStore.get(ACTIVE_STORE_KEY);
+    active.onsuccess = () => {
+      if (stores.includes(active.result)) storeName = active.result;
+      if (storeName === STORE_CASES_LEGACY) {
+        metadata = {};
+        const fields = {
+          local_ver: 'version', content_hash: 'contentHash',
+          court_code_map: 'courtCodeMap', short_case_keys: 'shortCaseKeys',
+        };
+        for (const [key, field] of Object.entries(fields)) {
+          const request = metaStore.get(key);
+          request.onsuccess = () => {
+            metadata[field] = request.result ?? null;
+            if (field === 'shortCaseKeys') finishMetadata();
+          };
+        }
+      } else {
+        const request = metaStore.get(`${SNAPSHOT_META_PREFIX}${storeName}`);
+        request.onsuccess = () => {
+          const value = request.result;
+          if (value && typeof value === 'object' && !Array.isArray(value) &&
+              typeof value.version === 'string' && Number.isSafeInteger(value.totalCount) &&
+              value.totalCount >= 0) {
+            metadata = value;
+            finishMetadata();
+          }
+        };
+      }
+    };
+    tx.oncomplete = () => resolve({ storeName, metadata, legacy: storeName === STORE_CASES_LEGACY });
+    tx.onerror = () => reject(new Error(`readCanonicalSnapshot failed: ${tx.error}`));
+    tx.onabort = () => reject(new Error(`readCanonicalSnapshot aborted: ${tx.error}`));
+  });
+}
+
+async function doGetMetadata() {
+  const cached = await chrome.storage.local.get(['bupgogae_meta', 'bupgogae_court_map']);
+  let meta = await loadStaticMetadata(cached.bupgogae_meta);
 
   // snapshot 전환과 같은 transaction에 저장된 map을 우선 사용한다.
   let activeCourtMap = null;
-  let activeIsLegacy = true;
+  let activeShortCaseKeys = null;
+  let activeIsLegacy = false;
+  let activeSnapshot = null;
   try {
     const db = await getCachedDB();
-    const activeStore = await getActiveStoreName(db);
-    activeIsLegacy = activeStore === STORE_CASES_LEGACY;
-    const snapshotMetadata = await readActiveSnapshotMetadata(db, activeStore);
+    let snapshot = await readCanonicalSnapshot(db, meta.case_code_map);
+    if (snapshot.metadata && !Array.isArray(snapshot.metadata.shortCaseKeys)) {
+      snapshot = await readCanonicalSnapshot(db, meta.case_code_map, true);
+    }
+    activeIsLegacy = snapshot.legacy;
+    const snapshotMetadata = snapshot.metadata;
+    activeSnapshot = {
+      storeName: snapshot.storeName,
+      version: snapshotMetadata?.version ?? null,
+      contentHash: snapshotMetadata?.contentHash ?? null,
+    };
     activeCourtMap = snapshotMetadata?.courtCodeMap || null;
+    if (Array.isArray(snapshotMetadata?.shortCaseKeys)) {
+      activeShortCaseKeys = snapshotMetadata.shortCaseKeys;
+    }
   } catch {}
   // storage의 map은 구버전 legacy용 캐시다. A/B metadata가 없을 때 이를 섞으면
   // stale 데이터와 새 법원 코드가 결합되므로 A/B에서는 fail-closed한다.
   const courtMap = activeCourtMap || (activeIsLegacy ? cached.bupgogae_court_map : null);
-  if (courtMap) {
-    meta = {
-      ...meta,
-      court_code_map: { ...meta.court_code_map, ...courtMap },
-    };
-  }
+  meta = {
+    ...meta,
+    court_code_map: activeIsLegacy
+      ? { ...meta.court_code_map, ...(courtMap || {}) } : (courtMap || {}),
+    active_snapshot: activeSnapshot,
+  };
+
+  // A/B snapshot에서는 반드시 그 snapshot에 결합된 목록만 사용한다. legacy에서만
+  // bundled meta를 최후 fallback으로 허용하며, 없으면 4글자 탐지를 fail-closed한다.
+  meta = {
+    ...meta,
+    short_case_keys: activeShortCaseKeys ||
+      (activeIsLegacy && Array.isArray(meta.short_case_keys) ? meta.short_case_keys : []),
+  };
 
   return meta;
+}
+
+/** 정적 codec 메타를 storage cache 또는 extension bundle에서 읽는다. */
+async function loadStaticMetadata(cachedMeta = null) {
+  if (cachedMeta && cachedMeta.case_code_map) return cachedMeta;
+  if (cachedMeta === null) {
+    const cached = await chrome.storage.local.get('bupgogae_meta');
+    if (cached.bupgogae_meta?.case_code_map) return cached.bupgogae_meta;
+  }
+  try {
+    const url = chrome.runtime.getURL('data/bupgogae_meta.json');
+    const res = await fetch(url);
+    const meta = await res.json();
+    await chrome.storage.local.set({ bupgogae_meta: meta });
+    console.log('[bupgogae] ✅ 번들 메타데이터 로드 완료');
+    return meta;
+  } catch (bundledErr) {
+    console.error('[bupgogae] 번들 메타 로드 실패:', bundledErr);
+    return { case_code_map: {}, court_code_map: {}, short_case_keys: [] };
+  }
 }
 
 
@@ -1877,7 +2057,9 @@ if (typeof module !== 'undefined' && module.exports) {
     dbCount,
     getActiveStoreName,
     stageAndActivateSnapshot,
-    countCoreKeys,
+    readLocalSyncState,
+    maybeLoadBundledDB,
+    getMetadata,
     syncDatabase,
     fetchDB,
     fetchValidatedManifest,
@@ -1896,6 +2078,7 @@ if (typeof module !== 'undefined' && module.exports) {
       _driftCheckInFlight = null;
       _adapterFetchInFlight = null;
       _manifestFetchInFlight = null;
+      _metadataInFlight = null;
     },
     constants: {
       DB_NAME,

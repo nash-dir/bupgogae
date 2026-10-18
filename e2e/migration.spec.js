@@ -7,7 +7,9 @@ const os = require('os');
 const path = require('path');
 const { chromium, expect, test } = require('@playwright/test');
 
-const CURRENT_EXTENSION_PATH = path.resolve(__dirname, '..', 'extension');
+const CURRENT_EXTENSION_PATH = path.resolve(
+  process.env.BUPGOGAE_EXTENSION_PATH || path.resolve(__dirname, '..', 'extension'),
+);
 const LEGACY_CASE_KEY = '15Da6302';
 const LEGACY_CASE_RECORDS = [[235282, 1, 150521, 'legacy 판결']];
 const LEGACY_VERSION = '20260701';

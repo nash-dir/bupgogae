@@ -9,7 +9,37 @@ const {
   sanitizeAdaptersConfig,
   validateVersionDate,
   validateDbIntegrity,
+  deriveShortCaseKeys,
 } = require('../background/sync-utils.js');
+
+describe('deriveShortCaseKeys', () => {
+  const caseCodeMap = { 다: 'Da', 두: 'Du', 헌마: 'HM' };
+
+  test('한글 1글자 부호·1자리 일련번호인 실제 DB 키만 정렬해 반환', () => {
+    const cases = {
+      '99Da12': [[1]],
+      '89HM1': [[1]],
+      '99Da1': [[1]],
+      '89Du1': [[1]],
+      'TX25중1': [[1]],
+    };
+    expect(deriveShortCaseKeys(cases, caseCodeMap)).toEqual(['89Du1', '99Da1']);
+    expect(deriveShortCaseKeys(Object.keys(cases), caseCodeMap)).toEqual(['89Du1', '99Da1']);
+  });
+
+  test('입력 형식이 잘못되면 fail-closed', () => {
+    expect(deriveShortCaseKeys(null, caseCodeMap)).toEqual([]);
+    expect(deriveShortCaseKeys({}, null)).toEqual([]);
+    expect(deriveShortCaseKeys([null, 3], caseCodeMap)).toEqual([]);
+  });
+
+  test('현재 번들 파생값이 baked meta와 정확히 일치', () => {
+    const bundled = require('../data/db.json');
+    const meta = require('../data/bupgogae_meta.json');
+    expect(deriveShortCaseKeys(bundled.cases, meta.case_code_map))
+      .toEqual(meta.short_case_keys);
+  });
+});
 
 describe('isValidCssSelector', () => {
   test('정상 셀렉터 통과', () => {
@@ -222,6 +252,31 @@ describe('validateDbIntegrity', () => {
     expect(validateDbIntegrity(unknownReference).ok).toBe(false);
     unknownReference.cases['15Da1'][0][1] = 0;
     expect(validateDbIntegrity(unknownReference).ok).toBe(true);
+  });
+
+  test('법원·헌재만 허용하고 폐기된 비법원 payload는 거부한다', () => {
+    const base = {
+      version: '20260101', total: 1,
+      court_code_map: { '헌법재판소': 2, '특허법원': 3 },
+    };
+    expect(validateDbIntegrity({
+      ...base, cases: { '17HB323': [['D57476', 2, 0, '헌법소원']] },
+    }).ok).toBe(true);
+    expect(validateDbIntegrity({
+      ...base, cases: { '26Heo1': [[123, 3, 260101, '특허법원 판결']] },
+    }).ok).toBe(true);
+    expect(validateDbIntegrity({
+      ...base, cases: { '26Du1': [[123, 3, 260101, '과세처분 취소']] },
+    }).ok).toBe(true);
+    expect(validateDbIntegrity({
+      ...base, cases: { 'TX90서1671': [['T18430', 3, 900929, '조세심판']] },
+    }).ok).toBe(false);
+    expect(validateDbIntegrity({
+      ...base, cases: { '15Da1': [['T18430', 3, 900929, '잘못된 군']] },
+    }).ok).toBe(false);
+    expect(validateDbIntegrity({
+      ...base, cases: { 'TX90서1671': [['D57476', 2, 0, '잘못된 군']] },
+    }).ok).toBe(false);
   });
 
   test('현재 번들 전체 payload와 헌재 D-prefix serial을 전수 검증한다', () => {

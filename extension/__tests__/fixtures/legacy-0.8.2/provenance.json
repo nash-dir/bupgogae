@@ -1,0 +1,19 @@
+{
+  "commit": "d82a8757217fd655de29e717a6fb4b590b1b4af1",
+  "version": "0.8.2",
+  "scope": "Repository production baseline; store package identity unverified",
+  "files": {
+    "sync-utils.cjs": {
+      "source": "extension/background/sync-utils.js",
+      "sha256": "7d509be6bc78f42cb0f64d1f76948665d4f259c313080d7f2889603a9f9bb8c6"
+    },
+    "case-regex.cjs": {
+      "source": "extension/content/case-regex.js",
+      "sha256": "ce2c529bf421a4a4ed20bd56100cdd568d3e02030ccdaf4f1348ec6a075504b6"
+    },
+    "meta.json": {
+      "source": "extension/data/bupgogae_meta.json",
+      "sha256": "9d2a9a5a943e0cbc5c253b33699ed4bd5e44f7b92ac5fc52d2edef61156e13df"
+    }
+  }
+}

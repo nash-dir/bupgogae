@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'pipeline'))
+from public_contract import derive_short_case_keys  # noqa: E402
+from manifest import validate_payload  # noqa: E402
+
 DB_PATH = ROOT / "extension" / "data" / "db.json"
 META_PATH = ROOT / "extension" / "data" / "bupgogae_meta.json"
 
 
 def main() -> int:
     db_bytes = DB_PATH.read_bytes()
-    db = json.loads(db_bytes)
+    db = validate_payload(db_bytes)
     meta = json.loads(META_PATH.read_text(encoding="utf-8"))
 
     version = str(db["version"])
@@ -51,6 +56,7 @@ def main() -> int:
         "file_size_mb": round(len(db_bytes) / 1048576, 2),
     }
     meta["court_code_map"] = court_map
+    meta["short_case_keys"] = derive_short_case_keys(cases, meta["case_code_map"])
 
     temp_path = META_PATH.with_suffix(".json.tmp")
     with temp_path.open("w", encoding="utf-8", newline="\n") as stream:
@@ -60,6 +66,7 @@ def main() -> int:
     print(
         f"bundle meta refreshed: version={version} "
         f"cases={total:,} courts={len(court_map):,}"
+        f" short_cases={len(meta['short_case_keys']):,}"
     )
     return 0
 

@@ -119,6 +119,12 @@ describe('buildFetchPlan', () => {
 // ============================================================
 
 describe('shouldLoadBundled', () => {
+  test('범위 전환은 같은 버전의 검증된 번들로 복구하되 최신 로컬을 다운그레이드하지 않는다', () => {
+    const local = { localVer: '20261018', coreCount: 150_000, snapshotMetadataValid: false };
+    expect(shouldLoadBundled('20261018', local)).toEqual({ load: true, reason: 'scope_migration' });
+    expect(shouldLoadBundled('20261017', local).load).toBe(false);
+    expect(shouldLoadBundled('20261018', { ...local, snapshotMetadataValid: true }).load).toBe(false);
+  });
   test('로컬 DB가 비어있으면 번들 로드 허용 (최초 부트스트랩)', () => {
     const d = shouldLoadBundled('20260321', { localVer: null, coreCount: 0 });
     expect(d.load).toBe(true);

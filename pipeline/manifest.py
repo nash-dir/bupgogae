@@ -7,28 +7,28 @@ Drift 안전망용 manifest 빌더.
 [해시 대상 주의]
   클라이언트 fetch는 Content-Encoding: gzip을 자동 해제하므로,
   클라이언트가 해시하는 대상 = 비압축 바이트. 따라서 여기서도 반드시
-  업로드되는 비압축 db.json / db_tax.json 바이트를 그대로 해시한다.
+  업로드되는 비압축 db.json 바이트를 그대로 해시한다.
 """
 
 import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from public_contract import MAX_SAFE_INTEGER
 
 SCHEMA_VERSION = 1
-VERSION_RE = re.compile(r"^\d{8}$")  # YYYYMMDD
+VERSION_RE = re.compile(r"^[0-9]{8}$")  # YYYYMMDD, same ASCII contract as JavaScript
 CORE_CASE_KEY_RE = re.compile(
-    r"^(?:\d{2}(?:[A-Za-z][A-Za-z0-9]*|[가-힣]{1,4})\d+|"
-    r"(?:TX|KP)\d{2}[가-힣]{1,4}\d+)$"
+    r"^[0-9]{2}(?:[A-Za-z][A-Za-z0-9]*|[가-힣]{1,4})[0-9]+$"
 )
-CONSTITUTIONAL_SERIAL_RE = re.compile(r"^D\d+$")
+CONSTITUTIONAL_SERIAL_RE = re.compile(r"^D[0-9]+$")
 MIN_CORE_KEYS = 100_000
 MAX_CORE_KEYS = 10_000_000
 MAX_RAW_BYTES = 50 * 1024 * 1024
 
 
 def _is_integer(value) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, int) and not isinstance(value, bool) and abs(value) <= MAX_SAFE_INTEGER
 
 
 def _validate_version(version: object, label: str) -> str:
@@ -38,6 +38,8 @@ def _validate_version(version: object, label: str) -> str:
         parsed = datetime.strptime(version, "%Y%m%d").date()
     except ValueError as error:
         raise ValueError(f"{label}: version이 실제 달력 날짜가 아님") from error
+    if parsed.year < 2000:
+        raise ValueError(f"{label}: version year must be >= 2000")
 
     kst_today = datetime.now(timezone(timedelta(hours=9))).date()
     if parsed > kst_today + timedelta(days=1):
@@ -128,7 +130,7 @@ def validate_payload(
     # keys는 과거 payload에는 없을 수 있어 하위 호환상 선택 필드로 두되,
     # 존재한다면 total/cases와 정확히 같아야 한다.
     keys_field = data.get("keys")
-    if keys_field is not None and (
+    if "keys" in data and (
         not _is_integer(keys_field) or keys_field != key_count
     ):
         raise ValueError(
@@ -152,7 +154,7 @@ def validate_payload(
 
 
 def _build_entry(payload_bytes: bytes, label: str, min_keys: int) -> dict:
-    """비압축 DB payload 바이트 → manifest 엔트리 (core/tax 공용)."""
+    """비압축 판례 DB payload 바이트 → manifest 엔트리."""
     data = validate_payload(payload_bytes, label, min_keys=min_keys)
     version = data["version"]
     cases = data["cases"]
@@ -169,11 +171,9 @@ def _build_entry(payload_bytes: bytes, label: str, min_keys: int) -> dict:
 
 def build_manifest(
     core_bytes: bytes,
-    tax_bytes: bytes = None,
     built_at: datetime = None,
     *,
     min_core_keys: int = MIN_CORE_KEYS,
-    min_tax_keys: int = 1,
 ) -> dict:
     """비압축 DB 바이트들로부터 manifest dict 생성.
 
@@ -187,8 +187,6 @@ def build_manifest(
         "built_at": built_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "core": _build_entry(core_bytes, "core", min_core_keys),
     }
-    if tax_bytes is not None:
-        manifest["tax"] = _build_entry(tax_bytes, "tax", min_tax_keys)
     return manifest
 
 

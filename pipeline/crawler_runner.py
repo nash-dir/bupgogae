@@ -51,6 +51,11 @@ from api import (  # noqa: E402
 )
 from compress import compress_case_number  # noqa: E402
 from master_db import MasterDB  # noqa: E402
+from known_errors import CorrectionError, LIST_FIELDS, registry, fetch_source_body
+from law_normalization import (
+    normalize_decision_date, normalize_precedent_identity,
+    is_merged_case_number, expand_merged_case_numbers,
+)
 from manifest import MIN_CORE_KEYS as MIN_PUBLIC_CORE_KEYS  # noqa: E402
 from log_setup import get_logger  # noqa: E402
 from config import (  # noqa: E402
@@ -96,10 +101,22 @@ PIPELINE_REPORT_REASONS = {
     "partial_crawl",
 }
 BACKLOG_FAILURE_REASONS = {
+    "known_error_review_required",
+    "known_error_input_changed",
+    "known_error_source_changed",
+    "known_error_source_unavailable",
+    "known_error_invalid_registry",
+    "known_error_invalid_record",
+    "known_error_receipt_mismatch",
+    "quarantined_raw_changed_requires_review",
+    "merged_case_members_removed",
+    "unsupported_publication_serial",
+    "unreviewed_unexportable_case",
     "api_error_envelope",
     "bootstrap_not_attempted",
     "circuit_breaker_not_attempted",
     "configured_page_limit_exceeded",
+    "conflicting_case_court",
     "duplicate_case_serial",
     "empty_response",
     "initial_detc_scan_not_attempted",
@@ -223,8 +240,11 @@ def fetch_recent_ruling_dates() -> set[str]:
         )
         for item in items:
             raw_date = get_text(item, "선고일자")
-            if raw_date and len(raw_date) == 8 and raw_date.isdigit():
-                dates.add(raw_date)
+            normalized_date = normalize_decision_date(raw_date)
+            if raw_date and normalized_date is None:
+                raise RangeFetchError("recent_prec", page, "invalid_case_date")
+            if normalized_date:
+                dates.add(normalized_date)
         time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
     return dates
 
@@ -355,13 +375,6 @@ def require_healthy_baseline(
         if not {"idx_cases_date", "idx_cases_inserted"}.issubset(indexes):
             raise BaselineStateError("required_cases_indexes_missing")
 
-        count, oldest, newest = conn.execute(
-            "SELECT COUNT(*), MIN(date), MAX(date) FROM cases "
-            "WHERE serial NOT LIKE 'D%'"
-        ).fetchone()
-        detc_count = conn.execute(
-            "SELECT COUNT(*) FROM cases WHERE serial LIKE 'D%'"
-        ).fetchone()[0]
     except BaselineStateError:
         raise
     except (OSError, sqlite3.Error) as exc:
@@ -370,21 +383,12 @@ def require_healthy_baseline(
         if conn is not None:
             conn.close()
 
-    if count < BASELINE_MIN_PRECEDENTS:
-        raise BaselineStateError("insufficient_precedent_count")
-    if not oldest or oldest > BASELINE_EARLIEST_CUTOFF:
-        raise BaselineStateError("historical_coverage_missing")
-    recent_cutoff = f"{today.year - 2}0101"
-    if not newest or newest < recent_cutoff:
-        raise BaselineStateError("recent_coverage_missing")
-    if require_detc and detc_count < 1:
-        raise BaselineStateError("detc_coverage_missing")
-    return {
-        "precedent_count": count,
-        "detc_count": detc_count,
-        "oldest": oldest,
-        "newest": newest,
-    }
+    from baseline_health import core_coverage, require_coverage
+    try:
+        return require_coverage(core_coverage(db_path, today), minimum_precedents=BASELINE_MIN_PRECEDENTS,
+                                earliest_cutoff=BASELINE_EARLIEST_CUTOFF, today=today, require_detc=require_detc)
+    except ValueError as exc:
+        raise BaselineStateError(str(exc)) from exc
 
 
 def write_pipeline_report(
@@ -605,7 +609,7 @@ def save_failed_dates(
     }
     temp_path = path + ".tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
     os.replace(temp_path, path)
     precedent_count = sum(item.get("kind") != "detc" for item in deduped)
     detc_count = sum(item.get("kind") == "detc" for item in deduped)
@@ -789,6 +793,12 @@ def _required_numeric_serial(
 def _required_case_number(raw_number: str, source: str, page: int) -> str:
     if not raw_number:
         raise RangeFetchError(source, page, "missing_case_number")
+    if is_merged_case_number(raw_number):
+        try:
+            expand_merged_case_numbers(raw_number)
+        except ValueError as exc:
+            raise RangeFetchError(source, page, "invalid_case_number") from exc
+        return raw_number
     if compress_case_number(clean_case_number(raw_number)) is None:
         raise RangeFetchError(source, page, "invalid_case_number")
     return raw_number
@@ -801,20 +811,34 @@ def _precedent_case(item, date_range: str, page: int) -> dict:
         page=page,
         max_length=32,
     )
-    case_number = _required_case_number(
-        get_text(item, "사건번호"), date_range, page
-    )
-    case_date = get_text(item, "선고일자")
-    if not case_date:
+    try:
+        corrected = registry().resolve({k: get_text(item, k) for k in LIST_FIELDS}, fetch_source_body)
+    except CorrectionError as exc:
+        raise RangeFetchError(date_range, page, str(exc)) from exc
+    if corrected is not None:
+        start, separator, end = date_range.partition("~")
+        if not start <= corrected["date"] <= (end if separator else start):
+            raise RangeFetchError(date_range, page, "out_of_range_case_date")
+        return corrected
+    try:
+        number, court = normalize_precedent_identity(
+            get_text(item, "사건번호"), get_text(item, "법원명"),
+            get_text(item, "데이터출처명"),
+        )
+    except ValueError as exc:
+        raise RangeFetchError(date_range, page, "conflicting_case_court") from exc
+    case_number = _required_case_number(number, date_range, page)
+    raw_date = get_text(item, "선고일자")
+    if not raw_date:
         raise RangeFetchError(date_range, page, "missing_case_date")
-    if not _valid_date_string(case_date):
+    case_date = normalize_decision_date(raw_date)
+    if case_date is None:
         raise RangeFetchError(date_range, page, "invalid_case_date")
     start_date, separator, end_date = date_range.partition("~")
     if not separator:
         end_date = start_date
     if not start_date <= case_date <= end_date:
         raise RangeFetchError(date_range, page, "out_of_range_case_date")
-    court = get_text(item, "법원명")
     if not court:
         raise RangeFetchError(date_range, page, "missing_case_court")
     return {
@@ -942,10 +966,11 @@ def _fetch_detc_page(page: int) -> list[dict]:
         case_number = _required_case_number(
             get_text(item, "사건번호"), "detc", page
         )
-        decision_date = get_text(item, "종국일자")
+        raw_date = get_text(item, "종국일자")
+        decision_date = normalize_decision_date(raw_date) if raw_date else ""
         # 실제 헌재 원천에는 종국일자 공란이 존재한다. 다만 값이 있으면
         # 반드시 calendar date여야 하며, 잘못된 값은 기존 정상 행을 덮지 않는다.
-        if decision_date and not _valid_date_string(decision_date):
+        if decision_date is None:
             raise RangeFetchError("detc", page, "invalid_case_date")
         cases.append({
             "serial": f"D{raw_serial}",
@@ -956,18 +981,6 @@ def _fetch_detc_page(page: int) -> list[dict]:
         })
     if len({case["serial"] for case in cases}) != len(cases):
         raise RangeFetchError("detc", page, "duplicate_case_serial")
-    return cases
-
-
-def crawl_detc_pages(pages: list[int]) -> list[dict]:
-    """지정된 페이지들만 스캔 (sort=efdes)."""
-    cases = []
-    for page in pages:
-        page_cases = _fetch_detc_page(page)
-        if not page_cases and page > DETC_DAILY_PAGES:
-            break  # Zone B에서 빈 페이지 → 끝
-        cases.extend(page_cases)
-        time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
     return cases
 
 
@@ -1059,29 +1072,6 @@ def crawl_detc_scan(
     }
 
 
-def crawl_detc_full() -> list[dict]:
-    """헌재결정례 전량 수집 (최초 실행 시 1회, sort=efdes)."""
-    cases = []
-    page = 1
-    while True:
-        page_cases = _fetch_detc_page(page)
-        if not page_cases:
-            break
-        cases.extend(page_cases)
-        if page % 50 == 0:
-            log.info(f"  [detc] {page}페이지, {len(cases):,}건")
-        page += 1
-        time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
-    return cases
-
-
-
-
-
-# ════════════════════════════════════════════════════════════
-# 풀 DB 덤프
-# ════════════════════════════════════════════════════════════
-
 def _write_gzipped_json(payload: dict, output_path: str) -> float:
     """딥셔너리를 gzip JSON으로 저장. 파일 크기(MB) 반환."""
     json_bytes = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -1119,7 +1109,10 @@ def export_split_db(db: MasterDB, data_dir: str) -> float:
     version = datetime.now().strftime("%Y%m%d")
 
     # Core: 판례 + 헌재
-    core_data, core_skip = db.export_core()
+    try:
+        core_data, core_skip = db.export_core()
+    except ValueError as exc:
+        raise PublicationStateError("invalid_case_number_export") from exc
     core_keys = len(core_data)
     if core_keys < MIN_PUBLIC_CORE_KEYS:
         raise PublicationStateError("insufficient_core_keys")
@@ -1161,6 +1154,8 @@ def _safe_failure_reason(exc: Exception) -> str:
             exc.reason if exc.reason in BACKLOG_FAILURE_REASONS
             else "range_fetch_error"
         )
+    if isinstance(exc, ValueError) and str(exc) in BACKLOG_FAILURE_REASONS:
+        return str(exc)
     return "internal_error"
 
 
@@ -1441,16 +1436,17 @@ def execute_local_crawl(
         log.info("\n📦 DB 덤프 (Core)")
         try:
             core_mb = export_split_db(db, data_dir)
-        except PublicationStateError:
+        except PublicationStateError as exc:
             write_pipeline_report(
                 data_dir,
                 status="blocked",
-                reason="insufficient_public_payload",
+                reason=("insufficient_public_payload" if str(exc) == "insufficient_core_keys"
+                        else "artifact_validation_failed"),
                 db_total=after,
             )
             send_pipeline_alert(
                 "Publication Gate",
-                "사용자용 DB가 최소 key 기준을 충족하지 않아 게시 차단",
+                "사용자용 DB의 key 수 또는 레코드 변환 검증 실패로 게시 차단",
             )
             sys.exit(1)
         return {

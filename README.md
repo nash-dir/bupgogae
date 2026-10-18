@@ -10,12 +10,15 @@
 
 법률 답변의 판례 인용은 원문과 추가 자료로 직접 확인해야 합니다. 법고개는 사건번호 확인을 빠르게 시작할 수 있도록 보조하며, 판례의 진위나 AI 답변 전체의 정확성을 보장하지 않습니다.
 
+확인 범위는 **법원·헌법재판소 판례**입니다. 조세심판원·특허심판원 자료는 포함하지 않으며, 법원의 조세 사건과 특허법원 판결은 포함합니다.
+
 ## ✨ 주요 기능
 
-* **🚦 3단계 사건번호 표시**
+* **🚦 4상태 사건번호 표시**
   * 🟢 **DB에서 찾음**: 현재 활성 공개 DB에서 해당 사건번호를 찾음 (공개 일련번호 기반 원문 링크)
   * 🟠 **DB에서 찾지 못함**: 현재 로컬 DB에 해당 사건번호가 없음 (새 판례·비공개·DB 갱신 지연 가능)
-  * 🔴 **형식 오류**: 미래 연도, 법원(1945년)·헌법재판소(1988년) 설립 이전 등 사건번호 형식 검사 실패
+  * 🔴 **형식·지원 범위 경고**: 미래 연도, 0번, 현재 제품의 조회 연도 하한(법원 1945년·헌법재판소 1988년) 검사 실패. 법적 부존재 판정이 아님
+  * ⚪ **검증 미완료**: 시간 초과나 시스템 오류로 로컬 DB 조회를 완료하지 못함. DB 미확인과 구분
 * **🌐 멀티 LLM 플랫폼 지원 (어댑터 패턴 적용)**
   * ChatGPT (`chatgpt.com`)
   * Claude (`claude.ai`)
@@ -57,6 +60,16 @@
 
 이 프로젝트는 [GNU GPLv3](LICENSE.txt) 라이선스를 따릅니다.
 
+판례·헌재결정례 메타데이터의 제공 출처는 **법제처 국가법령정보센터의
+[국가법령정보 공동활용 Open API](https://open.law.go.kr/)**이며, 재판·결정의
+작성 기관은 각 법원과 헌법재판소입니다. 법고개는 이들 기관이 운영하거나
+판례의 진위·법적 효력을 보증하는 서비스가 아닙니다.
+
+법고개가 수행한 사건번호 정규화·검증된 오류 정정은 원천 자료 자체의 공식
+수정과 구분합니다. 원문·원본 필드와 정정 근거를 보존하며, 최종 내용은
+공공 출처의 원문을 확인해야 합니다. GPLv3 고지는 소프트웨어에 적용되며,
+제3자 자료의 권리까지 법고개가 새로 허락한다는 의미는 아닙니다.
+
 ```
 bupgogae
 Copyright 2026 nash-dir
@@ -73,12 +86,15 @@ Copyright 2026 nash-dir
 
 Case citations in AI answers still require direct review of the source. Bupgogae helps start that review; it does not guarantee authenticity, legal validity, or the accuracy of the surrounding answer.
 
+Coverage is limited to courts and the Constitutional Court. Court judgments on taxation and patent disputes remain included; administrative tribunal decisions are excluded.
+
 ## ✨ Key Features
 
-* **🚦 3-Level Case-Number Status**
-  * 🟢 **Found in DB**: the case number exists in the currently active public database (original-source link via public serial ID)
+* **🚦 4-State Case-Number Status**
+  * 🟢 **Found in DB**: the case number was found in the currently active public database (original-source link via public serial ID)
   * 🟠 **Not found in DB**: the current local database has no matching case number; this can also reflect a new, unavailable, or not-yet-synchronized record
-  * 🔴 **Format Error**: the case-number form fails structural checks such as future or pre-court dates
+  * 🔴 **Format/support-range warning**: the candidate fails a structural or current product-range check (future year, zero serial, or the lookup year floor); this is not a legal nonexistence finding
+  * ⚪ **Verification incomplete**: a timeout or system error prevented the local lookup from completing; this is not a DB miss
 * **🌐 Multi-LLM Platform Support (Site Adapter Pattern)**
   * ChatGPT (`chatgpt.com`)
   * Claude (`claude.ai`)
@@ -94,10 +110,10 @@ Case citations in AI answers still require direct review of the source. Bupgogae
   * When a platform's DOM changes break detection, the extension automatically fetches updated CSS selectors from the server (`adapters.json`).
   * Packaged selectors and the last saved configuration are used when the server is unreachable.
   * Only pure JSON data is fetched and validated against a strict CSS whitelist (MV3 CSP compliant).
-* **⚡ Ultra-Fast Local Matching**
-  * Hundreds of thousands of case metadata entries are compressed and synchronized to local IndexedDB, enabling an instant local lookup with zero per-citation API latency.
+* **⚡ Local Matching**
+  * Case metadata is compressed and synchronized to local IndexedDB, avoiding a per-citation external analysis request.
 * **🔒 Local Text Analysis**
-  * Prompt/response pattern matching and database lookup happen in the browser, and that text is not transmitted externally. Supporting network calls update the database/manifest/selectors and fetch an original document when requested by the user; see the [Privacy Policy](PRIVACY.md).
+  * Displayed-response pattern matching and database lookup happen in the browser, and that text is not transmitted externally. Supporting network calls update the database/manifest/selectors and fetch an original document when requested by the user; see the [Privacy Policy](PRIVACY.md).
 
 ## 🚀 Installation
 
@@ -137,7 +153,7 @@ The final implementation was reviewed, tested, and approved by the author.
 
 ### Problem
 
-Each LLM chatbot platform (ChatGPT, Claude, Gemini, Copilot, Perplexity, Grok, etc.) renders AI-generated responses in a unique DOM structure. A browser extension that detects hallucinated citations must navigate these heterogeneous DOMs without coupling its core detection logic to any single platform.
+Each LLM chatbot platform (ChatGPT, Claude, Gemini, Copilot, Perplexity, Grok, etc.) renders AI-generated responses in a unique DOM structure. A browser extension that locates case-number citations and compares them with a local public database must navigate these heterogeneous DOMs without coupling its core detection logic to any single platform.
 
 ### Solution
 
@@ -158,41 +174,41 @@ The extension implements a **Site Adapter Pattern** — a variant of the Strateg
 ```
 MutationObserver → settle (process after the response stops mutating)
     → adapter.findResponseContainers()     [adapter-specific]
-    → collectTextNodes(container)           [shared, filters editables]
+    → processContainer(container)           [TreeWalker, cooperative scan, filters editables]
     → extractCaseNumbers(text)              [shared, whitelist regex]
     → validateCaseNumber(parsed)            [shared, Red filter cascade]
     → compressCaseKey(parsed)               [shared, Hangul→ASCII]
     → chrome.runtime.sendMessage(LOOKUP_BATCH)  [shared, IPC to SW]
-    → renderPrecedentBadges(textNode)       [shared, one-pass: Green/Orange/Red]
+    → renderPrecedentBadges(textNode)       [shared, one-pass: Green/Orange/Red/Gray]
 ```
 
 > **Render timing (settle + single-pass).** Some platforms (e.g., Gemini, Copilot, Grok) re-render the response subtree while streaming, discarding externally injected badge nodes. To avoid flicker, the pipeline waits for the subtree to go quiet (a **settle** window) before processing, then renders once. Within a text node, all matches are split and badged in a **single pass** (`renderPrecedentBadges`), so case numbers listed across consecutive lines — which some platforms place in one text node — all appear together instead of one-per-cycle.
 
 ### Selector Resolution Algorithm
 
-The base class `findResponseContainers()` iterates through the selector array returned by `resolveResponseSelectors()` in priority order. For each selector, it queries the DOM via `document.querySelectorAll()`. The **first selector that returns any results** determines the container set for that scan cycle. This "first-match-wins" design allows adapters to specify increasingly broad fallback selectors without combinatorial explosion.
+The base class `findResponseContainers()` tries remote selectors followed by bundled selectors, skipping duplicates. It excludes explicit user messages, editable roots, and whole-page roots such as `main`. The first selector with usable response containers determines the set for that scan cycle. A stale remote selector that finds no usable replies cannot mask the shipped configuration.
 
 ### Remote Config — Dynamic Selector Updates
 
 Each LLM platform's frontend changes frequently, potentially invalidating hardcoded CSS selectors. The extension addresses this through a **Remote Config** mechanism:
 
 1. **Service Worker** periodically fetches `adapters.json` from the server (alongside the case law DB sync) and stores it in `chrome.storage.local`
-2. **`resolveResponseSelectors()`** checks remote config first, falling back to hardcoded selectors:
+2. **`findResponseContainers()`** checks remote config first, falling back to bundled selectors:
    ```
-   Priority:  Remote Config (server)  →  Hardcoded selectors (adapter class)
+   Priority:  Remote Config (server)  →  Bundled adapters.json
    ```
 3. **Auto-Fetch trigger** — if all selectors fail to match any DOM elements, the content script sends a one-time `FETCH_ADAPTERS` message to the Service Worker (throttled to once per page load to prevent infinite loops)
 4. **Security** — only pure JSON is fetched and parsed via `res.json()`; no `eval()`, `innerHTML`, or remote JS execution (MV3 CSP compliant)
 
-This design ensures the extension survives DOM changes without requiring a Chrome Web Store update, while the hardcoded selectors provide **offline resilience** when the server is unreachable.
+Remote configuration can deliver selector corrections without a Store release. Bundled selectors remain available offline. Changes to a service's response structure still require compatibility checks.
 
 ### Input Exclusion Filter
 
-The `collectTextNodes()` function uses a DOM `TreeWalker` with a custom `NodeFilter.acceptNode` callback that **rejects** text nodes whose parent element satisfies any of:
+The `createTextWalker()` filter used by `processContainer()` rejects text nodes inside editable areas, user messages, and extension badges. Editable exclusions include:
 - `parent.isContentEditable === true`
 - `parent.closest('[contenteditable="true"], [contenteditable=""], textarea, [role="textbox"]')` returns non-null
 
-This prevents the extension from injecting badges into prompt input areas, ensuring only AI-generated response text is scanned.
+The adapter selects response containers first. Explicit user message markers are excluded even when a broad site selector matches them. Selector compatibility still requires live review when a service changes its DOM.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -223,15 +239,16 @@ Naively querying a database for every potential case number extracted from LLM t
 
 ### Solution
 
-The extension implements a **Multi-Tier Pre-Database Filtering** system — a 3-level format-check cascade applied before any database query. The resulting Red / Orange / Green states report only format-check failure, current-local-DB miss, or current-local-DB hit; they are not confidence scores.
+The extension implements a **Multi-Tier Pre-Database Filtering** system — a 3-level format-check cascade applied before any database query. Red / Orange / Green / Gray report only format-check failure, current-local-DB miss, current-local-DB hit, or lookup-not-completed; they are not confidence scores.
 
-### 3-Class Output Taxonomy
+### 4-State Output Taxonomy
 
 | Class | Meaning | Determined By |
 |-------|---------|---------------|
-| 🔴 **Red** (Format Error) | Candidate failed a structural case-number check | Pre-DB cascade (zero latency) |
+| 🔴 **Red** (Format/support-range warning) | Candidate failed a structural or current product-range check; this does not prove legal nonexistence | Pre-DB cascade (zero latency) |
 | 🟠 **Orange** (Not found in local DB) | Format checks passed; no match in the currently active local DB | DB lookup: no match |
 | 🟢 **Green** (Found in local DB) | Match in the currently active public DB snapshot | DB lookup: match found |
+| ⚪ **Gray** (Verification incomplete) | Lookup did not complete; this is not a DB miss | Timeout or system error after retries |
 
 ### 3-Level Validation Cascade
 
@@ -240,12 +257,12 @@ Before any IndexedDB query, each candidate passes through this cascade **in stri
 | Level | Check | Rule | Example | Rationale |
 |-------|-------|------|---------|-----------|
 | 🔴 L1 | **Future year** | `fullYear > currentYear` | `2030다12345` | No case can exist in the future |
-| 🔴 L2 | **Pre-establishment** | `< 1945` (court), `< 1988` (헌재) | `1940다100`, `1987헌마1` | Courts established 1945; Constitutional Court 1988 |
+| 🔴 L2 | **Below product range** | `< 1945` (court), `< 1988` (헌재) | `1940다100`, `1987헌마1` | Current lookup-policy floor; not a legal nonexistence finding |
 | 🔴 L3 | **Zero serial** | `parseInt(serial) === 0` | `2020다0` | Serial numbers are 1-indexed |
 
 **Why there is no "invalid code" check in this cascade**: case-code validity is enforced *upstream*, at the extraction stage, not here. The whitelist extraction regex (see Core Concept below) only emits candidates whose code is in `case_code_map` (~159 registered types). An unregistered code — a hallucinated `뿡`, or another agency's code such as `부해` (labor commission) / `형제` (prosecution) — is therefore never extracted and receives **no badge at all**. That silence *is* the signal: the extension highlights only the citations it can actually reason about, rather than flagging every unknown token Red. Because all reachable candidates already carry a registered code, this cascade only needs to check the year and serial.
 
-**Key insight**: Red badges with strikethrough appear **instantly** (zero latency), while Green/Orange classifications require an asynchronous `LOOKUP_BATCH` IPC round-trip to the Service Worker.
+**Key insight**: Red badges with strikethrough appear before a database query, while Green/Orange classifications require an asynchronous `LOOKUP_BATCH` IPC round-trip. Gray is reserved for a lookup that still failed after retries.
 
 ### 2-Digit Year Normalization
 
@@ -294,11 +311,18 @@ At `initMeta()`, the extension sorts all ~159 case codes by length (descending) 
 // (?<![0-9]) — left boundary so a run of digits (phone/account numbers)
 //              isn't mis-split into a bogus 2-digit-year case number.
 _courtCaseRegex = new RegExp(
-  `(?<![0-9])((?:19|20)\\d{2}|\\d{2})(${sortedCodesPattern})(\\d{1,7})`, 'g'
+  `(?<![0-9])((?:19|20)\\d{2}|\\d{2})(${sortedCodesPattern})(\\d{1,7})(?![0-9])`, 'g'
 );
 ```
 
-This **whitelist approach** eliminates false positives from non-court case codes (e.g., `부해` from labor commissions, `형제` from prosecutors) at the extraction stage, rather than requiring a downstream Red filter. The same dynamic regex also covers Constitutional Court codes (`헌가`, `헌마`, …) since they live in `case_code_map`. The leading `(?<![0-9])` boundary prevents a digit run such as `010-1234-5678도1` or `3015다1234` from being mis-matched as `78도1` / `15다1234`.
+This **whitelist approach** eliminates false positives from non-court case codes (e.g., `부해` from labor commissions, `형제` from prosecutors) at the extraction stage, rather than requiring a downstream Red filter. The same dynamic regex also covers Constitutional Court codes (`헌가`, `헌마`, …) since they live in `case_code_map`. The leading `(?<![0-9])` and trailing `(?![0-9])` boundaries prevent surrounding digit runs from being truncated into a different case number.
+
+An additional snapshot-derived allowlist applies only to identifiers that are exactly four
+characters long (`YY` + one-Hangul case code + one-digit serial). Such a candidate is accepted
+only when its compressed key exists in the active DB snapshot. Isolated four-character text
+nodes are checked against an in-memory `Set` before regex execution; identifiers of five or
+more characters, including `89헌마1` and four-digit-year citations such as `2026헌가1`, keep
+the normal code-whitelist path.
 
 ---
 
@@ -336,6 +360,7 @@ User's Browser (prompt/response text stays in this local path)
 │  [IndexedDB Query] Single readonly transaction                   │
 │       │ found? ── yes → 🟢 Green badge (+ law.go.kr link)      │
 │       │            no → 🟠 Orange badge (manual check prompt)   │
+│       │         error → ⚪ Gray badge (verification incomplete) │
 │       ▼                                                          │
 │  [Badge Render] Inline highlight + tooltip with metadata         │
 │                                                                  │
@@ -410,10 +435,10 @@ The automatic update path downloads static public data and configuration. It doe
    └──────────────────────────┘            └──────────────────────────┘
 ```
 
-* **Full-DB deploy** — one gzip JSON object (~3 MB) contains the entire case law database
+* **Snapshot deploy** — one gzip JSON object (~3 MB) contains the complete currently published snapshot; this does not claim that the public source itself is exhaustive
 * **Atomic publication** — a content-addressed `objects/<sha256>.json.gz` is uploaded first, `manifest.json` commits that object second, and the legacy `db.json.gz` mirror is updated last. A failed manifest upload leaves old clients untouched; a failed mirror upload leaves new clients on the committed immutable object and old clients on their previous fixed-key snapshot.
 * **Hash-first caching** — an unchanged manifest hash skips the DB download; a downloaded DB must match the manifest SHA-256 before staging
-* **Bundled DB** — the full database ships with the extension for instant offline access on first install
+* **Bundled DB** — a published database snapshot ships with the extension for immediate local lookup on first install
 * **Snapshot staging** — each update is written in chunks to an inactive IndexedDB store and count-checked before a short metadata transaction switches the active pointer; the previous snapshot remains active on staging failure
 * **Non-destructive v1 migration** — existing users keep the legacy `cases` store active until the first complete v2 snapshot is ready
 * **Batch lookup** — content scripts read the active pointer and all requested keys in one IndexedDB readonly transaction, so a batch cannot mix old and new snapshots
@@ -507,7 +532,7 @@ extension/
 
 pipeline/
 ├── api.py                      # 법제처 API client
-├── compress.py                 # SQLite → compressed JSON converter
+├── compress.py                 # Shared case-number/date compression and code maps
 ├── master_db.py                # SQLite master DB with blacklist
 ├── crawler_runner.py               # Crawler orchestrator (date-modulus)
 ├── sync_state.py               # Local ↔ R2 serverless state synchronizer
@@ -534,16 +559,8 @@ To add support for a new chatbot in v0.8.0+, you only need to update two files.
 }
 ```
 
-2. Register the boilerplate adapter in `extension/content/adapters/registry.js`:
+2. Add a row to `SITE_DEFS` in `extension/content/adapters/registry.js`:
 ```javascript
-class NewSiteAdapter extends window.bupgogaeAdapters.SiteAdapter {
-  get siteId() { return 'newsite'; }
-  get displayName() { return 'New Site AI'; }
-}
-window.bupgogaeAdapters.NewSiteAdapter = NewSiteAdapter;
-
-const ADAPTER_MAP = {
-  // ...
-  'newsite.com': 'NewSiteAdapter',
-};
+{ adapterName: 'NewSiteAdapter', siteId: 'newsite', displayName: 'New Site AI', hosts: ['newsite.com'] },
 ```
+3. Add the host to the static `matches` and `host_permissions` in `extension/manifest.json`, then run registry and DOM fixture tests.

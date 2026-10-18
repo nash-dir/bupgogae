@@ -9,7 +9,7 @@
  * (처리 함수는 __setProcessFnForTest로 스파이 주입).
  */
 
-require('../content/case-regex.js');
+const caseRegex = require('../content/case-regex.js');
 require('../content/precedent-badge.js');
 const content = require('../content/bupgogae-content.js');
 
@@ -68,5 +68,33 @@ describe('scheduleProcessing — settle 게이트', () => {
     }
     // 순수 settle만 있으면 0회(영구 보류) — 캡 덕분에 최소 1회는 처리되어야 한다.
     expect(processSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('27초 조회 timeout 중 추가된 변경을 완료 후 처리하며 기존 Gray를 보존한다', async () => {
+    caseRegex.__setMetaForTest({ 두: 'Du', 다: 'Da' }, { 대법원: 1 }, ['89Du1']);
+    const root = document.createElement('div');
+    root.textContent = '89두1';
+    document.body.appendChild(root);
+    content.__setAdapterForTest({ findResponseContainers: () => [root] });
+    content.__setShowOrangeToastForTest(false);
+    chrome.storage.local.get = jest.fn(async () => ({}));
+    chrome.runtime.sendMessage = jest.fn((message, callback) => {
+      if (message.type !== 'LOOKUP_BATCH') return callback?.({});
+      if (message.keys.includes('89Du1')) return; // 실제 8초 × 3회 timeout
+      callback(Object.fromEntries(message.keys.map(key => [key, { found: false }])));
+    });
+    content.scheduleProcessing();
+    await jest.advanceTimersByTimeAsync(2500);
+    const added = document.createElement('span');
+    added.textContent = '2015다12345';
+    root.appendChild(added);
+    content.scheduleProcessing();
+    await jest.advanceTimersByTimeAsync(32000);
+    expect(root.querySelectorAll('.bgae-gray')).toHaveLength(1);
+    expect(added.querySelectorAll('.bgae-orange')).toHaveLength(1);
+    expect(root.querySelectorAll('.bgae-badge')).toHaveLength(2);
+    expect(chrome.runtime.sendMessage.mock.calls.filter(([m]) => m.type === 'LOOKUP_BATCH'))
+      .toHaveLength(4);
+    root.remove();
   });
 });

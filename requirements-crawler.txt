@@ -7,6 +7,7 @@ defusedxml==0.7.1
 idna==3.18
 jmespath==1.1.0
 python-dateutil==2.9.0.post0
+PySocks==1.7.1
 requests==2.34.2
 s3transfer==0.19.1
 six==1.17.0

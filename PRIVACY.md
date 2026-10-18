@@ -1,9 +1,9 @@
 # Privacy Policy for Bupgogae
 
-**Effective date:** July 20, 2026
+**Effective date:** September 23, 2026
 
 Bupgogae (법고개) examines case numbers shown in responses on supported AI chat
-sites. Prompt and response text is scanned and compared with a case-number database
+sites. Displayed response text is scanned and compared with a case-number database
 locally in the browser. The Extension does not send that text to the Bupgogae update
 server or to another analysis service.
 
@@ -64,7 +64,10 @@ The manifest does not request the `tabs` permission.
 - **Green** means the case number was found in the public database currently active
   in the browser.
 - **Orange** means the case number was not found in that local database.
-- **Red** means the case-number form failed the Extension's structural checks.
+- **Red** means the candidate failed a structural or current product-range check;
+  it does not establish that no legal case could exist.
+- **Gray** means the local lookup did not complete because of a timeout or system
+  error. It does not mean that the case number was absent from the database.
 
 These states do not guarantee authenticity, legal validity, safety, completeness of
 the public source, or the accuracy of the surrounding AI answer. Orange can also mean
@@ -79,10 +82,10 @@ Questions: [nashdir.dev@gmail.com](mailto:nashdir.dev@gmail.com)
 
 # 법고개(Bupgogae) 개인정보처리방침
 
-**시행일:** 2026년 7월 20일
+**시행일:** 2026년 9월 23일
 
 법고개는 지원되는 AI 채팅 사이트의 응답에 표시된 사건번호를 확인합니다.
-프롬프트·답변 텍스트의 패턴 탐색과 판례 DB 대조는 브라우저 로컬에서 수행하며,
+화면에 표시된 답변 텍스트의 패턴 탐색과 판례 DB 대조는 브라우저 로컬에서 수행하며,
 그 텍스트를 법고개 업데이트 서버나 외부 분석 서비스로 전송하지 않습니다.
 
 소스코드: [github.com/nash-dir/bupgogae](https://github.com/nash-dir/bupgogae)
@@ -135,7 +138,10 @@ manifest는 `tabs` 권한을 요청하지 않습니다.
 
 - **초록**: 현재 브라우저의 활성 공개 DB에서 해당 사건번호를 찾음
 - **주황**: 현재 로컬 DB에서 해당 사건번호를 찾지 못함
-- **빨강**: 확장프로그램의 사건번호 형식 검사를 통과하지 못함
+- **빨강**: 구조 또는 현재 제품의 조회 지원 범위 검사를 통과하지 못함. 법적
+  부존재 판정은 아님
+- **회색**: 시간 초과나 시스템 오류로 로컬 조회를 완료하지 못함. DB 미확인을
+  의미하지 않음
 
 이 표시는 판례의 진위·법적 유효성·안전성, 공공 출처의 완전성 또는 AI 답변 전체의
 정확성을 보장하지 않습니다. 주황은 새 판례이거나 공개되지 않았거나 현재 DB에 아직

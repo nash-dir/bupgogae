@@ -94,16 +94,76 @@ async function installDefaultLawMock(context) {
 // ============================================================
 
 const test = base.extend({
+  freshInstall: [false, { option: true }],
+  // 종료된 합성 profile만 복사한다. 각 test는 별도 디렉터리와 browser를 사용한다.
+  profileTemplate: [async ({}, use, workerInfo) => {
+    if (process.env.BUPGOGAE_E2E_REUSE_PROFILE === '0') {
+      await use(null);
+      return;
+    }
+    const template = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bupgogae-e2e-template-'));
+    let context;
+    try {
+      context = await launchHermeticContext(template, workerInfo.project.use);
+      await context.close();
+      context = null;
+      await use(template);
+    } finally {
+      if (context) await context.close();
+      await fs.promises.rm(template, { recursive: true, force: true });
+    }
+  }, { scope: 'worker', timeout: 60_000 }],
   /**
    * 확장프로그램이 로드된 Persistent Context.
    * 매 테스트마다 임시 프로필 디렉터리를 새로 만들어 상태(IndexedDB 등)를 격리.
    */
-  context: async ({ headless, channel }, use) => {
+  context: [async ({ headless, channel, profileTemplate, freshInstall }, use, testInfo) => {
     const userDataDir = await fs.promises.mkdtemp(
       path.join(os.tmpdir(), 'bupgogae-e2e-'),
     );
+    const timing = { source: profileTemplate && !freshInstall ? 'template-copy' : 'fresh' };
+    let context;
+    try {
+      const start = performance.now();
+      if (profileTemplate && !freshInstall) {
+        await fs.promises.cp(profileTemplate, userDataDir, { recursive: true });
+      }
+      timing.copyMs = performance.now() - start;
+      const prepareStart = performance.now();
+      context = await launchHermeticContext(userDataDir, { headless, channel });
+      timing.prepareMs = performance.now() - prepareStart;
+      await use(context);
+    } finally {
+      const cleanupStart = performance.now();
+      if (context) await context.close();
+      await fs.promises.rm(userDataDir, { recursive: true, force: true })
+        .catch(() => { /* Windows 파일 잠금 등으로 실패해도 test 의미는 바뀌지 않는다. */ });
+      timing.teardownMs = performance.now() - cleanupStart;
+      await testInfo.attach('fixture-timing', {
+        body: Buffer.from(JSON.stringify(timing)), contentType: 'application/json',
+      });
+    }
+  }, { timeout: 60_000 }],
 
-    const context = await chromium.launchPersistentContext(userDataDir, {
+  /**
+   * 백그라운드 Service Worker로부터 동적으로 추출한 확장프로그램 ID.
+   */
+  extensionId: async ({ context }, use) => {
+    let [serviceWorker] = context.serviceWorkers();
+    if (!serviceWorker) serviceWorker = await context.waitForEvent('serviceworker');
+    await use(serviceWorker.url().split('/')[2]);
+  },
+
+  extensionPage: async ({ context, extensionId }, use) => {
+    const page = await context.newPage();
+    await page.goto(`chrome-extension://${extensionId}/privacy.html`);
+    await page.waitForLoadState('domcontentloaded');
+    await use(page);
+  },
+});
+
+async function launchHermeticContext(userDataDir, { headless, channel }) {
+  const context = await chromium.launchPersistentContext(userDataDir, {
       channel: channel || 'chromium',
       headless,
       args: [
@@ -118,6 +178,7 @@ const test = base.extend({
       serviceWorkers: 'allow',
     });
 
+  try {
     // ── Hermetic 네트워크 기본값 ──
     // 1) 원격 Core DB는 기본적으로 404로 차단한다. 설치 동기화는 정직하게
     //    fetch_failed가 되고 패키지의 실제 번들 DB로 복구된다. 무조건부 304로
@@ -125,7 +186,7 @@ const test = base.extend({
     //    각 테스트가 나중에 등록한 route가 이 기본값보다 우선 매칭된다.
     await context.route('https://api.bup.live/**', (route) => {
       const url = route.request().url();
-      if (url.includes('/db.json.gz')) return route.fulfill({ status: 404, body: 'not found' });
+      if (url.includes('/db-v0.9.0.json.gz')) return route.fulfill({ status: 404, body: 'not found' });
       if (url.includes('/adapters.json')) {
         return route.fulfill({ contentType: 'application/json', body: '{"adapters":{}}' });
       }
@@ -138,40 +199,16 @@ const test = base.extend({
     let [serviceWorker] = context.serviceWorkers();
     if (!serviceWorker) serviceWorker = await context.waitForEvent('serviceworker');
     await serviceWorker.evaluate(() => syncDatabase({ trigger: 'e2e_fixture' }));
-
-    await use(context);
-
-    await context.close();
-    await fs.promises.rm(userDataDir, { recursive: true, force: true })
-      .catch(() => { /* Windows 파일 잠금 등으로 실패해도 테스트는 통과 */ });
-  },
-
-  /**
-   * 백그라운드 Service Worker로부터 동적으로 추출한 확장프로그램 ID.
-   * MV3에서는 backgroundPage 대신 serviceWorker 이벤트를 사용한다.
-   */
-  extensionId: async ({ context }, use) => {
-    let [serviceWorker] = context.serviceWorkers();
-    if (!serviceWorker) {
-      serviceWorker = await context.waitForEvent('serviceworker');
+    const state = await serviceWorker.evaluate(() => readLocalSyncState());
+    if (state.coreCount < 100000 || !state.snapshotMetadataValid) {
+      throw new Error('E2E fixture의 실제 번들 DB 활성화가 완료되지 않음');
     }
-    // URL 형식: chrome-extension://<EXTENSION_ID>/background/db-sync.js
-    const extensionId = serviceWorker.url().split('/')[2];
-    await use(extensionId);
-  },
-
-  /**
-   * 확장 오리진의 정적 페이지로 이동을 마친 Page.
-   * SW에 chrome.runtime.sendMessage를 보내는 구동용 — privacy.html은
-   * 자체 스크립트가 없어 테스트에 부수효과를 만들지 않는다.
-   */
-  extensionPage: async ({ context, extensionId }, use) => {
-    const page = await context.newPage();
-    await page.goto(`chrome-extension://${extensionId}/privacy.html`);
-    await page.waitForLoadState('domcontentloaded');
-    await use(page);
-  },
-});
+    return context;
+  } catch (err) {
+    await context.close();
+    throw err;
+  }
+}
 
 module.exports = {
   test,
@@ -179,4 +216,5 @@ module.exports = {
   EXTENSION_PATH,
   buildSearchResultHtml,
   buildPrecDetailHtml,
+  launchHermeticContext,
 };

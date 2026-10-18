@@ -1,10 +1,12 @@
 {
-  "version": "2026-04-23",
+  "version": "2026-10-18",
   "hosts": {
     "gemini.google.com": "gemini",
     "chatgpt.com": "chatgpt",
     "claude.ai": "claude",
     "copilot.microsoft.com": "copilot",
+    "copilot.com": "copilot",
+    "copilot.cloud.microsoft": "copilot",
     "www.perplexity.ai": "perplexity",
     "perplexity.ai": "perplexity",
     "grok.com": "grok"
@@ -24,11 +26,13 @@
     },
     "chatgpt": {
       "responseSelectors": [
+        "[data-message-role=\"assistant\"]",
+        "[data-chatgpt-search-unit-key$=\":assistant\"]",
         "div[data-message-author-role=\"assistant\"] .markdown",
         "div[data-message-author-role=\"assistant\"]",
         ".markdown.prose"
       ],
-      "streamingIndicator": ".result-streaming"
+      "streamingIndicator": "[data-message-role=\"assistant\"]:not([data-message-complete]), .result-streaming"
     },
     "claude": {
       "responseSelectors": [
@@ -38,13 +42,12 @@
         "div.prose",
         "[class*=\"font-claude\"]",
         "[class*=\"message-content\"]",
-        "[class*=\"prose\"]",
-        "article",
-        "main"
+        "[class*=\"prose\"]"
       ]
     },
     "copilot": {
       "responseSelectors": [
+        "[role=\"article\"][aria-labelledby^=\"copilot-message-\"]",
         "[class*=\"group/assistant\"]",
         "[class*=\"prose\"]",
         "[class*=\"whitespace-pre-wrap\"]",

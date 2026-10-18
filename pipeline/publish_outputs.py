@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 
 import requests
@@ -24,6 +25,15 @@ REPORT_REASON_RE = re.compile(r"^[a-z0-9_]{1,80}$")
 MANIFEST_R2_KEY = "bupgogae/manifest.json"
 IMMUTABLE_R2_PREFIX = "bupgogae/objects"
 IMMUTABLE_MANIFEST_PREFIX = "objects"
+# Contract introduction version, independent of daily payload version and app releases.
+PUBLIC_CONTRACT = "v0.9.0"
+# Legacy consumers accept this layout. A future contract requires a separately
+# validated legacy serializer; changing PUBLIC_CONTRACT must not overwrite it.
+LEGACY_PAYLOAD_CONTRACT = "v0.9.0"
+VERSIONED_DB_NAME = f"db-{PUBLIC_CONTRACT}.json.gz"
+VERSIONED_MANIFEST_NAME = f"manifest-{PUBLIC_CONTRACT}.json"
+VERSIONED_R2_KEY = f"bupgogae/{VERSIONED_DB_NAME}"
+VERSIONED_MANIFEST_R2_KEY = f"bupgogae/{VERSIONED_MANIFEST_NAME}"
 
 
 def _sha256(path: str) -> str:
@@ -159,7 +169,10 @@ def send_notification(status: str, data_dir: str | None = None):
         log.warning(f"Telegram 알림 실패 (kind={type(error).__name__})")
 
 
-def publish_outputs(data_dir: str):
+def prepare_contract_outputs(data_dir: str):
+    """Build both contract lanes without network access or recompressing bytes."""
+    if PUBLIC_CONTRACT != LEGACY_PAYLOAD_CONTRACT:
+        raise ValueError("legacy serializer required before changing public contract")
     raw_path = os.path.join(data_dir, "db.json")
     gzip_path = os.path.join(data_dir, "db.json.gz")
     manifest_path = os.path.join(data_dir, "manifest.json")
@@ -183,6 +196,16 @@ def publish_outputs(data_dir: str):
         f"{IMMUTABLE_MANIFEST_PREFIX}/{object_name}"
     )
     write_manifest(manifest, manifest_path)
+    versioned_manifest = dict(manifest, contract=PUBLIC_CONTRACT)
+    write_manifest(versioned_manifest, os.path.join(data_dir, VERSIONED_MANIFEST_NAME))
+    shutil.copyfile(gzip_path, os.path.join(data_dir, VERSIONED_DB_NAME))
+    return immutable_r2_key
+
+
+def publish_outputs(data_dir: str):
+    immutable_r2_key = prepare_contract_outputs(data_dir)
+    gzip_path = os.path.join(data_dir, "db.json.gz")
+    manifest_path = os.path.join(data_dir, "manifest.json")
 
     # 게시 순서 자체가 원자성 계약이다.
     # 1) content-addressed 객체, 2) 새 클라이언트용 commit marker,
@@ -201,12 +224,22 @@ def publish_outputs(data_dir: str):
         content_encoding=None,
     )
     upload_db_to_r2(gzip_path, r2_key=R2_KEY)
+    # Separate commit marker per contract; the fixed alias is never used instead
+    # of the immutable object by the new client. Failure retains its prior marker.
+    upload_db_to_r2(os.path.join(data_dir, VERSIONED_DB_NAME), r2_key=VERSIONED_R2_KEY)
+    upload_db_to_r2(
+        os.path.join(data_dir, VERSIONED_MANIFEST_NAME),
+        r2_key=VERSIONED_MANIFEST_R2_KEY,
+        cache_control="no-cache, max-age=0",
+        content_encoding=None,
+    )
     log.info("✅ public DB와 manifest 게시 완료")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Publish verified crawl outputs")
     parser.add_argument("--dir", help="db.json/db.json.gz artifact 디렉토리")
+    parser.add_argument("--prepare-only", action="store_true", help="계약별 artifact 생성·검증만 수행; 네트워크 접근 없음")
     notify_group = parser.add_mutually_exclusive_group()
     notify_group.add_argument(
         "--notify-success",
@@ -219,6 +252,12 @@ def main():
         help="게시 없이 pipeline failure 알림만 전송",
     )
     args = parser.parse_args()
+
+    if args.prepare_only:
+        if not args.dir or args.notify_success or args.notify_failure:
+            parser.error("--prepare-only requires --dir and cannot notify")
+        prepare_contract_outputs(args.dir)
+        return
 
     if args.notify_success or args.notify_failure:
         send_notification(

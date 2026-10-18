@@ -139,8 +139,8 @@ jobs:
         continue-on-error: true
         run: |
           if command -v warp-cli >/dev/null 2>&1; then
-            timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi --ipc-timeout 10 disconnect || true
-            timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi --ipc-timeout 10 registration delete || true
+            timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi disconnect || true
+            timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi registration delete || true
           fi
           timeout 15s sudo systemctl stop warp-svc || true
           systemctl --user disable --now warp-taskbar.service >/dev/null 2>&1 || true

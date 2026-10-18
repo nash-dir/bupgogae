@@ -78,6 +78,14 @@ if [[ "${installed_version}" != "${WARP_PACKAGE_VERSION}" ]]; then
   exit 1
 fi
 
+# Check the actual pinned binary before retrying any stateful operation. IPC
+# waits are bounded by GNU timeout; this client has no --ipc-timeout option.
+for command in 'registration new' 'tunnel protocol set' 'proxy port' 'mode'; do
+  read -r -a command_args <<< "${command}"
+  timeout --kill-after=2s 10s warp-cli --accept-tos --no-ansi \
+    "${command_args[@]}" --help >/dev/null
+done
+
 # The GUI service is unnecessary on a headless runner.
 systemctl --user disable --now warp-taskbar.service >/dev/null 2>&1 || true
 sudo systemctl start warp-svc.service
@@ -102,14 +110,14 @@ fi
 registered=false
 for _ in {1..3}; do
   if timeout --kill-after=5s 15s \
-    warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
+    warp-cli --accept-tos --no-ansi \
       registration show >/dev/null 2>&1
   then
     registered=true
     break
   fi
   if timeout --kill-after=5s 45s \
-    warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
+    warp-cli --accept-tos --no-ansi \
       registration new >/dev/null 2>&1
   then
     registered=true
@@ -123,16 +131,16 @@ if [[ "${registered}" != "true" ]]; then
 fi
 
 timeout --kill-after=5s 15s \
-  warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
+  warp-cli --accept-tos --no-ansi \
     tunnel protocol set MASQUE >/dev/null
 timeout --kill-after=5s 15s \
-  warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
+  warp-cli --accept-tos --no-ansi \
     proxy port 40000 >/dev/null
 timeout --kill-after=5s 15s \
-  warp-cli --accept-tos --no-ansi --ipc-timeout 20 \
+  warp-cli --accept-tos --no-ansi \
     mode proxy >/dev/null
 timeout --kill-after=5s 30s \
-  warp-cli --accept-tos --no-ansi --ipc-timeout 20 connect >/dev/null
+  warp-cli --accept-tos --no-ansi connect >/dev/null
 
 route_verified=false
 for _ in {1..30}; do

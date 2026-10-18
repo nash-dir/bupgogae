@@ -1013,7 +1013,7 @@ class DeploymentSecurityTests(unittest.TestCase):
             warp_script,
         )
         self.assertIn(
-            "--ipc-timeout 20 connect",
+            "--no-ansi connect",
             warp_script,
         )
         self.assertIn("socks5h://127.0.0.1:40000", warp_script)

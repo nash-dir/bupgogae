@@ -18,24 +18,13 @@ import argparse
 import os
 import sys
 
-import boto3
+from r2_client import get_r2_client
 
 from log_setup import get_logger
 
 log = get_logger(__name__)
 
 R2_KEY = "bupgogae/db.json.gz"
-
-
-def get_r2_client():
-    """Cloudflare R2 S3 클라이언트."""
-    account_id = os.environ["CF_ACCOUNT_ID"]
-    return boto3.client(
-        "s3",
-        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
-        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
-    )
 
 
 def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None,
@@ -56,9 +45,10 @@ def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None,
     bucket = os.environ["R2_BUCKET"]
 
     log.info(f"\n{'─'*50}")
-    log.info(f"  📤 R2 Upload")
+    log.info("  📤 R2 Upload")
     log.info(f"     파일: {gz_path} ({size_mb:.2f} MB)")
-    log.info(f"     버킷: {bucket}/{key}")
+    # bucket 이름도 credential scope/인프라 식별자이므로 로그에는 object key만 남긴다.
+    log.info(f"     객체 키: {key}")
     log.info(f"{'─'*50}")
 
     if dry:
@@ -77,27 +67,6 @@ def upload_db_to_r2(gz_path: str, dry: bool = False, r2_key: str = None,
     client.upload_file(gz_path, bucket, key, ExtraArgs=extra_args)
 
     log.info(f"  ✅ 업로드 완료: {key}")
-
-
-def ensure_cors():
-    """R2 버킷 CORS 규칙 설정 (멱등)."""
-    client = get_r2_client()
-    bucket = os.environ["R2_BUCKET"]
-    try:
-        client.put_bucket_cors(
-            Bucket=bucket,
-            CORSConfiguration={
-                "CORSRules": [{
-                    "AllowedOrigins": ["*"],
-                    "AllowedMethods": ["GET", "HEAD"],
-                    "AllowedHeaders": ["*"],
-                    "MaxAgeSeconds": 3600,
-                }]
-            },
-        )
-        log.info("  ✅ CORS 설정 완료")
-    except Exception as e:
-        log.warning(f"  ⚠️ CORS 설정 실패 (무시): {e}")
 
 
 if __name__ == "__main__":

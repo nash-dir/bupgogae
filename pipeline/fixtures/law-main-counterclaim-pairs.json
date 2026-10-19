@@ -1,0 +1,96 @@
+{
+  "capture_date": "2026-10-17",
+  "provenance": "Fields copied from retained official PrecService responses; no inferred or omitted case members.",
+  "records": [
+    {
+      "serial": "618285",
+      "case_number": "2021가단3821(본소), 2022가단102312(반소)",
+      "court": "수원지방법원 안양지원",
+      "date": "20221223",
+      "case_name": "토지인도·토지인도",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=618285",
+      "detail_xml_sha256": "6471bfcbefb85c7b0482949b97794a5954543610416e4f9a608c117cc1e1556b"
+    },
+    {
+      "serial": "624097",
+      "case_number": "2023나2001980(본소), 2023나2001997(반소)",
+      "court": "서울고등법원",
+      "date": "20230907",
+      "case_name": "채무부존재확인·부정경쟁행위 금지 및 손해배상",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=624097",
+      "detail_xml_sha256": "b9cccf072cd14dc7080127cebe25041d67d39eb0bf5daf71ec12200894b70716"
+    },
+    {
+      "serial": "619385",
+      "case_number": "2021가단5237940(본소), 2021가단5339556(반소)",
+      "court": "서울중앙지방법원",
+      "date": "20231121",
+      "case_name": "약정금·손해배상(기)",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=619385",
+      "detail_xml_sha256": "0b8274d8be9e1968e2bc172072beed3c4d7fc827ac5c80fed40d1a9193bcd42d"
+    },
+    {
+      "serial": "618283",
+      "case_number": "2023나53379(본소), 2023나53386(반소)",
+      "court": "수원지방법원",
+      "date": "20240111",
+      "case_name": "토지인도·토지인도",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=618283",
+      "detail_xml_sha256": "fc85b890e6084812d783f7a47dc3a9a4b2f55e18d33ba691bc20d4ac5285dc48"
+    },
+    {
+      "serial": "614355",
+      "case_number": "2023가단112928(본소), 2024가단102621(반소)",
+      "court": "울산지방법원",
+      "date": "20240326",
+      "case_name": "건물인도·손해배상(기)",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=614355",
+      "detail_xml_sha256": "14e49d09d70b5351ad4486a1b7da49382b44478a2f40b33d980b8420c2c5c46d"
+    },
+    {
+      "serial": "616555",
+      "case_number": "2022가합546698(본소), 2022가합559823(반소)",
+      "court": "서울중앙지방법원",
+      "date": "20240724",
+      "case_name": "근저당권말소·손해배상청구의소",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=616555",
+      "detail_xml_sha256": "db01cef0ea9ae718b281b97aef8d5cf8ac5ad236b58bd0695ae6cae350c583d9"
+    },
+    {
+      "serial": "624491",
+      "case_number": "2020가합571614(본소), 2022가합521507(반소)",
+      "court": "서울중앙지방법원",
+      "date": "20240910",
+      "case_name": "공사대금등청구의소·건물철거등청구",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=624491",
+      "detail_xml_sha256": "37da78a3f9df1b4d09288cc591d5dd0fbb932a1e13be31d6b2f275668be30235"
+    },
+    {
+      "serial": "623971",
+      "case_number": "2023가단13936(본소), 2024가단4762(반소)",
+      "court": "수원지방법원",
+      "date": "20240926",
+      "case_name": "계약금반환 등·손해배상(기)",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=623971",
+      "detail_xml_sha256": "7f9493ec94c0337addfe563ee70552cc893603bbe8b4dd124bbafecf650c4abf"
+    },
+    {
+      "serial": "614353",
+      "case_number": "2024나11658(본소), 2024나11665(반소)",
+      "court": "울산지방법원",
+      "date": "20241023",
+      "case_name": "건물인도·손해배상(기)",
+      "source": "대법원",
+      "source_url": "https://www.law.go.kr/LSW/precInfoP.do?precSeq=614353",
+      "detail_xml_sha256": "1a3c8619a51c7f7c73ccfb0ea68b5e1abbd33f48001160b303cc45d8c87712b4"
+    }
+  ]
+}

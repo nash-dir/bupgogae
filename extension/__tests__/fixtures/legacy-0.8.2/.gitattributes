@@ -1,0 +1,3 @@
+# Preserve byte hashes across Windows and Linux checkouts of frozen consumers.
+*.cjs -text
+meta.json -text

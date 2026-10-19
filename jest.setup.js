@@ -20,6 +20,7 @@ function makeChromeMock() {
         get: jest.fn((_keys, cb) => cb && cb({})),
         set: jest.fn((_items, cb) => cb && cb()),
       },
+      onChanged: { addListener: jest.fn() },
     },
   };
 }

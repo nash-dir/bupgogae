@@ -1,12 +1,13 @@
 /**
- * 법고개(Bupgogae) — 3단 신호등 인라인 렌더링 모듈
+ * 법고개(Bupgogae) — 4상태 인라인 배지 렌더링 모듈
  * =============================================
  * LLM 대화창 DOM에서 탐지된 판례번호 텍스트 자체를 색상 하이라이트로 감싼다.
  *
- * [3단 신호등]
+ * [4상태 배지]
  *   Green  : DB Hit — 연한 초록 하이라이트 + 밑줄 + hover/click 시 full citation 툴팁
- *   Red    : 형식 오류 — 붉은 배경 + 취소선 + hover/click 시 사유 툴팁
+ *   Red    : 형식·지원 범위 경고 — 붉은 배경 + 취소선 + hover/click 시 사유 툴팁
  *   Orange : DB Miss — 짙은 주황 하이라이트 + 하단 보더 + hover/click 시 경고 툴팁
+ *   Gray   : 조회 미완료 — 회색 점선 + hover/click 시 복구 안내 툴팁
  *
  * 인라인 <span> 렌더링. 이모지 없음.
  * 툴팁: hover 시 표시, 클릭 시 임시 고정(pinned), 다른 곳 클릭 또는 X 버튼으로 해제.
@@ -91,13 +92,12 @@ const BUPGOGAE_CSS = `
   background-color: rgba(234, 88, 12, 0.30);
 }
 
-/* --- Gray (Pending) --- */
+/* --- Gray (Verification incomplete) --- */
 .bgae-gray {
   background-color: rgba(156, 163, 175, 0.20);
   color: inherit;
   border-bottom: 2.5px dotted rgba(156, 163, 175, 0.6);
-  animation: bgae-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  cursor: wait;
+  cursor: help;
 }
 
 @keyframes bgae-pulse {
@@ -352,7 +352,7 @@ function decodeCourtName(courtCode, courtCodeMap) {
  * 사건부호로 판결/결정/심결 유형 판별.
  * 결정 사건부호: 마,모,후,브,스,즈,초,초기,비,인,그,르,슈,즈,카,타,파,하 등
  * @param {string} caseCode - 한글 사건부호 (예: "다", "마", "후", "당")
- * @param {string} [caseType] - 'court' | 'constitutional' | 'tax'
+ * @param {string} [caseType] - 'court' | 'constitutional'
  * @returns {string} "판결", "결정", 또는 "심결"
  */
 function getDecisionType(caseCode, caseType) {
@@ -382,7 +382,7 @@ function getDecisionType(caseCode, caseType) {
  * @param {string} dateStr - formatDecisionDate 결과
  * @param {string} caseNumber - 원본 사건번호 (예: "2015다6302")
  * @param {string} caseCode - 한글 사건부호 (예: "다", "마", "당")
- * @param {string} [caseType] - 'court' | 'constitutional' | 'tax'
+ * @param {string} [caseType] - 'court' | 'constitutional'
  * @returns {string}
  */
 function buildFullCitation(courtName, dateStr, caseNumber, caseCode, caseType) {
@@ -422,7 +422,7 @@ const TOOLTIP_BUILDERS = {
   /**
    * Green 툴팁 DOM 조립 — 동일 키에 매칭되는 사건 목록을 링크 리스트로 표시.
    *
-   * @param {Array} entries - [{serialNumber, courtCode, dateInt, caseName, caseType, caseCode, trialType}]
+   * @param {Array} entries - [{serialNumber, courtCode, dateInt, caseName, caseType, caseCode}]
    * @param {string} rawCaseNumber - 원본 사건번호 문자열 ("2015다6302")
    * @param {Object} courtCodeMap - 법원코드 매핑
    * @returns {DocumentFragment}
@@ -430,9 +430,11 @@ const TOOLTIP_BUILDERS = {
   green(entries, rawCaseNumber, courtCodeMap) {
     const frag = document.createDocumentFragment();
 
-    // 헤더 경고
-    frag.appendChild(_el('span', 'bgae-tooltip-title',
-      '법제처 DB에 존재하는 사건번호입니다.'));
+    // 헤더 경고: 동일 키가 복수 원문 레코드에 대응할 수 있음을 숨기지 않는다.
+    const title = entries.length > 1
+      ? `법제처 DB에서 동일 사건번호 후보 ${entries.length}건을 찾았습니다.`
+      : '법제처 DB에서 해당 사건번호를 찾았습니다.';
+    frag.appendChild(_el('span', 'bgae-tooltip-title', title));
     frag.appendChild(_el('span', 'bgae-tooltip-body',
       '인용 내용의 정확성은 보장되지 않으니, 원문 확인이 반드시 필요합니다.'));
 
@@ -442,7 +444,7 @@ const TOOLTIP_BUILDERS = {
     for (const entry of entries) {
       const {
         serialNumber, courtCode, dateInt,
-        caseName, caseType, caseCode, trialType,
+        caseName, caseType, caseCode,
       } = entry;
 
       // full citation 조립
@@ -457,8 +459,7 @@ const TOOLTIP_BUILDERS = {
       let href;
       if (sn.startsWith('D')) {
         href = `https://www.law.go.kr/detcInfoP.do?mode=1&detcSeq=${sn.slice(1)}`;
-      } else if (sn.startsWith('T')) {
-        href = `https://www.law.go.kr/DRF/lawService.do?target=ttSpecialDecc&ID=${sn.slice(1)}&type=HTML`;
+
       } else {
         href = `https://www.law.go.kr/precInfoP.do?precSeq=${sn}`;
       }
@@ -515,11 +516,11 @@ const TOOLTIP_BUILDERS = {
    */
   red(reason) {
     const frag = document.createDocumentFragment();
-    frag.appendChild(_el('span', 'bgae-tooltip-title', '사건번호 형식 오류'));
+    frag.appendChild(_el('span', 'bgae-tooltip-title', '사건번호 형식·지원 범위 경고'));
     frag.appendChild(_el('span', 'bgae-tooltip-body',
-      reason || '대한민국 사건번호 체계를 벗어난 형식입니다.'));
+      reason || '법고개의 구조 또는 현재 조회 지원 범위 검사를 통과하지 못했습니다.'));
     frag.appendChild(_el('span', 'bgae-tooltip-footer',
-      'AI 환각(Hallucination)일 가능성이 높습니다.'));
+      '이 경고만으로 사건의 법적 존재나 인용의 진위 여부를 확정할 수 없습니다.'));
     return frag;
   },
 
@@ -531,7 +532,7 @@ const TOOLTIP_BUILDERS = {
     const frag = document.createDocumentFragment();
     frag.appendChild(_el('span', 'bgae-tooltip-title', 'DB 미확인 사건번호'));
     frag.appendChild(_el('span', 'bgae-tooltip-body',
-      '공개된 판례 데이터베이스에서 검증되지 않은 사건번호입니다.'));
+      '현재 브라우저의 로컬 공개 DB에서 찾지 못한 사건번호입니다.'));
 
     // 사법정보공개포털 링크가 포함된 본문
     const bodyWithLink = _el('span', 'bgae-tooltip-body');
@@ -540,11 +541,21 @@ const TOOLTIP_BUILDERS = {
     portalLink.target = '_blank';
     portalLink.rel = 'noopener';
     bodyWithLink.appendChild(portalLink);
-    bodyWithLink.appendChild(document.createTextNode('에서 허위 사건번호 여부를 판별하십시오.'));
+    bodyWithLink.appendChild(document.createTextNode('과 원문·추가 자료에서 직접 확인하십시오.'));
     frag.appendChild(bodyWithLink);
 
     frag.appendChild(_el('span', 'bgae-tooltip-footer',
       '법적 인용 전 반드시 원문을 확인하십시오.'));
+    return frag;
+  },
+
+  gray(reason) {
+    const frag = document.createDocumentFragment();
+    frag.appendChild(_el('span', 'bgae-tooltip-title', '검증 미완료'));
+    frag.appendChild(_el('span', 'bgae-tooltip-body',
+      reason || '로컬 DB 조회가 완료되지 않았습니다.'));
+    frag.appendChild(_el('span', 'bgae-tooltip-footer',
+      'DB 미확인을 뜻하지 않습니다. 잠시 후 다시 시도하거나 페이지를 새로고침해 주세요.'));
     return frag;
   },
 };
@@ -557,6 +568,7 @@ const TOOLTIP_BUILDERS = {
 let _currentPinnedTooltip = false; // 전역 툴팁 고정 여부 플래그
 let _activeBadge = null;           // 현재 툴팁이 가리키고 있는 배지 요소
 let _globalTooltip = null;         // 전역 툴팁 DOM
+let _tooltipDetachObserver = null; // tooltip이 열려 있는 동안만 삭제를 관찰
 
 /**
  * 전역 툴팁 DOM을 싱글톤으로 생성하여 반환.
@@ -606,6 +618,8 @@ function getGlobalTooltip() {
       if (_activeBadge) updateTooltipPosition();
     }, { passive: true });
   }
+  // SPA가 body subtree를 교체한 경우에도 싱글톤을 현재 document에 복구한다.
+  if (!_globalTooltip.isConnected) document.body.appendChild(_globalTooltip);
   return _globalTooltip;
 }
 
@@ -613,6 +627,7 @@ function getGlobalTooltip() {
  * 툴팁의 위치를 _activeBadge의 최신 화면 좌표로 동기화.
  */
 function updateTooltipPosition() {
+  clearDetachedTooltip();
   if (!_activeBadge || !_globalTooltip) return;
   const rect = _activeBadge.getBoundingClientRect();
   // 위치: 배지의 가로 중앙, 세로 상단 (transform: translate(-50%, -100%)로 보정됨)
@@ -624,6 +639,7 @@ function updateTooltipPosition() {
  * 툴팁을 특정 배지에 띄움.
  */
 function showTooltip(badge, level, options, precedentString) {
+  clearDetachedTooltip();
   // 이미 다른 배지에 핀 고정되어 있다면 무시
   if (_currentPinnedTooltip && _activeBadge !== badge) return;
   
@@ -641,7 +657,6 @@ function showTooltip(badge, level, options, precedentString) {
         caseName: options.caseName || '',
         caseType: options.caseType || 'court',
         caseCode: options.caseCode || '',
-        trialType: options.trialType || '',
       }];
       contentBox.appendChild(TOOLTIP_BUILDERS.green(
         greenEntries, precedentString, options.courtCodeMap,
@@ -654,8 +669,11 @@ function showTooltip(badge, level, options, precedentString) {
     case 'orange':
       contentBox.appendChild(TOOLTIP_BUILDERS.orange());
       break;
+    case 'gray':
+      contentBox.appendChild(TOOLTIP_BUILDERS.gray(options.grayReason || ''));
+      break;
     default:
-      return; // gray 상태는 툴팁 표시 불가
+      return;
   }
 
   // 클래스명 및 테마 업데이트
@@ -663,7 +681,22 @@ function showTooltip(badge, level, options, precedentString) {
   if (_currentPinnedTooltip) tooltip.classList.add('bgae-pinned');
   
   _activeBadge = badge;
+  if (typeof MutationObserver !== 'undefined') {
+    if (!_tooltipDetachObserver) {
+      _tooltipDetachObserver = new MutationObserver(clearDetachedTooltip);
+    }
+    _tooltipDetachObserver.observe(document.documentElement, { childList: true, subtree: true });
+  }
   updateTooltipPosition();
+}
+
+/** 삭제된 응답의 subtree가 singleton tooltip에 계속 붙잡히지 않게 한다. */
+function clearDetachedTooltip() {
+  if (_activeBadge && !_activeBadge.isConnected) {
+    unpinCurrentTooltip();
+    hideTooltip();
+    _globalTooltip?.querySelector('.bgae-tooltip-content-box')?.replaceChildren();
+  }
 }
 
 /**
@@ -676,6 +709,7 @@ function hideTooltip() {
     _globalTooltip.classList.remove('bgae-pinned');
   }
   _activeBadge = null;
+  _tooltipDetachObserver?.disconnect();
 }
 
 /**
@@ -746,20 +780,17 @@ function _createBadge(precedentString, level, options = {}) {
   badge.setAttribute('data-bgae-case', precedentString);
   badge.textContent = precedentString;
 
-  // gray(pending)는 툴팁 없음
-  if (level !== 'gray') {
-    badge.addEventListener('mouseenter', () => {
-      showTooltip(badge, level, options, precedentString);
-    });
-    badge.addEventListener('mouseleave', () => {
-      hideTooltip();
-    });
-    badge.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      togglePinTooltip(badge, level, options, precedentString);
-    });
-  }
+  badge.addEventListener('mouseenter', () => {
+    showTooltip(badge, level, options, precedentString);
+  });
+  badge.addEventListener('mouseleave', () => {
+    hideTooltip();
+  });
+  badge.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    togglePinTooltip(badge, level, options, precedentString);
+  });
 
   return badge;
 }
@@ -902,6 +933,7 @@ if (typeof window !== 'undefined') {
     decodeCourtName,
     buildFullCitation,
     getDecisionType,
+    clearDetachedTooltip,
     _ownTextNodes, // 옵저버가 자체 삽입 텍스트 노드를 식별하기 위해 노출
   });
 }

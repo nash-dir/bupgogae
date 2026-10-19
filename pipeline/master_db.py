@@ -11,7 +11,6 @@ Master DB 관리 모듈 — 영속 SQLite.
   MasterDB(db_path)      -> DB 열기/생성
   db.upsert_raw(cases)   -> (삽입, 갱신, 스킵) 튜플 반환
   db.export_all()        -> 압축 dict + 스킵 수
-  db.export_since(date)  -> 특정 날짜 이후 레코드 압축
   db.stats()             -> DB 통계 dict
 
 [보안 참고]
@@ -24,15 +23,17 @@ import os
 import re
 import sqlite3
 from collections import defaultdict
-from datetime import datetime
+from pathlib import Path
 
 from compress import (  # noqa: E402
-    compress_case_number, compress_tax_case_number,
+    compress_case_number,
     compress_case_name, compress_date, CourtCodeResolver,
 )
 from api import clean_case_number  # noqa: E402
-from validate import sanitize_raw_case, sanitize_kipris_item  # noqa: E402
+from validate import sanitize_raw_case  # noqa: E402
+from law_normalization import is_merged_case_number, expand_merged_case_numbers
 from log_setup import get_logger  # noqa: E402
+from serving_policy import SCHEMA as SERVING_SCHEMA, load_policy, table_exists
 
 log = get_logger(__name__)
 
@@ -52,20 +53,36 @@ class MasterDB:
     );
     CREATE INDEX IF NOT EXISTS idx_cases_date ON cases(date);
     CREATE INDEX IF NOT EXISTS idx_cases_inserted ON cases(inserted_at);
-    """
+    CREATE TABLE IF NOT EXISTS known_error_provenance (
+        serial TEXT PRIMARY KEY REFERENCES cases(serial),
+        receipt_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS reviewed_recovery_provenance (
+        serial TEXT PRIMARY KEY REFERENCES cases(serial),
+        recovery_sha256 TEXT NOT NULL,
+        catalog_sha256 TEXT NOT NULL,
+        record_json TEXT NOT NULL,
+        raw_record_json TEXT NOT NULL
+    );
+    """ + SERVING_SCHEMA
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, *, read_only: bool = False):
         self.db_path = db_path
-        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        self.conn = sqlite3.connect(db_path)
-        self.conn.execute("PRAGMA journal_mode=WAL;")
-        self.conn.execute("PRAGMA synchronous=NORMAL;")
-        self.conn.executescript(self.SCHEMA)
-        self.conn.commit()
+        if read_only:
+            self.conn = sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
+        else:
+            os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+            self.conn = sqlite3.connect(db_path)
+            self.conn.execute("PRAGMA journal_mode=WAL;")
+            self.conn.execute("PRAGMA synchronous=NORMAL;")
+            self.conn.executescript(self.SCHEMA)
+            self.conn.commit()
 
         # 법원코드 변환기 — 인스턴스 로컬 상태(미등록 법원 동적 할당).
         # 전역 변이 없이 export 후 court_resolver.code_map으로 최종 맵 조회.
         self.court_resolver = CourtCodeResolver()
+        self.export_dates = {}
+        self.last_export_report = {}
 
         # 블랙리스트 로드 (잘못된 레이블 serial)
         bl_path = os.path.join(os.path.dirname(__file__), "blacklist.json")
@@ -87,82 +104,134 @@ class MasterDB:
     # ════════════════════════════════════════════════
 
     def upsert_raw(self, raw_cases: list[dict]) -> tuple[int, int, int]:
-        """raw API 결과를 UPSERT. (inserted, updated, skipped) 반환."""
+        """raw API 결과를 한 transaction으로 UPSERT.
+
+        한 날짜/페이지 묶음 도중 SQLite 오류가 나면 그 호출에서 쓴 행을 모두
+        rollback한다. 그렇지 않으면 다음 성공 호출의 commit이 앞선 부분 쓰기까지
+        함께 확정해 durable backlog와 master DB의 완료 경계가 어긋날 수 있다.
+        """
         cur = self.conn.cursor()
         inserted = 0
         updated = 0
         skipped = 0
 
-        for raw in raw_cases:
-            # 입력 검증/정제 (길이 상한·None 안전). serial 없으면 스킵.
-            case = sanitize_raw_case(raw)
-            if case is None:
-                skipped += 1
-                continue
-            serial = case["serial"]
-
-            # 블랙리스트 체크
-            try:
-                if int(serial) in self.blacklist:
+        try:
+            policy = load_policy(self.conn)
+            for raw in raw_cases:
+                # 입력 검증/정제 (길이 상한·None 안전). serial 없으면 스킵.
+                case = sanitize_raw_case(raw)
+                if case is None:
                     skipped += 1
                     continue
-            except ValueError:
-                pass
+                serial = case["serial"]
+                if not re.fullmatch(r"(?:[0-9]+|D[0-9]+)", serial):
+                    raise ValueError("unsupported_publication_serial")
 
-            case_number_clean = clean_case_number(case["case_number"])
+                # 블랙리스트 체크
+                try:
+                    if int(serial) in self.blacklist:
+                        skipped += 1
+                        continue
+                except ValueError:
+                    pass
 
-            # 존재 여부 확인
-            existing = cur.execute(
-                "SELECT serial FROM cases WHERE serial = ?", (serial,)
-            ).fetchone()
+                # Validate the original before a length cap can discard a tail.
+                # Explicit blacklist exclusions above retain their prior meaning.
+                raw_number = raw.get("case_number")
+                if isinstance(raw_number, str) and is_merged_case_number(raw_number):
+                    expand_merged_case_numbers(raw_number)
+                case_number_clean = clean_case_number(case["case_number"])
 
-            if existing:
-                cur.execute("""
-                    UPDATE cases SET
-                        case_name = ?, case_number = ?, case_number_clean = ?,
-                        date = ?, court = ?
-                    WHERE serial = ?
-                """, (
-                    case["case_name"],
-                    case["case_number"],
-                    case_number_clean,
-                    case["date"],
-                    case["court"],
-                    serial,
-                ))
-                updated += 1
-            else:
-                cur.execute("""
-                    INSERT INTO cases
-                        (serial, case_name, case_number, case_number_clean, date, court)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    serial,
-                    case["case_name"],
-                    case["case_number"],
-                    case_number_clean,
-                    case["date"],
-                    case["court"],
-                ))
-                inserted += 1
+                # One indexed lookup also checks whether a reviewed row is protected.
+                existing = cur.execute(
+                    "SELECT c.serial, c.case_number, c.case_number_clean, p.receipt_json, r.raw_record_json "
+                    "FROM cases c LEFT JOIN known_error_provenance p ON p.serial=c.serial "
+                    "LEFT JOIN reviewed_recovery_provenance r ON r.serial=c.serial "
+                    "WHERE c.serial=?", (serial,)
+                ).fetchone()
 
-        self.conn.commit()
-        return inserted, updated, skipped
+                if policy and serial in policy.quarantine:
+                    # Historical archive entries are not a permanent source
+                    # filter. A changed source record needs an explicit review
+                    # that preserves the earlier full raw/member evidence.
+                    raise ValueError("quarantined_raw_changed_requires_review")
+
+                receipt = raw.get("_known_error")
+                if existing and existing[4] and json.loads(existing[4]) != case:
+                    from known_errors import CorrectionError
+                    raise CorrectionError("known_error_review_required")
+                if receipt is not None:
+                    from known_errors import registry
+                    registry().verify_receipt(raw, receipt)
+                elif existing and existing[3]:
+                    # A plain response cannot erase a previously reviewed fix.
+                    from known_errors import CorrectionError
+                    raise CorrectionError("known_error_receipt_mismatch")
+
+                if existing:
+                    # An update containing only a leading member must not erase
+                    # previously verified merged members. Corrections that remove
+                    # members require explicit review rather than silent overwrite.
+                    previous_number = existing[1] or existing[2] or ""
+                    if case["case_number"] and is_merged_case_number(previous_number):
+                        previous_members = set(expand_merged_case_numbers(previous_number))
+                        next_members = (set(expand_merged_case_numbers(case["case_number"]))
+                                        if is_merged_case_number(case["case_number"])
+                                        else {case_number_clean})
+                        if not previous_members.issubset(next_members):
+                            raise ValueError("merged_case_members_removed")
+                    cur.execute("""
+                        UPDATE cases SET
+                            case_name = COALESCE(NULLIF(?, ''), case_name),
+                            case_number = COALESCE(NULLIF(?, ''), case_number),
+                            case_number_clean = COALESCE(
+                                NULLIF(?, ''), case_number_clean
+                            ),
+                            date = COALESCE(NULLIF(?, ''), date),
+                            court = COALESCE(NULLIF(?, ''), court)
+                        WHERE serial = ?
+                    """, (
+                        case["case_name"],
+                        case["case_number"],
+                        case_number_clean,
+                        case["date"],
+                        case["court"],
+                        serial,
+                    ))
+                    updated += 1
+                else:
+                    cur.execute("""
+                        INSERT INTO cases
+                            (serial, case_name, case_number, case_number_clean, date, court)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        serial,
+                        case["case_name"],
+                        case["case_number"],
+                        case_number_clean,
+                        case["date"],
+                        case["court"],
+                    ))
+                    inserted += 1
+
+                if receipt is not None:
+                    cur.execute(
+                        "INSERT INTO known_error_provenance VALUES(?,?) "
+                        "ON CONFLICT(serial) DO UPDATE SET receipt_json=excluded.receipt_json",
+                        (serial, json.dumps(receipt, ensure_ascii=False, sort_keys=True)),
+                    )
+
+            self.conn.commit()
+            return inserted, updated, skipped
+        except Exception:
+            self.conn.rollback()
+            raise
+        finally:
+            cur.close()
 
     # ════════════════════════════════════════════════
     # 조회
     # ════════════════════════════════════════════════
-
-    def get_cases_since(self, date_str: str) -> list[sqlite3.Row]:
-        """특정 날짜 이후 (>=) 레코드 조회."""
-        self.conn.row_factory = sqlite3.Row
-        cur = self.conn.execute(
-            "SELECT * FROM cases WHERE date >= ? ORDER BY date",
-            (date_str,),
-        )
-        rows = cur.fetchall()
-        self.conn.row_factory = None
-        return rows
 
     def get_all_cases(self) -> list[sqlite3.Row]:
         """전체 레코드 조회."""
@@ -172,67 +241,101 @@ class MasterDB:
         self.conn.row_factory = None
         return rows
 
-    def get_new_since(self, since_iso: str) -> list[sqlite3.Row]:
-        """inserted_at >= since_iso 인 레코드 (이번 실행에서 추가된 것들)."""
-        self.conn.row_factory = sqlite3.Row
-        cur = self.conn.execute(
-            "SELECT * FROM cases WHERE inserted_at >= ? ORDER BY date",
-            (since_iso,),
-        )
-        rows = cur.fetchall()
-        self.conn.row_factory = None
-        return rows
-
     # ════════════════════════════════════════════════
     # 압축 JSON 변환
     # ════════════════════════════════════════════════
 
-    def compress_rows(self, rows) -> dict:
+    def _compress_rows(self, rows, policy, *, require_full=True) -> tuple[dict, int]:
         """sqlite3.Row 리스트 → 압축 JSON dict."""
         compressed = defaultdict(list)
         skipped = 0
+        receipts = (dict(self.conn.execute("SELECT serial, receipt_json FROM known_error_provenance"))
+                    if table_exists(self.conn, "known_error_provenance") else {})
+        recoveries = {sid: (corrected, original) for sid, corrected, original in self.conn.execute(
+            "SELECT serial, record_json, raw_record_json FROM reviewed_recovery_provenance")} if table_exists(
+                self.conn, "reviewed_recovery_provenance") else {}
+        held = 0
+        checked = set()
+        self.export_dates = {}
 
         for row in rows:
-            key = compress_case_number(row["case_number_clean"])
-            if not key:
+            if policy and policy.held(row):
+                checked.add(row["serial"])
+                held += 1
                 skipped += 1
                 continue
+            recovered = recoveries.get(row["serial"])
+            if recovered:
+                from known_errors import CorrectionError, RECORD_FIELDS
+                if ({k: row[k] for k in RECORD_FIELDS} != json.loads(recovered[1])
+                        or row["case_number_clean"] != clean_case_number(row["case_number"])):
+                    raise CorrectionError("known_error_receipt_mismatch")
+                row = dict(row)
+                row.update(json.loads(recovered[0]))
+                row["case_number_clean"] = clean_case_number(row["case_number"])
+            receipt = receipts.get(row["serial"])
+            if receipt:
+                from known_errors import registry, CorrectionError
+                registry().verify_receipt(dict(row), json.loads(receipt))
+                if row["case_number_clean"] != clean_case_number(row["case_number"]):
+                    raise CorrectionError("known_error_receipt_mismatch")
+            raw_number = row["case_number"] or row["case_number_clean"] or ""
+            clean_number = row["case_number_clean"] or ""
+            if is_merged_case_number(raw_number) or is_merged_case_number(clean_number):
+                if clean_number != clean_case_number(raw_number):
+                    raise ValueError("inconsistent_merged_case_number")
+                keys = [compress_case_number(number)
+                        for number in expand_merged_case_numbers(raw_number)]
+            else:
+                key = compress_case_number(clean_number)
+                if not key:
+                    raise ValueError("unreviewed_unexportable_case")
+                keys = [key]
 
-            # serial: 숫자만이면 int, D/T prefix면 string 유지
+            # 법원 일련번호는 int, 헌재 D prefix는 string 유지.
             raw_serial = row["serial"] or "0"
+            if not re.fullmatch(r"(?:[0-9]+|D[0-9]+)", raw_serial):
+                raise ValueError("unsupported_publication_serial")
             serial = int(raw_serial) if raw_serial.isdigit() else raw_serial
             court_code = self.court_resolver.resolve(row["court"])
             date_int = compress_date(row["date"])
             name_raw = compress_case_name(row["case_name"] or "")
 
-            compressed[key].append([serial, court_code, date_int, name_raw])
+            for key in keys:
+                compressed[key].append([serial, court_code, date_int, name_raw])
+            self.export_dates[str(serial)] = row["date"]
 
+        if require_full and policy and checked != policy.quarantine.keys():
+            raise ValueError("quarantined_raw_missing")
+        self.last_export_report = {"quarantinedRows": held, "legacyUnclassifiedSkips": skipped - held,
+                                   "servingIds": len(self.export_dates)}
         return dict(compressed), skipped
 
-    def export_since(self, date_str: str) -> tuple[dict, int]:
-        """특정 날짜 이후 레코드 → 압축 dict."""
-        rows = self.get_cases_since(date_str)
-        return self.compress_rows(rows)
-
-    def export_all(self) -> tuple[dict, int]:
-        """전체 레코드 → 압축 dict."""
-        rows = self.get_all_cases()
-        return self.compress_rows(rows)
+    def compress_rows(self, rows) -> tuple[dict, int]:
+        """Review-only subset conversion; publication must use export_core()."""
+        self.conn.execute("SAVEPOINT reviewed_subset")
+        try:
+            policy = load_policy(self.conn)
+            self.court_resolver = CourtCodeResolver(policy.reference["court_code_map"] if policy else None)
+            return self._compress_rows(rows, policy, require_full=False)
+        finally:
+            self.conn.execute("RELEASE reviewed_subset")
 
     def export_core(self) -> tuple[dict, int]:
-        """판례 + 헌재 레코드 → 압축 dict."""
-        self.conn.row_factory = sqlite3.Row
-        cur = self.conn.execute(
-            "SELECT * FROM cases ORDER BY date"
-        )
-        rows = cur.fetchall()
-        self.conn.row_factory = None
-        return self.compress_rows(rows)
+        """Validate one consistent SQLite snapshot; revalidate on every export."""
+        self.conn.execute("SAVEPOINT verified_export")
+        try:
+            policy = load_policy(self.conn)
+            self.court_resolver = CourtCodeResolver(policy.reference["court_code_map"] if policy else None)
+            data, skipped = self._compress_rows(self.get_all_cases(), policy)
+            if policy:
+                data = policy.preserve_reference(data, self.court_resolver.code_map)
+            return data, skipped
+        finally:
+            self.conn.execute("RELEASE verified_export")
 
-    def export_new(self, since_iso: str) -> tuple[dict, int]:
-        """이번 실행에서 추가된 레코드만 → 압축 dict."""
-        rows = self.get_new_since(since_iso)
-        return self.compress_rows(rows)
+    def export_all(self) -> tuple[dict, int]:
+        return self.export_core()
 
     # ════════════════════════════════════════════════
     # 유틸
@@ -255,49 +358,3 @@ class MasterDB:
             "newest_date": newest,
             "size_mb": round(size_mb, 2),
         }
-
-
-# 자체 테스트 (직접 실행 시)
-if __name__ == "__main__":
-    def _test():
-        """간단한 통합 테스트. 완료 후 테스트 DB 자동 삭제."""
-        test_db = "test_master.db"
-        db = MasterDB(test_db)
-
-        test_cases = [
-            {"serial": "100001", "case_name": "손해배상(기)",
-             "case_number": "2024다12345", "date": "20240115", "court": "대법원"},
-            {"serial": "100002", "case_name": "부과처분취소",
-             "case_number": "2023구합56789", "date": "20230610", "court": "서울행정법원"},
-        ]
-
-        ins, upd, skp = db.upsert_raw(test_cases)
-        log.info(f"Inserted: {ins}, Updated: {upd}, Skipped: {skp}")
-        log.info(f"Stats: {db.stats()}")
-
-        compressed, skipped = db.export_all()
-        log.info(f"Compressed keys: {len(compressed)}, Skipped: {skipped}")
-        log.info(json.dumps(compressed, ensure_ascii=False, indent=2))
-
-        # KIPRIS 테이블 테스트
-        test_kipris = [
-            {"serial": "2023당1234", "case_name": "거절결정취소",
-             "case_number": "2023당1234", "decision_date": "20230915",
-             "trial_type": "거절결정"},
-            {"serial": "2022원5678", "case_name": "무효심판",
-             "case_number": "2022원5678", "decision_date": "20220310",
-             "trial_type": "무효"},
-        ]
-        k_ins, k_upd = db.upsert_kipris(test_kipris)
-        log.info(f"KIPRIS Inserted: {k_ins}, Updated: {k_upd}")
-        log.info(f"KIPRIS Count: {db.kipris_count()}")
-
-        k_data, k_skip = db.export_kipris()
-        log.info(f"KIPRIS Compressed keys: {len(k_data)}, Skipped: {k_skip}")
-        log.info(json.dumps(k_data, ensure_ascii=False, indent=2))
-
-        db.close()
-        os.remove(test_db)
-        log.info("✅ Test passed")
-
-    _test()

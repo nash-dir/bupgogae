@@ -7,6 +7,7 @@ Dockerfile*
 
 # ===== 개발 환경 =====
 venv/
+.venv/
 __pycache__/
 .env
 .env.*
@@ -38,6 +39,7 @@ legacy/
 
 # ===== Backfill 출력 =====
 backfill/
+/audit/
 caseDB_*
 pipeline/output/
 
@@ -51,6 +53,8 @@ playwright-report/
 blob-report/
 playwright/.cache/
 .pytest_cache/
+.ruff_cache/
+coverage/
 .coverage
 htmlcov/
 .ipynb_checkpoints/
@@ -67,7 +71,6 @@ htmlcov/
 *.db-wal
 *.sqlite
 *.sqlite3
-extension/data/db.json
 
 # ===== 빌드 산출물 =====
 dist/
@@ -81,10 +84,13 @@ build/
 *.log
 *.tmp
 *.txt
+!requirements-dev.txt
 
 # ===== 에이전트 설정 =====
 AGENTS.md
 .agents/*
+.codex/
+.aws/
 # Claude Code 개인 로컬 설정 (공용 .claude/settings.json은 추적)
 .claude/settings.local.json
 # 로컬 수동검증용 문서 픽스쳐 (커밋 금지)

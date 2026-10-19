@@ -9,7 +9,7 @@ const path = require('path');
 
 function loadScript(rel) {
   const code = fs.readFileSync(path.join(__dirname, '..', rel), 'utf-8');
-  (0, eval)(code); // eslint-disable-line no-eval
+  (0, eval)(code);
 }
 
 describe('renderPrecedentBadge', () => {
@@ -42,6 +42,24 @@ describe('renderPrecedentBadge', () => {
     expect(parent.querySelector('.bgae-badge')).toBe(badge);
   });
 
+  test('삭제만 된 고정 배지를 자동 해제하고 다음 배지 tooltip을 열 수 있다', async () => {
+    const { parent, tn } = makeTextNode('2015다6302');
+    const badge = bg.renderPrecedentBadge(tn, '2015다6302', 'green');
+    badge.click();
+    const tooltip = document.querySelector('.bgae-global-tooltip');
+    expect(tooltip.classList.contains('bgae-pinned')).toBe(true);
+    parent.remove();
+    await Promise.resolve(); // MutationObserver의 삭제 알림
+    expect(tooltip.classList.contains('bgae-show')).toBe(false);
+    expect(tooltip.classList.contains('bgae-pinned')).toBe(false);
+    expect(tooltip.querySelector('.bgae-tooltip-content-box').childNodes).toHaveLength(0);
+    const next = makeTextNode('2015다7777');
+    const nextBadge = bg.renderPrecedentBadge(next.tn, '2015다7777', 'orange');
+    nextBadge.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(tooltip.classList.contains('bgae-tooltip-orange')).toBe(true);
+    nextBadge.dispatchEvent(new MouseEvent('mouseleave'));
+  });
+
   test('분할 텍스트 노드는 _ownTextNodes에 등록 (옵저버 무시 대상)', () => {
     const { parent, tn } = makeTextNode('앞 2020두1234 뒤');
     bg.renderPrecedentBadge(tn, '2020두1234', 'green');
@@ -57,6 +75,67 @@ describe('renderPrecedentBadge', () => {
   test('매칭 문자열이 없으면 null', () => {
     const { tn } = makeTextNode('관련 내용 없음');
     expect(bg.renderPrecedentBadge(tn, '2015다6302', 'green')).toBeNull();
+  });
+
+  test('주황 툴팁은 로컬 DB miss만 설명하고 허위 여부를 단정하지 않음', () => {
+    const { tn } = makeTextNode('2026다1234');
+    const badge = bg.renderPrecedentBadge(tn, '2026다1234', 'orange');
+    badge.dispatchEvent(new MouseEvent('mouseenter'));
+
+    const tooltip = document.querySelector('.bgae-global-tooltip');
+    expect(tooltip.textContent).toContain('현재 브라우저의 로컬 공개 DB에서 찾지 못한');
+    expect(tooltip.textContent).toContain('원문·추가 자료에서 직접 확인');
+    expect(tooltip.textContent).not.toContain('검증되지 않은');
+    expect(tooltip.textContent).not.toContain('허위 사건번호 여부를 판별');
+    badge.dispatchEvent(new MouseEvent('mouseleave'));
+  });
+
+  test('빨강 툴팁은 구조·지원 범위 경고만으로 법적 존재나 인용 진위를 확정하지 않음', () => {
+    const { tn } = makeTextNode('2030다1');
+    const badge = bg.renderPrecedentBadge(tn, '2030다1', 'red', {
+      redReason: '미래 연도입니다.',
+    });
+    badge.dispatchEvent(new MouseEvent('mouseenter'));
+
+    const tooltip = document.querySelector('.bgae-global-tooltip');
+    expect(tooltip.textContent).toContain('사건의 법적 존재나 인용의 진위 여부를 확정할 수 없습니다');
+    expect(tooltip.textContent).not.toContain('AI 환각');
+    badge.dispatchEvent(new MouseEvent('mouseleave'));
+  });
+
+  test('회색 툴팁은 DB 미확인이 아니라 검증 미완료로 설명', () => {
+    const { tn } = makeTextNode('2015다6302');
+    const badge = bg.renderPrecedentBadge(tn, '2015다6302', 'gray', {
+      grayReason: '테스트 조회 오류',
+    });
+    badge.dispatchEvent(new MouseEvent('mouseenter'));
+
+    const tooltip = document.querySelector('.bgae-global-tooltip');
+    expect(tooltip.textContent).toContain('검증 미완료');
+    expect(tooltip.textContent).toContain('테스트 조회 오류');
+    expect(tooltip.textContent).toContain('DB 미확인을 뜻하지 않습니다');
+    badge.dispatchEvent(new MouseEvent('mouseleave'));
+  });
+
+  test('초록 툴팁은 동일 사건번호의 복수 레코드를 후보 건수로 알린다', () => {
+    const { tn } = makeTextNode('2015다6302');
+    const common = {
+      courtCode: 1, dateInt: 150115, caseName: '테스트사건',
+      caseType: 'court', caseCode: '다',
+    };
+    const badge = bg.renderPrecedentBadge(tn, '2015다6302', 'green', {
+      greenEntries: [
+        { ...common, serialNumber: 1 },
+        { ...common, serialNumber: 2 },
+      ],
+      courtCodeMap: { 대법원: 1 },
+    });
+    badge.dispatchEvent(new MouseEvent('mouseenter'));
+
+    const tooltip = document.querySelector('.bgae-global-tooltip');
+    expect(tooltip.textContent).toContain('동일 사건번호 후보 2건');
+    expect(tooltip.querySelectorAll('.bgae-tooltip-case-item')).toHaveLength(2);
+    badge.dispatchEvent(new MouseEvent('mouseleave'));
   });
 
   test('renderPrecedentBadges: 한 텍스트노드 내 다중 매칭을 1회 분할로 모두 배지 (M2)', () => {

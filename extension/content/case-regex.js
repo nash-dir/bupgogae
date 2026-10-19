@@ -6,7 +6,7 @@
  * [파이프라인]
  *   1. extractCaseNumbers(text) → 화이트리스트 정규식으로 사건번호 추출
  *      - 법원/헌재: case_code_map 기반 동적 정규식 (등록된 사건부호만 매칭)
- *   2. validateCaseNumber(num)  → Red 필터: 미래 연도, 비현실적 과거, 비정상 일련번호
+ *   2. validateCaseNumber(num)  → Red 필터: 미래 연도, 제품 지원 연도 하한, 비정상 일련번호
  *   3. compressCaseKey(num)     → "2015다6302" → "15Da6302"
  *
  * [의존성]
@@ -24,8 +24,43 @@
 let _caseCodeMap = null;      // 한글부호 → 로마자
 let _validCodes = null;       // Set<한글부호> — 유효 부호 집합
 let _courtCodeMap = null;     // 법원코드 매핑 { "대법원": 1, ... }
+let _shortCaseKeys = new Set(); // 활성 DB에 실제 존재하는 4글자 사건번호 압축 키
+let _shortRawCases = new Set(); // 정규식 전 fast-path용 원문 사건번호
 let _metaInitPromise = null;  // 초기화 Promise (중복 요청 방지)
 let _courtCaseRegex = null;   // 동적 빌드된 법원 사건번호 정규식
+
+function applyMetadata(caseCodeMap, courtCodeMap, shortCaseKeys) {
+  _caseCodeMap = caseCodeMap || {};
+  _validCodes = new Set(Object.keys(_caseCodeMap));
+  _courtCodeMap = courtCodeMap || {};
+  _shortCaseKeys = new Set(Array.isArray(shortCaseKeys)
+    ? shortCaseKeys.filter((key) => typeof key === 'string')
+    : []);
+  _shortRawCases = new Set();
+
+  const romanToSingleHangul = new Map();
+  for (const [hangulCode, romanCode] of Object.entries(_caseCodeMap)) {
+    if (hangulCode.length === 1 && typeof romanCode === 'string') {
+      romanToSingleHangul.set(romanCode, hangulCode);
+    }
+  }
+  for (const key of _shortCaseKeys) {
+    if (!/^\d{2}.+\d$/.test(key)) continue;
+    const hangulCode = romanToSingleHangul.get(key.slice(2, -1));
+    if (hangulCode) _shortRawCases.add(`${key.slice(0, 2)}${hangulCode}${key.slice(-1)}`);
+  }
+
+  const codes = Object.keys(_caseCodeMap)
+    .sort((a, b) => b.length - a.length || a.localeCompare(b));
+  if (codes.length > 0) {
+    const codesPattern = codes.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    _courtCaseRegex = new RegExp(
+      `(?<![0-9])((?:19|20)\\d{2}|\\d{2})(${codesPattern})(\\d{1,7})(?![0-9])`, 'g'
+    );
+  } else {
+    _courtCaseRegex = null;
+  }
+}
 
 /**
  * 메타데이터 초기화.
@@ -40,32 +75,21 @@ function initMeta() {
     chrome.runtime.sendMessage({ type: 'GET_META' }, (response) => {
       if (chrome.runtime.lastError) {
         console.warn('[bupgogae] 메타데이터 로드 실패:', chrome.runtime.lastError.message);
-        _caseCodeMap = {};
-        _validCodes = new Set();
+        applyMetadata({}, {}, []);
         resolve();
         return;
       }
 
       if (response && response.case_code_map) {
-        _caseCodeMap = response.case_code_map;
-        _validCodes = new Set(Object.keys(_caseCodeMap));
-        _courtCodeMap = response.court_code_map || {};
+        applyMetadata(
+          response.case_code_map,
+          response.court_code_map,
+          response.short_case_keys,
+        );
 
-        // 화이트리스트 정규식 빌드: 긴 부호 우선 (가합 > 가)
-        const codes = Object.keys(_caseCodeMap)
-          .sort((a, b) => b.length - a.length || a.localeCompare(b));
-        if (codes.length > 0) {
-          const codesPattern = codes.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-          // 캡처 그룹: (연도)(사건부호)(일련번호)
-          _courtCaseRegex = new RegExp(
-            `(?<![0-9])((?:19|20)\\d{2}|\\d{2})(${codesPattern})(\\d{1,7})`, 'g'
-          );
-        }
-
-        console.log(`[bupgogae] 메타데이터 로드 완료: ${_validCodes.size}개 사건부호, ${Object.keys(_courtCodeMap).length}개 법원`);
+        console.log(`[bupgogae] 메타데이터 로드 완료: ${_validCodes.size}개 사건부호, ${Object.keys(_courtCodeMap).length}개 법원, ${_shortCaseKeys.size}개 4글자 사건번호`);
       } else {
-        _caseCodeMap = {};
-        _validCodes = new Set();
+        applyMetadata({}, {}, []);
         console.warn('[bupgogae] 메타데이터 응답 이상:', response);
       }
       resolve();
@@ -84,7 +108,7 @@ function initMeta() {
  * 법원 사건번호 폴백 정규식 (메타 미로드 시에만 사용).
  * 메타 로드 후에는 _courtCaseRegex (화이트리스트)를 우선 사용.
  */
-const CASE_NUMBER_REGEX_FALLBACK = /(?<![0-9])(?:(?:19|20)\d{2}|\d{2})[가-힣]{1,4}\d{1,7}/g;
+const CASE_NUMBER_REGEX_FALLBACK = /(?<![0-9])(?:(?:19|20)\d{2}|\d{2})[가-힣]{1,4}\d{1,7}(?![0-9])/g;
 const CASE_PARTS_REGEX = /^((?:19|20)\d{2}|\d{2})([가-힣]{1,4})(\d{1,7})$/;
 
 /**
@@ -131,14 +155,16 @@ function extractCaseNumbers(text) {
     _courtCaseRegex.lastIndex = 0;
     while ((match = _courtCaseRegex.exec(text)) !== null) {
       const raw = match[0];
+      const parsed = {
+        raw, year: match[1], code: match[2], serial: match[3],
+        startIdx: match.index,
+        type: match[2].startsWith('헌') ? 'constitutional' : 'court',
+      };
+      // 정확히 4글자인 후보는 활성 DB snapshot에서 파생한 canonical 집합만 허용한다.
+      if (raw.length === 4 && !_shortCaseKeys.has(compressCaseKey(parsed))) continue;
       if (seen.has(raw)) continue;
       seen.add(raw);
-      // 헌재 부호(헌가~헌아)는 'constitutional', 나머지는 'court'
-      const caseType = match[2].startsWith('헌') ? 'constitutional' : 'court';
-      results.push({
-        raw, year: match[1], code: match[2], serial: match[3],
-        startIdx: match.index, type: caseType,
-      });
+      results.push(parsed);
     }
   } else {
     // 폴백: 메타 미로드 시 범용 정규식
@@ -149,6 +175,8 @@ function extractCaseNumbers(text) {
       seen.add(raw);
       const parts = raw.match(CASE_PARTS_REGEX);
       if (!parts) continue;
+      // 메타 로드 실패 시 canonical 집합도 없으므로 4글자 후보는 fail-closed한다.
+      if (raw.length === 4) continue;
       results.push({
         raw, year: parts[1], code: parts[2], serial: parts[3],
         startIdx: match.index, type: 'court',
@@ -169,7 +197,7 @@ function extractCaseNumbers(text) {
  *
  * Red 판정 기준:
  *   1. 미래 연도: year > currentYear
- *   2. 비현실적 과거 연도: 법원 < 1945, 헌재 < 1988
+ *   2. 제품 지원 연도 하한: 법원 < 1945, 헌재 < 1988
  *   3. 비정상 일련번호: 0
  *
  * 사건부호 유효성은 추출 단계에서 화이트리스트 정규식(_courtCaseRegex)으로
@@ -204,19 +232,19 @@ function validateCaseNumber(parsed) {
     };
   }
 
-  // ── Red 2: 비현실적 과거 연도 ──
-  // 헌재(constitutional)는 헌법재판소 설립(1988) 이전 사건이 존재할 수 없다 (L2).
+  // ── Red 2: 제품 지원 연도 하한 ──
+  // 이 하한은 현재 공개 DB와 조회 정책의 범위이며, 법적 부존재 판정이 아니다.
   const minYears = { court: 1945, constitutional: 1988 };
   const minYear = minYears[parsed.type] || 1945;
   if (fullYear < minYear) {
     const floorLabel = parsed.type === 'constitutional'
-      ? '헌법재판소 설립(1988)'
-      : '법원 설립(1945)';
+      ? '헌법재판소 사건 조회 지원 하한(1988)'
+      : '법원 사건 조회 지원 하한(1945)';
     // 2자리 연도가 직전 세기로 해석돼 floor 미만이 된 경우엔, 해석 과정을 밝혀
     // "왜 과거로 읽혔는지"를 사용자가 알 수 있게 한다 (라벨은 Red로 동일).
     const reason = twoDigitDroppedToPastCentury
       ? `2자리 연도 '${parsed.year}'은 가장 가까운 과거인 ${fullYear}년으로 해석되며, 이는 ${floorLabel} 이전입니다.`
-      : `비현실적 연도(${fullYear}년)입니다. ${floorLabel} 이전 사건은 존재할 수 없습니다.`;
+      : `${fullYear}년은 법고개의 ${floorLabel}보다 이전이어서 조회 지원 범위 밖입니다.`;
     return { valid: false, reason };
   }
 
@@ -287,6 +315,25 @@ function getCourtCodeMap() {
   return _courtCodeMap || {};
 }
 
+/** 활성 DB snapshot 교체 후 메타를 다시 읽는다. 진행 중 초기화와는 직렬화한다. */
+async function refreshMeta() {
+  if (_metaInitPromise) await _metaInitPromise;
+  _metaInitPromise = null;
+  return initMeta();
+}
+
+/** 고립된 4글자 텍스트 노드를 정규식 전에 O(1)로 거르는 fast-path. */
+function isCanonicalShortCaseText(text) {
+  return typeof text === 'string' && text.length === 4 && _shortRawCases.has(text);
+}
+
+/** 조회 snapshot과 함께 온 court map으로 원자적으로 교체한다. */
+function updateCourtCodeMap(courtCodeMap) {
+  if (!courtCodeMap || typeof courtCodeMap !== 'object' || Array.isArray(courtCodeMap)) return false;
+  _courtCodeMap = { ...courtCodeMap };
+  return true;
+}
+
 
 // ============================================================
 // 6. 외부 인터페이스
@@ -295,11 +342,14 @@ function getCourtCodeMap() {
 if (typeof window !== 'undefined') {
   window.bupgogaeCaseRegex = {
     initMeta,
+    refreshMeta,
     extractCaseNumbers,
     validateCaseNumber,
     compressCaseKey,
     isMetaReady,
     getCourtCodeMap,
+    updateCourtCodeMap,
+    isCanonicalShortCaseText,
   };
 }
 
@@ -307,35 +357,29 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     initMeta,
+    refreshMeta,
     extractCaseNumbers,
     validateCaseNumber,
     compressCaseKey,
     isMetaReady,
     getCourtCodeMap,
+    updateCourtCodeMap,
+    isCanonicalShortCaseText,
     /**
      * 테스트 전용: 메타데이터(case_code_map / court_code_map)를 직접 주입.
      * Service Worker 메시지 없이 화이트리스트 정규식·압축 로직을 검증하기 위함.
      */
-    __setMetaForTest(caseCodeMap, courtCodeMap) {
-      _caseCodeMap = caseCodeMap || {};
-      _validCodes = new Set(Object.keys(_caseCodeMap));
-      _courtCodeMap = courtCodeMap || {};
-      const codes = Object.keys(_caseCodeMap)
-        .sort((a, b) => b.length - a.length || a.localeCompare(b));
-      if (codes.length > 0) {
-        const codesPattern = codes.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-        _courtCaseRegex = new RegExp(
-          `(?<![0-9])((?:19|20)\\d{2}|\\d{2})(${codesPattern})(\\d{1,7})`, 'g'
-        );
-      } else {
-        _courtCaseRegex = null;
-      }
+    __setMetaForTest(caseCodeMap, courtCodeMap, shortCaseKeys = []) {
+      applyMetadata(caseCodeMap, courtCodeMap, shortCaseKeys);
     },
     /** 테스트 전용: 주입된 메타 초기화. */
     __resetMetaForTest() {
       _caseCodeMap = null;
       _validCodes = null;
       _courtCodeMap = null;
+      _shortCaseKeys = new Set();
+      _shortRawCases = new Set();
+      _metaInitPromise = null;
       _courtCaseRegex = null;
     },
   };

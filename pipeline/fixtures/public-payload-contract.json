@@ -1,0 +1,133 @@
+{
+  "base": {
+    "version": "20260101",
+    "total": 1,
+    "keys": 1,
+    "court_code_map": {
+      "대법원": 1,
+      "헌법재판소": 2
+    },
+    "cases": {
+      "26Da1": [
+        [
+          123,
+          1,
+          260101,
+          "합성 판결"
+        ]
+      ]
+    }
+  },
+  "samples": [
+    {
+      "name": "valid court",
+      "valid": true
+    },
+    {
+      "name": "valid constitutional",
+      "cases": {
+        "26HB1": [
+          [
+            "D123",
+            2,
+            260101,
+            "합성 결정"
+          ]
+        ]
+      },
+      "valid": true
+    },
+    {
+      "name": "unsafe serial",
+      "serial": 9007199254740992,
+      "valid": false
+    },
+    {
+      "name": "negative serial",
+      "serial": -1,
+      "valid": false
+    },
+    {
+      "name": "boolean serial",
+      "serial": true,
+      "valid": false
+    },
+    {
+      "name": "old version year",
+      "version": "19990101",
+      "valid": false
+    },
+    {
+      "name": "invalid calendar version",
+      "version": "20260230",
+      "valid": false
+    },
+    {
+      "name": "obsolete key",
+      "cases": {
+        "TX26중1": [
+          [
+            "T123",
+            1,
+            260101,
+            "심판"
+          ]
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown court",
+      "courtCode": 99,
+      "valid": false
+    },
+    {
+      "name": "keys mismatch",
+      "keys": 2,
+      "valid": false
+    },
+    {
+      "name": "missing optional keys",
+      "omitKeys": true,
+      "valid": true
+    },
+    {
+      "name": "null title",
+      "title": null,
+      "valid": false
+    },
+    {
+      "name": "null optional keys is invalid",
+      "keys": null,
+      "valid": false
+    },
+    {
+      "name": "non ASCII constitutional serial",
+      "serial": "D１２３",
+      "valid": false
+    },
+    {
+      "name": "non ASCII case key",
+      "cases": {"２６Da１": [[123, 1, 260101, "합성 판결"]]},
+      "valid": false
+    }
+  ],
+  "canonical": {
+    "caseCodeMap": {
+      "두": "Du",
+      "다": "Da",
+      "헌가": "HG"
+    },
+    "keys": [
+      "89Du1",
+      "89Du12",
+      "15Da6302",
+      "26HG1",
+      "８９Du１",
+      "TX25중1"
+    ],
+    "expected": [
+      "89Du1"
+    ]
+  }
+}

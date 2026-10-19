@@ -13,15 +13,14 @@
 """
 
 import os
-import random
 import time
 
 import requests
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from log_setup import get_logger
-from config import LAW_DELAY_MIN as DELAY_MIN, LAW_DELAY_MAX as DELAY_MAX, LAW_TIMEOUT
+from config import LAW_TIMEOUT
+from law_normalization import normalize_decision_date
 
 log = get_logger(__name__)
 
@@ -37,7 +36,21 @@ HEADERS = {
 }
 
 # ── 네트워크 통계 (모듈 수준) ──
-_stats = {"requests": 0, "success": 0, "retries": 0, "failures": 0}
+_stats = {
+    "requests": 0,  # logical fetch_xml_safe calls
+    "attempts": 0,  # physical HTTP requests
+    "success": 0,
+    "retries": 0,
+    "failures": 0,
+}
+
+MAX_ATTEMPTS = 5
+RETRYABLE_STATUS_CODES = {408, 429}
+MAX_XML_BYTES = 5 * 1024 * 1024
+
+
+class ResponseBodyTooLarge(Exception):
+    """법제처 응답이 페이지별 안전 상한을 초과함."""
 
 
 def get_network_stats() -> dict:
@@ -47,33 +60,85 @@ def get_network_stats() -> dict:
 
 def reset_network_stats():
     """네트워크 통계 초기화."""
-    _stats.update({"requests": 0, "success": 0, "retries": 0, "failures": 0})
+    _stats.update({
+        "requests": 0,
+        "attempts": 0,
+        "success": 0,
+        "retries": 0,
+        "failures": 0,
+    })
 
 
 # ── 커넥션 풀 세션 (TCP/TLS 핸드셰이크 재사용) ──
 _session = None
+WARP_LAW_PROXY = "socks5h://127.0.0.1:40000"
 
 
 def _get_session() -> requests.Session:
-    """커넥션 풀링 + 자동 재시도 세션 반환 (lazy init)."""
+    """자동 재시도 없이 커넥션 풀링만 제공하는 세션 반환."""
     global _session
     if _session is None:
+        proxy = os.getenv("BUPGOGAE_LAW_PROXY", "")
+        if proxy and proxy != WARP_LAW_PROXY:
+            raise ValueError("BUPGOGAE_LAW_PROXY must use the approved local WARP proxy")
         _session = requests.Session()
-        retry = Retry(
-            total=3,
-            backoff_factor=1,           # 1, 2, 4초 자동 백오프
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET"],
-            raise_on_status=False,
-        )
+        if proxy:
+            # Only the law API uses WARP. Ignore ambient HTTP_PROXY/NO_PROXY
+            # so a failed proxy cannot silently fall back to the runner route.
+            _session.trust_env = False
+            _session.proxies["https://www.law.go.kr"] = proxy
         adapter = HTTPAdapter(
-            max_retries=retry,
+            # 재시도는 fetch_xml_safe 한 곳에서만 수행한다. urllib3의 숨은
+            # 재시도와 중첩하지 않아 실제 요청 횟수와 telemetry를 일치시킨다.
+            max_retries=0,
             pool_connections=5,
             pool_maxsize=5,
         )
         _session.mount("https://", adapter)
         _session.headers.update(HEADERS)
     return _session
+
+
+def _backoff_seconds(attempt_index: int) -> int:
+    """0-based 실패 attempt 뒤의 bounded backoff."""
+    return min(5 * (2 ** attempt_index), 60)
+
+
+def _request_error_kind(error: requests.exceptions.RequestException) -> str:
+    """URL/요청 객체를 직렬화하지 않는 안전한 오류 분류."""
+    if isinstance(error, requests.exceptions.Timeout):
+        return "timeout"
+    if isinstance(error, requests.exceptions.SSLError):
+        return "tls"
+    if isinstance(error, requests.exceptions.ConnectionError):
+        return "connection"
+    return "request"
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code in RETRYABLE_STATUS_CODES or 500 <= status_code <= 599
+
+
+def _read_bounded_body(response) -> bytes:
+    raw_length = response.headers.get("Content-Length")
+    if raw_length is not None:
+        try:
+            declared_length = int(raw_length)
+        except (TypeError, ValueError):
+            declared_length = None
+        if declared_length is not None and declared_length > MAX_XML_BYTES:
+            raise ResponseBodyTooLarge
+
+    chunks = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=64 * 1024):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > MAX_XML_BYTES:
+            raise ResponseBodyTooLarge
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def get_text(element, tag):
@@ -95,7 +160,7 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
     """법제처 API 호출 (지수 백오프 재시도 포함).
 
     Args:
-        date_str: 검색 날짜 (YYYYMMDD) — prec 전용
+        date_str: 검색 날짜 또는 범위 (YYYYMMDD[~YYYYMMDD]) — prec 전용
         page: 페이지 번호 (기본 1)
         target: API 대상 ("prec"=판례, "detc"=헌재결정례 등)
         query: 검색어 — detc 등 query 기반 API용
@@ -113,7 +178,14 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
         "page": page,
     }
     if date_str:
-        params["date"] = date_str
+        # Official API: date is a single date; ranges use prncYd. Sending a
+        # range in date produces a valid-looking totalCnt=0, not an API error.
+        parts = date_str.split("~")
+        if (target != "prec" or len(parts) not in (1, 2)
+                or any(normalize_decision_date(part) != part for part in parts)
+                or parts[0] > parts[-1]):
+            raise ValueError("invalid precedent date filter")
+        params["prncYd" if len(parts) == 2 else "date"] = date_str
         params["mobileYn"] = "Y"
     if query:
         params["query"] = query
@@ -122,30 +194,76 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
 
     _stats["requests"] += 1
     session = _get_session()
-    retries = 5
-    for i in range(retries):
+    for attempt_index in range(MAX_ATTEMPTS):
+        _stats["attempts"] += 1
+        response = None
         try:
             response = session.get(
-                base_url, params=params, timeout=LAW_TIMEOUT,
+                base_url,
+                params=params,
+                timeout=LAW_TIMEOUT,
+                allow_redirects=False,
+                stream=True,
             )
             if response.status_code == 200:
+                content = _read_bounded_body(response)
                 _stats["success"] += 1
-                return response.content
+                return content
+
+            if not _is_retryable_status(response.status_code):
+                log.error(
+                    "❌ 법제처 API 요청 실패 "
+                    f"(status={response.status_code}, attempts={attempt_index + 1}, "
+                    "retryable=false)"
+                )
+                break
+
+            if attempt_index == MAX_ATTEMPTS - 1:
+                log.error(
+                    "❌ 법제처 API 요청 실패 "
+                    f"(status={response.status_code}, attempts={MAX_ATTEMPTS})"
+                )
+                break
 
             _stats["retries"] += 1
-            backoff = min(5 * (2 ** i), 60)  # 5, 10, 20, 40, 60초
-            log.warning(f"⚠️ [HTTP {response.status_code}] "
-                  f"대기 {backoff}초 후 재시도 ({i + 1}/{retries})...")
+            backoff = _backoff_seconds(attempt_index)
+            log.warning(
+                "⚠️ 법제처 API 재시도 "
+                f"(kind=transient, status={response.status_code}, "
+                f"next_attempt={attempt_index + 2}/{MAX_ATTEMPTS}, "
+                f"backoff={backoff}s)"
+            )
             time.sleep(backoff)
 
+        except ResponseBodyTooLarge:
+            log.error(
+                "❌ 법제처 API 요청 실패 "
+                f"(kind=response_too_large, attempts={attempt_index + 1}, "
+                "retryable=false)"
+            )
+            break
         except requests.exceptions.RequestException as e:
+            kind = _request_error_kind(e)
+            if attempt_index == MAX_ATTEMPTS - 1:
+                log.error(
+                    "❌ 법제처 API 요청 실패 "
+                    f"(kind={kind}, attempts={MAX_ATTEMPTS})"
+                )
+                break
+
             _stats["retries"] += 1
-            backoff = min(5 * (2 ** i), 60)
-            # OC=API_KEY가 요청 URL에 실려 예외 문자열에 노출되므로 로깅 전 마스킹
-            safe_err = str(e).replace(API_KEY, "***") if API_KEY else str(e)
-            log.error(f"❌ [Network Error] {safe_err}. "
-                  f"대기 {backoff}초 후 재시도 ({i + 1}/{retries})...")
+            backoff = _backoff_seconds(attempt_index)
+            # RequestException 문자열에는 OC query와 URL이 포함될 수 있다.
+            # 예외 객체 자체는 절대 로그 포맷에 전달하지 않는다.
+            log.warning(
+                "⚠️ 법제처 API 재시도 "
+                f"(kind={kind}, next_attempt={attempt_index + 2}/"
+                f"{MAX_ATTEMPTS}, backoff={backoff}s)"
+            )
             time.sleep(backoff)
+        finally:
+            if response is not None:
+                response.close()
 
     _stats["failures"] += 1
     return None

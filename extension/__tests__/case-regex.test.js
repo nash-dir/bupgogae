@@ -19,6 +19,7 @@ const SAMPLE_CASE_CODE_MAP = {
 };
 
 const SAMPLE_COURT_CODE_MAP = { '대법원': 1, '서울고등법원': 2 };
+const SAMPLE_SHORT_CASE_KEYS = ['89Du1'];
 
 describe('extractCaseNumbers', () => {
   afterEach(() => caseRegex.__resetMetaForTest());
@@ -66,12 +67,12 @@ describe('extractCaseNumbers', () => {
     expect(found).toHaveLength(1);
   });
 
-  test('조세(조심) 사건번호는 더 이상 탐지하지 않는다 (DLC 제거)', () => {
+  test('조세(조심) 사건번호는 더 이상 탐지하지 않는다 (비법원 사건 제외)', () => {
     caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP);
     // "중"은 화이트리스트에 없고 조세 전용 정규식도 제거됨 → 어떤 항목도 추출되지 않음
     const found = caseRegex.extractCaseNumbers('조심 2025중2548 결정');
     expect(found).toHaveLength(0);
-    expect(found.some(f => f.type === 'tax')).toBe(false);
+    expect(found).toEqual([]);
   });
 
   test('폴백 모드(메타 미로드): 범용 정규식으로 추출', () => {
@@ -105,6 +106,68 @@ describe('extractCaseNumbers', () => {
       expect(caseRegex.extractCaseNumbers('99다1234 사건')[0].raw).toBe('99다1234');
     });
   });
+
+  test('4글자 후보는 활성 DB canonical 집합에 있는 사건번호만 추출', () => {
+    caseRegex.__setMetaForTest(
+      SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP, SAMPLE_SHORT_CASE_KEYS,
+    );
+    expect(caseRegex.extractCaseNumbers('89두1')).toHaveLength(1);
+    expect(caseRegex.extractCaseNumbers('(89두1)')[0].raw).toBe('89두1');
+    expect(caseRegex.extractCaseNumbers('99다1')).toEqual([]);
+    expect(caseRegex.isCanonicalShortCaseText('89두1')).toBe(true);
+    expect(caseRegex.isCanonicalShortCaseText('99다1')).toBe(false);
+  });
+
+  test('5글자 헌마·4자 연도 인용은 short allowlist와 무관하게 보존', () => {
+    caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP, []);
+    expect(caseRegex.extractCaseNumbers('89헌마1')[0].raw).toBe('89헌마1');
+    expect(caseRegex.extractCaseNumbers('2026헌가1')[0].raw).toBe('2026헌가1');
+  });
+
+  test('snapshot 교체 시 메타를 다시 읽어 4글자 canonical 집합을 갱신', async () => {
+    caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP, ['89Du1']);
+    expect(caseRegex.extractCaseNumbers('89두1')).toHaveLength(1);
+
+    global.chrome.runtime.sendMessage = jest.fn((_message, callback) => callback({
+      case_code_map: SAMPLE_CASE_CODE_MAP,
+      court_code_map: SAMPLE_COURT_CODE_MAP,
+      short_case_keys: ['99Da1'],
+    }));
+    await caseRegex.refreshMeta();
+
+    expect(caseRegex.extractCaseNumbers('89두1')).toEqual([]);
+    expect(caseRegex.extractCaseNumbers('99다1')).toHaveLength(1);
+  });
+
+  describe('오른쪽 숫자 경계: 긴 일련번호를 7자리로 자르지 않는다', () => {
+    test.each([
+      '2015다12345678',
+      '2015다123456789',
+    ])('화이트리스트에서 %s는 부분 매칭하지 않음', (input) => {
+      caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP);
+      expect(caseRegex.extractCaseNumbers(input)).toEqual([]);
+    });
+
+    test.each([
+      '2015다12345678',
+      '2015다123456789',
+    ])('폴백에서 %s는 부분 매칭하지 않음', (input) => {
+      expect(caseRegex.extractCaseNumbers(input)).toEqual([]);
+    });
+
+    test.each([
+      ['2015다1', '2015다1'],
+      ['2015다1234567', '2015다1234567'],
+      ['(2015다1234567)', '2015다1234567'],
+      ['2015다1234567, 후속 문장', '2015다1234567'],
+    ])('정상 경계 %s는 %s로 보존', (input, expected) => {
+      caseRegex.__setMetaForTest(SAMPLE_CASE_CODE_MAP, SAMPLE_COURT_CODE_MAP);
+      const found = caseRegex.extractCaseNumbers(input);
+      expect(found).toHaveLength(1);
+      expect(found[0].raw).toBe(expected);
+      expect(input.slice(found[0].startIdx, found[0].startIdx + expected.length)).toBe(expected);
+    });
+  });
 });
 
 describe('validateCaseNumber', () => {
@@ -131,7 +194,7 @@ describe('validateCaseNumber', () => {
       year: '1944', code: '다', serial: '1', type: 'court',
     });
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/비현실적/);
+    expect(r.reason).toMatch(/지원 범위/);
   });
 
   test('일련번호 0은 invalid', () => {
@@ -195,7 +258,7 @@ describe('validateCaseNumber — 연도 피벗 상대화(M3) + 헌재 floor(L2)'
       year: '1987', code: '헌마', serial: '1', type: 'constitutional',
     });
     expect(r.valid).toBe(false);
-    expect(r.reason).toMatch(/비현실적/);
+    expect(r.reason).toMatch(/지원 범위/);
   });
 
   test('L2: 헌재 1988년은 valid (경계)', () => {

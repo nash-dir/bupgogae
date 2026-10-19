@@ -29,7 +29,7 @@ const SITE_DEFS = [
   { adapterName: 'GeminiAdapter',     siteId: 'gemini',     displayName: 'Google Gemini',    hosts: ['gemini.google.com'] },
   { adapterName: 'ChatGPTAdapter',    siteId: 'chatgpt',    displayName: 'ChatGPT',          hosts: ['chatgpt.com'] },
   { adapterName: 'ClaudeAdapter',     siteId: 'claude',     displayName: 'Claude',           hosts: ['claude.ai'] },
-  { adapterName: 'CopilotAdapter',    siteId: 'copilot',    displayName: 'Copilot (실험적)', hosts: ['copilot.microsoft.com'] },
+  { adapterName: 'CopilotAdapter',    siteId: 'copilot',    displayName: 'Copilot (실험적)', hosts: ['copilot.microsoft.com', 'copilot.com', 'copilot.cloud.microsoft'] },
   { adapterName: 'PerplexityAdapter', siteId: 'perplexity', displayName: 'Perplexity',       hosts: ['www.perplexity.ai', 'perplexity.ai'] },
   { adapterName: 'GrokAdapter',       siteId: 'grok',       displayName: 'Grok (실험적)',    hosts: ['grok.com'] },
 ];

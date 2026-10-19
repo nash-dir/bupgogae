@@ -119,11 +119,20 @@ class SiteAdapter {
    * @returns {Element[]}
    */
   findResponseContainers() {
-    for (const selector of this.resolveResponseSelectors()) {
+    // A syntactically valid remote config can still be stale after a UI change.
+    // Fall back to the shipped selectors when that tier finds no usable replies.
+    const selectors = [...new Set([
+      ...this.resolveResponseSelectors(),
+      ...(this._bundledSelectors || []),
+      ...this.getResponseSelectors(),
+    ])];
+    for (const selector of selectors) {
       try {
-        const elements = document.querySelectorAll(selector);
+        const elements = [...document.querySelectorAll(selector)].filter(element =>
+          !element.closest('[data-message-role="user"], [data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"], [data-testid="user-message"], [role="article"][aria-labelledby^="user-message-"], user-query') &&
+          !element.matches('main, body, html, form, textarea, input, [contenteditable="true"]'));
         if (elements.length > 0) {
-          return Array.from(elements);
+          return elements;
         }
       } catch (e) {
         // 잘못된 셀렉터 무시 (예: 원격 업데이트된 잘못된 셀렉터)
@@ -144,14 +153,29 @@ class SiteAdapter {
    * @returns {boolean}
    */
   isStreaming(container) {
-    // Remote Config → 번들 JSON 순으로 streamingIndicator 확인
-    const indicator =
-      (this._remoteConfig && this._remoteConfig.streamingIndicator) ||
-      this._bundledStreamingIndicator;
+    // Remote Config 우선. 문법 오류라면 번들 indicator로 안전하게 후퇴한다.
+    const remoteIndicator = this._remoteConfig && this._remoteConfig.streamingIndicator;
+    if (remoteIndicator) {
+      try {
+        return !!container.closest(remoteIndicator);
+      } catch (err) {
+        console.warn(
+          `[bupgogae:${this.siteId}] streamingIndicator 셀렉터 오류: ${remoteIndicator}`,
+          err,
+        );
+      }
+    }
 
-    if (indicator) {
-      // L-4: closest()는 클래스 셀렉터(.result-streaming)도 정확히 처리
-      return !!container.closest(indicator);
+    if (this._bundledStreamingIndicator &&
+        this._bundledStreamingIndicator !== remoteIndicator) {
+      try {
+        return !!container.closest(this._bundledStreamingIndicator);
+      } catch (err) {
+        console.warn(
+          `[bupgogae:${this.siteId}] 번들 streamingIndicator 셀렉터 오류`,
+          err,
+        );
+      }
     }
     return false;
   }
@@ -176,6 +200,8 @@ class SiteAdapter {
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: ['data-message-role', 'data-message-author-role', 'data-message-complete', 'data-chatgpt-search-unit-key', 'data-talvt-turn-state'],
     };
   }
 }

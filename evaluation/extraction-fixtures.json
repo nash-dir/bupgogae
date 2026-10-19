@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "description": "합성 사건번호 추출 경계 회귀 자료. 실제 사건의 존재나 법률적 정확성을 주장하지 않는다.",
+  "minimum_precision": 1,
+  "minimum_recall": 1,
+  "cases": [
+    { "id": "basic", "text": "대법원 2015다6302 판결", "expected": ["2015다6302"] },
+    { "id": "short-node-canonical", "text": "89두1", "expected": ["89두1"] },
+    { "id": "short-parentheses-canonical", "text": "(89두1)", "expected": ["89두1"] },
+    { "id": "short-noncanonical", "text": "99다1", "expected": [] },
+    { "id": "right-boundary-8", "text": "2015다12345678", "expected": [] },
+    { "id": "right-boundary-9", "text": "2015다123456789", "expected": [] },
+    { "id": "left-boundary-phone", "text": "전화 010-1234-5678도1", "expected": [] },
+    { "id": "multiple", "text": "2015다6302 및 2020두1234", "expected": ["2015다6302", "2020두1234"] },
+    { "id": "constitutional", "text": "헌재 2018헌마123", "expected": ["2018헌마123"] },
+    { "id": "constitutional-short-year", "text": "89헌마1", "expected": ["89헌마1"] },
+    { "id": "constitutional-four-digit-year", "text": "2026헌가1", "expected": ["2026헌가1"] },
+    { "id": "unknown-code", "text": "2020부해123", "expected": [] },
+    { "id": "punctuation", "text": "참조: 2015다1234567, 후속 문장", "expected": ["2015다1234567"] }
+  ]
+}

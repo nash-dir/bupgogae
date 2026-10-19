@@ -12,7 +12,7 @@
     <img src="../icons/icon48.png" alt="법고개" class="popup-logo" width="28" height="28">
     <div class="popup-title-group">
       <h1 class="popup-title">법고개</h1>
-      <span class="popup-subtitle">LLM 환각 판례 탐지기</span>
+      <span class="popup-subtitle">AI 답변 사건번호 확인 도구</span>
     </div>
   </header>
 
@@ -28,7 +28,7 @@
     <div class="popup-toggle-row" id="siteToggleRow">
       <div class="popup-toggle-info">
         <span class="popup-toggle-label">이 사이트에서 적용</span>
-        <span class="popup-toggle-desc" id="siteToggleDesc">현재 사이트에서 판례 검증 활성</span>
+        <span class="popup-toggle-desc" id="siteToggleDesc">현재 사이트에서 사건번호 확인 활성</span>
       </div>
       <label class="toggle-switch" for="siteToggle">
         <input type="checkbox" id="siteToggle" checked>
@@ -42,7 +42,7 @@
     <div class="popup-toggle-row">
       <div class="popup-toggle-info">
         <span class="popup-toggle-label">모든 사이트에서 적용</span>
-        <span class="popup-toggle-desc" id="globalToggleDesc">모든 사이트에서 판례 검증 활성</span>
+        <span class="popup-toggle-desc" id="globalToggleDesc">모든 사이트에서 사건번호 확인 활성</span>
       </div>
       <label class="toggle-switch" for="globalToggle">
         <input type="checkbox" id="globalToggle" checked>
@@ -65,19 +65,19 @@
     </div>
   </div>
 
-  <!-- 검증 범위 -->
-  <div class="popup-dlc-section">
-    <button class="popup-dlc-header" id="dlcToggleBtn" type="button">
-      <span class="popup-dlc-icon">⚖️</span>
-      <span class="popup-dlc-title">검증 범위</span>
-      <span class="popup-dlc-arrow" id="dlcArrow">▾</span>
+  <!-- 확인 범위 -->
+  <div class="popup-section-section">
+    <button class="popup-section-header" id="scopeToggleBtn" type="button">
+      <span class="popup-section-icon">⚖️</span>
+      <span class="popup-section-title">확인 범위</span>
+      <span class="popup-section-arrow" id="scopeArrow">▾</span>
     </button>
-    <div class="popup-dlc-body" id="dlcBody">
+    <div class="popup-section-body" id="scopeBody">
       <!-- 법원 토글 (기본 ON, core DB) -->
-      <div class="popup-toggle-row popup-dlc-row">
+      <div class="popup-toggle-row popup-section-row">
         <div class="popup-toggle-info">
           <span class="popup-toggle-label">법원</span>
-          <span class="popup-toggle-desc" id="courtFilterDesc">법원 판례 검증 활성</span>
+          <span class="popup-toggle-desc" id="courtFilterDesc">법원 판례 DB 대조 활성</span>
         </div>
         <label class="toggle-switch" for="courtFilterToggle">
           <input type="checkbox" id="courtFilterToggle" checked>
@@ -86,10 +86,10 @@
       </div>
 
       <!-- 헌법재판소 토글 (기본 ON, core DB) -->
-      <div class="popup-toggle-row popup-dlc-row">
+      <div class="popup-toggle-row popup-section-row">
         <div class="popup-toggle-info">
           <span class="popup-toggle-label">헌법재판소</span>
-          <span class="popup-toggle-desc" id="constitutionalFilterDesc">헌재 결정 검증 활성</span>
+          <span class="popup-toggle-desc" id="constitutionalFilterDesc">헌재 결정 DB 대조 활성</span>
         </div>
         <label class="toggle-switch" for="constitutionalFilterToggle">
           <input type="checkbox" id="constitutionalFilterToggle" checked>
@@ -102,13 +102,13 @@
   </div>
 
   <!-- 동기화 이력 (sync ledger — 현장 진단용) -->
-  <div class="popup-dlc-section">
-    <button class="popup-dlc-header" id="ledgerToggleBtn" type="button">
-      <span class="popup-dlc-icon">🗒️</span>
-      <span class="popup-dlc-title">동기화 이력</span>
-      <span class="popup-dlc-arrow" id="ledgerArrow">▾</span>
+  <div class="popup-section-section">
+    <button class="popup-section-header" id="ledgerToggleBtn" type="button">
+      <span class="popup-section-icon">🗒️</span>
+      <span class="popup-section-title">동기화 이력</span>
+      <span class="popup-section-arrow" id="ledgerArrow">▾</span>
     </button>
-    <div class="popup-dlc-body" id="ledgerBody">
+    <div class="popup-section-body" id="ledgerBody">
       <ul class="popup-ledger-list" id="ledgerList">
         <li class="popup-ledger-empty">기록 없음</li>
       </ul>
@@ -123,6 +123,7 @@
       <button id="dbRefreshBtn" class="popup-refresh-btn" title="DB 수동 동기화">🔄</button>
     </div>
     <span class="popup-db-count" id="dbCount">판례 수 : —</span>
+    <span class="popup-data-source">데이터 출처: 법제처 국가법령정보 공동활용</span>
     <span class="popup-contact">개발자 연락처: <a href="mailto:nashdir.dev@gmail.com" id="contactLink">nashdir.dev@gmail.com</a></span>
   </footer>
 

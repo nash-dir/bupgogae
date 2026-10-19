@@ -25,8 +25,15 @@ const os = require('os');
 const fs = require('fs');
 const { test: base, chromium, expect } = require('@playwright/test');
 
-/** 확장프로그램 소스 루트 (manifest.json 위치) */
-const EXTENSION_PATH = path.resolve(__dirname, '..', 'extension');
+/**
+ * 확장프로그램 루트(manifest.json 위치).
+ * CI release gate는 결정적 Store ZIP을 임시 디렉터리에 풀고 이 환경변수로
+ * 정확한 제출 산출물을 로드한다. 미지정 시 개발 소스 디렉터리를 사용한다.
+ */
+const EXTENSION_PATH = path.resolve(
+  process.env.BUPGOGAE_EXTENSION_PATH
+    || path.resolve(__dirname, '..', 'extension'),
+);
 
 // ============================================================
 // 법제처(law.go.kr) 모의 응답 HTML 빌더
@@ -87,62 +94,66 @@ async function installDefaultLawMock(context) {
 // ============================================================
 
 const test = base.extend({
+  freshInstall: [false, { option: true }],
+  // 종료된 합성 profile만 복사한다. 각 test는 별도 디렉터리와 browser를 사용한다.
+  profileTemplate: [async ({}, use, workerInfo) => {
+    if (process.env.BUPGOGAE_E2E_REUSE_PROFILE === '0') {
+      await use(null);
+      return;
+    }
+    const template = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bupgogae-e2e-template-'));
+    let context;
+    try {
+      context = await launchHermeticContext(template, workerInfo.project.use);
+      await context.close();
+      context = null;
+      await use(template);
+    } finally {
+      if (context) await context.close();
+      await fs.promises.rm(template, { recursive: true, force: true });
+    }
+  }, { scope: 'worker', timeout: 60_000 }],
   /**
    * 확장프로그램이 로드된 Persistent Context.
    * 매 테스트마다 임시 프로필 디렉터리를 새로 만들어 상태(IndexedDB 등)를 격리.
    */
-  context: async ({ headless, channel }, use) => {
+  context: [async ({ headless, channel, profileTemplate, freshInstall }, use, testInfo) => {
     const userDataDir = await fs.promises.mkdtemp(
       path.join(os.tmpdir(), 'bupgogae-e2e-'),
     );
-
-    const context = await chromium.launchPersistentContext(userDataDir, {
-      channel: channel || 'chromium',
-      headless,
-      args: [
-        `--disable-extensions-except=${EXTENSION_PATH}`,
-        `--load-extension=${EXTENSION_PATH}`,
-      ],
-      // MV3 Service Worker 허용 (기본값이지만 명시)
-      serviceWorkers: 'allow',
-    });
-
-    // ── Hermetic 네트워크 기본값 ──
-    // 1) R2/원격 설정 요청은 "영구 보류" — abort가 아닌 hold인 이유:
-    //    abort는 설치 시점 동기화를 실패시켜 번들 DB 폴백(92k건 삽입)을
-    //    유발하므로 테스트 초기 상태가 비결정적으로 오염된다.
-    //    hold는 설치 동기화를 fetch 단계에서 잠재워 DB를 빈 상태로 유지하고,
-    //    동기화 테스트는 자체 route를 나중에 등록해(우선 매칭) 흐름을 직접 구동한다.
-    await context.route('https://api.bup.live/**', () => { /* 의도적 미응답 */ });
-    // 2) 법제처 요청은 기본 모의 응답 (테스트에서 재등록하여 오버라이드 가능)
-    await installDefaultLawMock(context);
-
-    await use(context);
-
-    await context.close();
-    await fs.promises.rm(userDataDir, { recursive: true, force: true })
-      .catch(() => { /* Windows 파일 잠금 등으로 실패해도 테스트는 통과 */ });
-  },
+    const timing = { source: profileTemplate && !freshInstall ? 'template-copy' : 'fresh' };
+    let context;
+    try {
+      const start = performance.now();
+      if (profileTemplate && !freshInstall) {
+        await fs.promises.cp(profileTemplate, userDataDir, { recursive: true });
+      }
+      timing.copyMs = performance.now() - start;
+      const prepareStart = performance.now();
+      context = await launchHermeticContext(userDataDir, { headless, channel });
+      timing.prepareMs = performance.now() - prepareStart;
+      await use(context);
+    } finally {
+      const cleanupStart = performance.now();
+      if (context) await context.close();
+      await fs.promises.rm(userDataDir, { recursive: true, force: true })
+        .catch(() => { /* Windows 파일 잠금 등으로 실패해도 test 의미는 바뀌지 않는다. */ });
+      timing.teardownMs = performance.now() - cleanupStart;
+      await testInfo.attach('fixture-timing', {
+        body: Buffer.from(JSON.stringify(timing)), contentType: 'application/json',
+      });
+    }
+  }, { timeout: 60_000 }],
 
   /**
    * 백그라운드 Service Worker로부터 동적으로 추출한 확장프로그램 ID.
-   * MV3에서는 backgroundPage 대신 serviceWorker 이벤트를 사용한다.
    */
   extensionId: async ({ context }, use) => {
     let [serviceWorker] = context.serviceWorkers();
-    if (!serviceWorker) {
-      serviceWorker = await context.waitForEvent('serviceworker');
-    }
-    // URL 형식: chrome-extension://<EXTENSION_ID>/background/db-sync.js
-    const extensionId = serviceWorker.url().split('/')[2];
-    await use(extensionId);
+    if (!serviceWorker) serviceWorker = await context.waitForEvent('serviceworker');
+    await use(serviceWorker.url().split('/')[2]);
   },
 
-  /**
-   * 확장 오리진의 정적 페이지로 이동을 마친 Page.
-   * SW에 chrome.runtime.sendMessage를 보내는 구동용 — privacy.html은
-   * 자체 스크립트가 없어 테스트에 부수효과를 만들지 않는다.
-   */
   extensionPage: async ({ context, extensionId }, use) => {
     const page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/privacy.html`);
@@ -151,10 +162,59 @@ const test = base.extend({
   },
 });
 
+async function launchHermeticContext(userDataDir, { headless, channel }) {
+  const context = await chromium.launchPersistentContext(userDataDir, {
+      channel: channel || 'chromium',
+      headless,
+      args: [
+        `--disable-extensions-except=${EXTENSION_PATH}`,
+        `--load-extension=${EXTENSION_PATH}`,
+        // launch 직후 onInstalled/onStartup fetch가 route 등록보다 먼저 실행돼도
+        // 실제 production host로 빠져나가지 못하게 한다. 등록된 context.route
+        // fulfill은 정상 동작하고, escape한 요청만 loopback에서 fail-closed한다.
+        '--host-resolver-rules=MAP api.bup.live 0.0.0.0,MAP www.law.go.kr 0.0.0.0',
+      ],
+      // MV3 Service Worker 허용 (기본값이지만 명시)
+      serviceWorkers: 'allow',
+    });
+
+  try {
+    // ── Hermetic 네트워크 기본값 ──
+    // 1) 원격 Core DB는 기본적으로 404로 차단한다. 설치 동기화는 정직하게
+    //    fetch_failed가 되고 패키지의 실제 번들 DB로 복구된다. 무조건부 304로
+    //    빈 DB를 정상 상태처럼 가장하지 않는다.
+    //    각 테스트가 나중에 등록한 route가 이 기본값보다 우선 매칭된다.
+    await context.route('https://api.bup.live/**', (route) => {
+      const url = route.request().url();
+      if (url.includes('/db-v0.9.0.json.gz')) return route.fulfill({ status: 404, body: 'not found' });
+      if (url.includes('/adapters.json')) {
+        return route.fulfill({ contentType: 'application/json', body: '{"adapters":{}}' });
+      }
+      return route.fulfill({ status: 404, body: 'not found' });
+    });
+    // 2) 법제처 요청은 기본 모의 응답 (테스트에서 재등록하여 오버라이드 가능)
+    await installDefaultLawMock(context);
+
+    // 테스트 시작 전에 설치 single-flight와 번들 폴백을 끝내 초기 상태를 결정적으로 만든다.
+    let [serviceWorker] = context.serviceWorkers();
+    if (!serviceWorker) serviceWorker = await context.waitForEvent('serviceworker');
+    await serviceWorker.evaluate(() => syncDatabase({ trigger: 'e2e_fixture' }));
+    const state = await serviceWorker.evaluate(() => readLocalSyncState());
+    if (state.coreCount < 100000 || !state.snapshotMetadataValid) {
+      throw new Error('E2E fixture의 실제 번들 DB 활성화가 완료되지 않음');
+    }
+    return context;
+  } catch (err) {
+    await context.close();
+    throw err;
+  }
+}
+
 module.exports = {
   test,
   expect,
   EXTENSION_PATH,
   buildSearchResultHtml,
   buildPrecDetailHtml,
+  launchHermeticContext,
 };

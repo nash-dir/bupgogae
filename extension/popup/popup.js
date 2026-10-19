@@ -24,10 +24,10 @@ const $dbDate = document.getElementById('dbDate');
 const $dbRefreshBtn = document.getElementById('dbRefreshBtn');
 const $dbCount = document.getElementById('dbCount');
 
-// DLC
-const $dlcToggleBtn = document.getElementById('dlcToggleBtn');
-const $dlcArrow = document.getElementById('dlcArrow');
-const $dlcBody = document.getElementById('dlcBody');
+// 확인 범위
+const $scopeToggleBtn = document.getElementById('scopeToggleBtn');
+const $scopeArrow = document.getElementById('scopeArrow');
+const $scopeBody = document.getElementById('scopeBody');
 
 // 동기화 이력 (ledger)
 const $ledgerToggleBtn = document.getElementById('ledgerToggleBtn');
@@ -65,6 +65,8 @@ let SUPPORTED_HOSTS = [
   'chatgpt.com',
   'claude.ai',
   'copilot.microsoft.com',
+  'copilot.com',
+  'copilot.cloud.microsoft',
   'www.perplexity.ai',
   'perplexity.ai',
   'grok.com',
@@ -223,7 +225,7 @@ function renderUI() {
   // 상태 텍스트
   updateStatusText();
 
-  // DLC/필터 토글
+  // 확인 범위 필터 토글
   $courtFilterToggle.checked = _filterCourt;
   updateCourtFilterDesc();
   $constitutionalFilterToggle.checked = _filterConstitutional;
@@ -242,28 +244,28 @@ function updateOrangeToastDesc() {
 
 function updateCourtFilterDesc() {
   $courtFilterDesc.textContent = _filterCourt
-    ? '법원 판례 검증 활성'
-    : '법원 판례 검증 비활성';
+    ? '법원 판례 DB 대조 활성'
+    : '법원 판례 DB 대조 비활성';
 }
 
 function updateConstitutionalFilterDesc() {
   $constitutionalFilterDesc.textContent = _filterConstitutional
-    ? '헌재 결정 검증 활성'
-    : '헌재 결정 검증 비활성';
+    ? '헌재 결정 DB 대조 활성'
+    : '헌재 결정 DB 대조 비활성';
 }
 
 
 
 function updateSiteDesc(enabled) {
   $siteToggleDesc.textContent = enabled
-    ? '현재 사이트에서 판례 검증 활성'
-    : '현재 사이트에서 판례 검증 해제됨';
+    ? '현재 사이트에서 사건번호 확인 활성'
+    : '현재 사이트에서 사건번호 확인 해제됨';
 }
 
 function updateGlobalDesc() {
   $globalToggleDesc.textContent = _disabledGlobal
-    ? '모든 사이트에서 판례 검증 해제됨'
-    : '모든 사이트에서 판례 검증 활성';
+    ? '모든 사이트에서 사건번호 확인 해제됨'
+    : '모든 사이트에서 사건번호 확인 활성';
 }
 
 function updateStatusText() {
@@ -301,16 +303,21 @@ function bindEvents() {
       }
       if (response && response.success) {
         await loadSyncDate(); // UI 갱신 (DB 날짜/건수)
+        $dbRefreshBtn.title = response.outcome === 'downgrade_blocked'
+          ? (response.reason || response.error || '서버보다 최신인 로컬 DB를 유지했습니다.')
+          : 'DB 새로고침';
       } else {
-        alert('동기화 실패: ' + (response?.outcome || response?.error || '알 수 없는 오류'));
+        const label = LEDGER_OUTCOME_LABELS[response?.outcome]?.label || response?.outcome || '알 수 없는 오류';
+        const detail = response?.reason || response?.error;
+        alert('동기화 실패: ' + label + (detail ? '\n' + detail : ''));
       }
     });
   });
 
-  // DLC accordion
-  $dlcToggleBtn.addEventListener('click', () => {
-    $dlcBody.classList.toggle('open');
-    $dlcArrow.classList.toggle('open');
+  // 확인 범위 accordion
+  $scopeToggleBtn.addEventListener('click', () => {
+    $scopeBody.classList.toggle('open');
+    $scopeArrow.classList.toggle('open');
   });
 
   // 동기화 이력 accordion — 펼칠 때마다 최신 원장으로 갱신
@@ -396,6 +403,7 @@ async function onGlobalToggle() {
 const LEDGER_OUTCOME_LABELS = {
   replaced:         { label: '교체 완료',   ok: true },
   not_modified:     { label: '변경 없음',   ok: true },
+  downgrade_blocked:{ label: '다운그레이드 차단', ok: true },
   fetch_failed:     { label: '다운로드 실패', ok: false },
   invalid_payload:  { label: '응답 불량',   ok: false },
   integrity_failed: { label: '무결성 실패', ok: false },
@@ -444,6 +452,7 @@ async function renderSyncLedger() {
     const meta = LEDGER_OUTCOME_LABELS[entry.outcome] || { label: entry.outcome || '?', ok: false };
     outcome.className = `popup-ledger-outcome ${meta.ok ? 'ok' : 'fail'}`;
     outcome.textContent = meta.label;
+    if (entry.reason) outcome.title = entry.reason;
 
     const duration = document.createElement('span');
     duration.className = 'popup-ledger-duration';

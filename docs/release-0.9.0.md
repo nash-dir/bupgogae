@@ -114,6 +114,14 @@ No-go: 로컬 결과만 있거나 CI가 다른 commit을 검사했다.
 
 - [ ] 공개 R2 버킷과 다른 state 전용 버킷 준비. 사용자 도메인·r2.dev 공개 접근이
       모두 꺼졌는지 확인하고 `R2_STATE_BUCKET` secret 설정
+      state 작업은 `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`의 Actions 전용
+      Object Read & Write 토큰을 사용한다. 공개 게시 단계의 기존
+      `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`와 분리하여 관리한다.
+      수집·게시 없이 접근을 확인하려면 `Daily Crawler Pipeline`을 검토 브랜치에서
+      `verify_state_only=true`, `full_bootstrap=false`,
+      `expected_state_sha256=<검증된 current master SHA-256>`로 수동 실행한다.
+      이 모드는 state를 내려받아 해시·SQLite·번들 사건·법원 맵을 전수 대조하며,
+      private DB artifact 전달, crawl, finalize는 실행하지 않는다.
 - [ ] 검증된 복구 master·backlog를 비공개 버킷에 seed. state 다운로드는 공개
       버킷으로 자동 fallback하지 않으므로 첫 실행 전에 검증된 seed가 필요
 - [ ] 기존 공개 `bupgogae/state/` 경로는 외부 접근을 차단하고 캐시된 응답도

@@ -1086,6 +1086,23 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertIn("TELEGRAM_BOT_TOKEN", notify_step)
         self.assertNotIn("AWS_ACCESS_KEY_ID", notify_step)
 
+    def test_readback_only_run_cannot_crawl_publish_or_export_private_artifacts(self):
+        workflow = (
+            self.REPO_ROOT / ".github/workflows/daily-pipeline.yml"
+        ).read_text(encoding="utf-8")
+        guard = "github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true"
+        crawl = workflow.split("\n  crawl:\n", 1)[1].split("    steps:", 1)[0]
+        finalize = workflow.split("\n  finalize:\n", 1)[1].split("    steps:", 1)[0]
+        artifact = workflow.split("- name: crawl 입력 state 전달", 1)[1].split(
+            "- name: 비공개 state 재다운로드 전수 검증", 1
+        )[0]
+        for boundary in (crawl, finalize, artifact):
+            self.assertIn(guard, boundary)
+        self.assertEqual(workflow.count("AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}"), 4)
+        self.assertEqual(workflow.count("AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}"), 4)
+        self.assertIn('[[ "$FULL_BOOTSTRAP" != \'true\' ]]', workflow)
+        self.assertIn('[[ "$EXPECTED_STATE_SHA256" =~ ^[0-9a-f]{64}$ ]]', workflow)
+
     def test_partial_state_upload_bypass_is_manual_full_bootstrap_only(self):
         workflow = (
             self.REPO_ROOT / ".github/workflows/daily-pipeline.yml"

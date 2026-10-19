@@ -10,6 +10,15 @@ on:
         required: true
         default: false
         type: boolean
+      verify_state_only:
+        description: '비공개 state 다운로드·무결성만 검증 (수집·업로드·게시 없음)'
+        required: true
+        default: false
+        type: boolean
+      expected_state_sha256:
+        description: '다운로드 전용 검증에서 요구할 master.db SHA-256'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -34,6 +43,15 @@ jobs:
             exit 2
           fi
 
+      - name: 다운로드 전용 검증 입력 확인
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_state_only == true }}
+        env:
+          FULL_BOOTSTRAP: ${{ inputs.full_bootstrap }}
+          EXPECTED_STATE_SHA256: ${{ inputs.expected_state_sha256 }}
+        run: |
+          [[ "$FULL_BOOTSTRAP" != 'true' ]]
+          [[ "$EXPECTED_STATE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+
       - name: 저장소 Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -53,8 +71,8 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true }}
         run: python pipeline/sync_state.py download --dir ./pipeline/data
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -63,13 +81,14 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true }}
         run: python pipeline/sync_state.py download --dir ./pipeline/data --allow-empty-bootstrap
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: crawl 입력 state 전달
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: crawler-input-state
@@ -80,9 +99,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: 비공개 state 재다운로드 전수 검증
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_state_only == true }}
+        run: python pipeline/verify_state_readback.py --dir ./pipeline/data
+        env:
+          EXPECTED_STATE_SHA256: ${{ inputs.expected_state_sha256 }}
+
   crawl:
     name: Secret 최소화 crawl
     needs: prepare-state
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -178,7 +204,7 @@ jobs:
   finalize:
     name: Trusted state/public 게시
     needs: [prepare-state, crawl]
-    if: ${{ always() && needs.prepare-state.result == 'success' && needs.crawl.result != 'cancelled' }}
+    if: ${{ always() && needs.prepare-state.result == 'success' && needs.crawl.result != 'cancelled' && (github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -207,8 +233,8 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true }}
         run: python pipeline/sync_state.py upload --dir ./pipeline/data
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -217,8 +243,8 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true }}
         run: python pipeline/sync_state.py upload --dir ./pipeline/data --allow-partial-bootstrap
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

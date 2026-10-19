@@ -84,6 +84,7 @@ build/
 *.log
 *.tmp
 *.txt
+!store/release-*.ko.txt
 !requirements-dev.txt
 
 # ===== 에이전트 설정 =====

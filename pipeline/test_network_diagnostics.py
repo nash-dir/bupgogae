@@ -14,6 +14,15 @@ from network_errors import network_error_detail
 
 
 class NetworkDiagnosticsTests(unittest.TestCase):
+    def test_daily_preflight_uses_one_keyless_https_probe_and_full_mode_is_explicit(self):
+        with mock.patch.object(diagnostic, "probe", return_value={}) as probe, \
+                mock.patch("builtins.print"):
+            diagnostic.main()
+            probe.assert_called_once_with("warp_remote_dns", "https_api")
+            probe.reset_mock()
+            diagnostic.main(full=True)
+            self.assertEqual(probe.call_count, 9)
+
     def test_nested_socks_error_emits_protocol_code_but_no_secret(self):
         secret = "https://www.law.go.kr/?OC=secret%40example.com"
         inner = socks.SOCKS5Error("0x04: " + secret)

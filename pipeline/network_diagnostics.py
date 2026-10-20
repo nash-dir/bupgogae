@@ -4,6 +4,7 @@ No environment credential, response body, redirect target or exception text is
 printed. HTTP is a keyless control only; the collector always uses HTTPS.
 """
 
+import argparse
 import json
 import time
 
@@ -39,11 +40,15 @@ def probe(route, endpoint):
     return result
 
 
-def main():
-    for route in ("direct", "warp_remote_dns", "warp_local_dns"):
-        for endpoint in ("https_root", "https_api", "http_root"):
+def main(full=False):
+    routes = ("direct", "warp_remote_dns", "warp_local_dns") if full else ("warp_remote_dns",)
+    endpoints = ("https_root", "https_api", "http_root") if full else ("https_api",)
+    for route in routes:
+        for endpoint in endpoints:
             print(json.dumps(probe(route, endpoint), sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--full", action="store_true", help="Run all nine keyless route controls")
+    main(parser.parse_args().full)

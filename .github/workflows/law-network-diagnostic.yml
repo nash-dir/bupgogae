@@ -24,7 +24,7 @@ jobs:
           CLOUDFLARE_WARP_TOS_ACCEPTED: ${{ vars.CLOUDFLARE_WARP_TOS_ACCEPTED }}
           WARP_ROUTE_MODE: proxy
       - name: Keyless law route comparison
-        run: timeout --signal=TERM --kill-after=5s 240s python pipeline/network_diagnostics.py
+        run: timeout --signal=TERM --kill-after=5s 240s python pipeline/network_diagnostics.py --full
       - name: Clean up ephemeral WARP
         if: always()
         continue-on-error: true

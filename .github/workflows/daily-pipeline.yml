@@ -173,6 +173,10 @@ jobs:
           CLOUDFLARE_WARP_TOS_ACCEPTED: ${{ vars.CLOUDFLARE_WARP_TOS_ACCEPTED }}
           WARP_ROUTE_MODE: proxy
 
+      - name: 같은 runner의 법제처 연결 진단 (API key 없음)
+        if: ${{ inputs.verify_handoff_only != true }}
+        run: timeout --signal=TERM --kill-after=5s 240s python pipeline/network_diagnostics.py
+
       - name: 크롤러 실행 (API key 외 credential 없음)
         if: ${{ (github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true) && inputs.verify_handoff_only != true }}
         run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data

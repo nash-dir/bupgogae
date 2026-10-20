@@ -21,6 +21,7 @@ from requests.adapters import HTTPAdapter
 from log_setup import get_logger
 from config import LAW_TIMEOUT
 from law_normalization import normalize_decision_date
+from network_errors import network_error_detail
 
 log = get_logger(__name__)
 
@@ -244,10 +245,11 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
             break
         except requests.exceptions.RequestException as e:
             kind = _request_error_kind(e)
+            detail = network_error_detail(e)
             if attempt_index == MAX_ATTEMPTS - 1:
                 log.error(
                     "❌ 법제처 API 요청 실패 "
-                    f"(kind={kind}, attempts={MAX_ATTEMPTS})"
+                    f"(kind={kind}, attempts={MAX_ATTEMPTS}, detail={detail})"
                 )
                 break
 
@@ -258,7 +260,7 @@ def fetch_xml_safe(date_str=None, page=1, target="prec", query=None, sort=None):
             log.warning(
                 "⚠️ 법제처 API 재시도 "
                 f"(kind={kind}, next_attempt={attempt_index + 2}/"
-                f"{MAX_ATTEMPTS}, backoff={backoff}s)"
+                f"{MAX_ATTEMPTS}, backoff={backoff}s, detail={detail})"
             )
             time.sleep(backoff)
         finally:

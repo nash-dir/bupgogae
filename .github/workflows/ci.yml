@@ -56,6 +56,9 @@ jobs:
 
       - run: npm ci
 
+      - name: npm dependency security gate
+        run: npm audit --audit-level=moderate
+
       - run: npm run lint:js
 
       - run: npm test
@@ -76,6 +79,9 @@ jobs:
           python-version: '3.10'
 
       - run: python -m pip install -r requirements-dev.txt
+
+      - name: Production Python dependency security gate
+        run: python -m pip_audit --requirement requirements-crawler.lock --no-deps --disable-pip --vulnerability-service osv
 
       - run: python -m ruff check pipeline scripts
 

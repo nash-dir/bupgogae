@@ -15,6 +15,11 @@ on:
         required: true
         default: false
         type: boolean
+      verify_handoff_only:
+        description: '암호화된 state의 3-job 전달·복호화만 검증 (수집·운영 게시 없음)'
+        required: true
+        default: false
+        type: boolean
       expected_state_sha256:
         description: '다운로드 전용 검증에서 요구할 master.db SHA-256'
         required: false
@@ -33,6 +38,8 @@ jobs:
     name: Trusted state 준비
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      input_artifact_id: ${{ steps.input-artifact.outputs.artifact-id }}
     steps:
       - name: WARP 약관 승인 설정 사전 확인
         env:
@@ -44,12 +51,15 @@ jobs:
           fi
 
       - name: 다운로드 전용 검증 입력 확인
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_state_only == true }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.verify_state_only == true || inputs.verify_handoff_only == true) }}
         env:
           FULL_BOOTSTRAP: ${{ inputs.full_bootstrap }}
+          VERIFY_STATE_ONLY: ${{ inputs.verify_state_only }}
+          VERIFY_HANDOFF_ONLY: ${{ inputs.verify_handoff_only }}
           EXPECTED_STATE_SHA256: ${{ inputs.expected_state_sha256 }}
         run: |
           [[ "$FULL_BOOTSTRAP" != 'true' ]]
+          [[ "$VERIFY_STATE_ONLY" != 'true' || "$VERIFY_HANDOFF_ONLY" != 'true' ]]
           [[ "$EXPECTED_STATE_SHA256" =~ ^[0-9a-f]{64}$ ]]
 
       - name: 저장소 Checkout
@@ -87,15 +97,21 @@ jobs:
           R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+      - name: crawl 입력 state 인증 암호화
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true }}
+        run: python pipeline/state_artifact.py seal --dir ./pipeline/data --file ./state-handoff/input.aead --phase input
+        env:
+          STATE_ARTIFACT_KEY: ${{ secrets.STATE_ARTIFACT_KEY }}
+
       - name: crawl 입력 state 전달
+        id: input-artifact
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: crawler-input-state
-          path: |
-            pipeline/data/master.db*
-            pipeline/data/failed_dates.json
-            pipeline/data/state-mode.json
+          name: crawler-input-state-encrypted
+          path: state-handoff/input.aead
+          compression-level: 0
+          overwrite: true
           if-no-files-found: error
           retention-days: 1
 
@@ -111,6 +127,8 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      resume_artifact_id: ${{ steps.resume-artifact.outputs.artifact-id }}
     steps:
       - name: 저장소 Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -127,16 +145,28 @@ jobs:
       - name: 해시 고정 wheel 의존성 설치
         run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements-crawler.lock'
 
+      - name: 입력 암호문 artifact ID 확인
+        run: '[[ "$INPUT_ARTIFACT_ID" =~ ^[0-9]+$ ]]'
+        env:
+          INPUT_ARTIFACT_ID: ${{ needs.prepare-state.outputs.input_artifact_id }}
+
       - name: crawl 입력 state 다운로드
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: crawler-input-state
-          path: pipeline/data
+          artifact-ids: ${{ needs.prepare-state.outputs.input_artifact_id }}
+          path: state-handoff
+          merge-multiple: true
+
+      - name: crawl 입력 state 인증 복호화
+        run: python pipeline/state_artifact.py unseal --dir ./pipeline/data --file ./state-handoff/input.aead --phase input
+        env:
+          STATE_ARTIFACT_KEY: ${{ secrets.STATE_ARTIFACT_KEY }}
 
       # Marketplace action이나 수동 WireGuard key를 쓰지 않는다. 저장소에서
       # 검토한 스크립트가 SHA-256으로 고정한 공식 Cloudflare client를 설치하고
       # WARP route를 검증한다. 다음 step에서만 법제처 API key를 주입한다.
       - name: 공식 Cloudflare WARP Client 연결 (IP 차단 우회)
+        if: ${{ inputs.verify_handoff_only != true }}
         timeout-minutes: 15
         run: bash .github/scripts/connect-warp.sh
         env:
@@ -144,14 +174,14 @@ jobs:
           WARP_ROUTE_MODE: proxy
 
       - name: 크롤러 실행 (API key 외 credential 없음)
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true }}
+        if: ${{ (github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true) && inputs.verify_handoff_only != true }}
         run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
           BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000
 
       - name: 명시적 full historical bootstrap 실행
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true && inputs.verify_handoff_only != true }}
         run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data --full-bootstrap
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
@@ -171,24 +201,31 @@ jobs:
           timeout 15s sudo systemctl stop warp-svc || true
           systemctl --user disable --now warp-taskbar.service >/dev/null 2>&1 || true
 
-      - name: 재개 state 전달
+      - name: 재개 state 인증 암호화
         if: always()
+        id: seal-resume
+        run: python pipeline/state_artifact.py seal --dir ./pipeline/data --file ./state-handoff/resume.aead --phase resume
+        env:
+          STATE_ARTIFACT_KEY: ${{ secrets.STATE_ARTIFACT_KEY }}
+
+      - name: 재개 state 전달
+        id: resume-artifact
+        if: ${{ always() && steps.seal-resume.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: crawler-resume-state
-          path: |
-            pipeline/data/master.db*
-            pipeline/data/failed_dates.json
-            pipeline/data/pipeline-report.json
+          name: crawler-resume-state-encrypted
+          path: state-handoff/resume.aead
+          compression-level: 0
+          overwrite: true
           if-no-files-found: error
           retention-days: 1
 
       - name: 계약별 public 파일 생성·검증 (게시 없음)
-        if: success()
+        if: ${{ success() && inputs.verify_handoff_only != true }}
         run: python pipeline/publish_outputs.py --prepare-only --dir ./pipeline/data
 
       - name: 완전 성공한 public 출력 전달
-        if: success()
+        if: ${{ success() && inputs.verify_handoff_only != true }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: crawler-public-output
@@ -204,7 +241,7 @@ jobs:
   finalize:
     name: Trusted state/public 게시
     needs: [prepare-state, crawl]
-    if: ${{ always() && needs.prepare-state.result == 'success' && needs.crawl.result != 'cancelled' && (github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true) }}
+    if: ${{ always() && needs.prepare-state.result == 'success' && needs.crawl.result != 'cancelled' && needs.crawl.outputs.resume_artifact_id != '' && (github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -226,11 +263,23 @@ jobs:
       - name: 재개 state 다운로드
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: crawler-resume-state
-          path: pipeline/data
+          artifact-ids: ${{ needs.crawl.outputs.resume_artifact_id }}
+          path: state-handoff
+          merge-multiple: true
+
+      - name: 재개 state 인증 복호화
+        run: python pipeline/state_artifact.py unseal --dir ./pipeline/data --file ./state-handoff/resume.aead --phase resume
+        env:
+          STATE_ARTIFACT_KEY: ${{ secrets.STATE_ARTIFACT_KEY }}
+
+      - name: 암호화 전달 후 비공개 state 전수 검증 (게시 없음)
+        if: ${{ inputs.verify_handoff_only == true }}
+        run: python pipeline/verify_state_readback.py --dir ./pipeline/data
+        env:
+          EXPECTED_STATE_SHA256: ${{ inputs.expected_state_sha256 }}
 
       - name: 검증된 증분 snapshot generation 및 pointer 게시
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true }}
+        if: ${{ (github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true) && inputs.verify_handoff_only != true }}
         run: python pipeline/sync_state.py upload --dir ./pipeline/data
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -240,7 +289,7 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: 명시적 full bootstrap 재개 snapshot generation 및 pointer 게시
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true && inputs.verify_handoff_only != true }}
         run: python pipeline/sync_state.py upload --dir ./pipeline/data --allow-partial-bootstrap
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -250,14 +299,14 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: 완전 성공한 public 출력 다운로드
-        if: needs.crawl.result == 'success'
+        if: ${{ needs.crawl.result == 'success' && inputs.verify_handoff_only != true }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: crawler-public-output
           path: pipeline/data
 
       - name: DB 검증 후 immutable 객체→manifest→legacy mirror 게시
-        if: needs.crawl.result == 'success'
+        if: ${{ needs.crawl.result == 'success' && inputs.verify_handoff_only != true }}
         run: python pipeline/publish_outputs.py --dir ./pipeline/data
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -266,7 +315,7 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: public/state 게시 성공 알림
-        if: ${{ success() && needs.crawl.result == 'success' }}
+        if: ${{ success() && needs.crawl.result == 'success' && inputs.verify_handoff_only != true }}
         run: python pipeline/publish_outputs.py --notify-success --dir ./pipeline/data
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

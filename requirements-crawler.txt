@@ -11,4 +11,8 @@ PySocks==1.7.1
 requests==2.34.2
 s3transfer==0.19.1
 six==1.17.0
-urllib3==2.7.0
+urllib3==2.8.0
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.11
+typing-extensions==4.16.0; python_version < "3.11"

@@ -44,10 +44,16 @@ afterEach(() => {
 describe('processContainer — 룩업 결과 렌더링 (L13)', () => {
   test('조회 중 제거된 메시지 subtree에 stale 응답으로 배지를 만들지 않는다', async () => {
     let reply;
-    chrome.runtime.sendMessage = jest.fn((_message, callback) => { reply = callback; });
+    let lookupStarted;
+    const requested = new Promise(resolve => { lookupStarted = resolve; });
+    chrome.runtime.sendMessage = jest.fn((message, callback) => {
+      if (message.type !== 'LOOKUP_BATCH') return callback({});
+      reply = callback;
+      lookupStarted();
+    });
     const container = makeContainer('2015다6302');
     const pending = content.processContainer(container);
-    await Promise.resolve();
+    await requested;
     container.remove();
     reply({ '15Da6302': { found: true, data: [[1, 1, 150115, '합성']] } });
     await pending;
@@ -56,10 +62,16 @@ describe('processContainer — 룩업 결과 렌더링 (L13)', () => {
 
   test('조회 중 Text가 바뀌면 과거 startIdx를 새 문자열에 적용하지 않는다', async () => {
     let reply;
-    chrome.runtime.sendMessage = jest.fn((_message, callback) => { reply = callback; });
+    let lookupStarted;
+    const requested = new Promise(resolve => { lookupStarted = resolve; });
+    chrome.runtime.sendMessage = jest.fn((message, callback) => {
+      if (message.type !== 'LOOKUP_BATCH') return callback({});
+      reply = callback;
+      lookupStarted();
+    });
     const container = makeContainer('2015다6302');
     const pending = content.processContainer(container);
-    await Promise.resolve();
+    await requested;
     container.firstChild.textContent = '새 응답 2015다7777';
     reply({ '15Da6302': { found: true, data: [[1, 1, 150115, '합성']] } });
     await pending;

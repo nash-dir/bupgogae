@@ -215,7 +215,7 @@ describe('older mixed-format server and strict court-only client', () => {
     expect(await sync.readLocalSyncState()).toMatchObject({
       activeStore: before.activeStore, contentHash: before.contentHash, coreCount: before.coreCount,
     });
-  });
+  }, 20_000); // Same 100k-row correctness fixture/budget as the seed/repair cases above.
 });
 
 describe('법원·헌재 snapshot의 전수 건수와 건강성', () => {

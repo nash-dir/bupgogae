@@ -232,6 +232,35 @@ state를 복구한다. 코드 revert만으로 이미 전환된 R2 pointer는 복
 
 ## 참고
 
+### 공개 Actions의 비공개 state 전달 (2026-10-20 보완)
+
+- 공개 저장소의 Actions artifact는 비공개 저장소가 아니다. `master.db`,
+  backlog, 격리·복구 근거를 평문 artifact로 올리지 않는다.
+- `STATE_ARTIFACT_KEY`는 무작위 32-byte 키의 표준 Base64 문자열을 GitHub
+  Actions Secret에만 저장한다. R2·법제처 자격증명에서 파생하지 않는다.
+- `pipeline/state_artifact.py`는 닫힌 DB의 바이트를 그대로 전달하고, WAL이 있으면
+  SQLite backup으로 커밋된 행을 포함한다. ZIP을 AES-256-GCM으로 인증 암호화한다.
+  무작위 nonce와 저장소·run ID·
+  소스 SHA·전달 방향을 인증하며, 복호화 인증 완료 전에는 파일을 추출하지 않는다.
+  재실행을 허용하기 위해 attempt는 고정하지 않고 producer의 정확한 artifact ID를
+  소비한다. 이번 producer가 전달을 완료하지 못하면 finalize를 실행하지 않는다.
+- 전달 키는 seal/unseal step에만 주입한다. WARP 연결·크롤러 실행 step에는
+  전달하지 않으며 R2·운영 게시 키는 여전히 prepare/finalize job에만 둔다.
+  전달 키가 없거나 변조·잘못된 run·경로·크기인 경우 평문 대체 없이 실패한다.
+- 키를 교체하면 이전 암호문은 재사용할 수 없다. 실행 중인 pipeline이 없는
+  시점에 Secret을 교체하고 전체 workflow를 다시 실행한다. 기존 R2 generation은
+  이 전달 키와 독립적으로 보존되므로 원본 state에서 다시 시작할 수 있다.
+- artifact 보존기간은 1일이다. 키·복호화된 DB·CLI 환경 전체를 로그, job output,
+  artifact 또는 Actions cache에 넣지 않는다. 공개 출력 artifact에는 검증된
+  공개 DB·manifest만 포함한다. 실패 재개 state와 기존 게시 차단 정책은 유지한다.
+- 운영 HTTP 의존성은 `urllib3>=2.8.0`을 검토된 exact pin과 wheel hash로 고정한다.
+  `test_http_stream_security.py`는 실제 decoder를 localhost의 합성 chunked/deflate
+  응답으로 검사하며, 무한 반복은 별도 process timeout으로 실패시킨다.
+- `verify_handoff_only=true`, `full_bootstrap=false`, `verify_state_only=false`와
+  검토된 `expected_state_sha256`로 prepare→crawl→finalize의 실제 암호화 전달만
+  검사할 수 있다. 이 모드는 WARP·수집·state 업로드·공개 DB 게시를 건너뛰고,
+  마지막 복호화 DB의 SHA·SQLite 무결성·전체 공개 사건·법원 맵을 대조한다.
+
 - Chrome Web Store update·partial rollout:
   <https://developer.chrome.com/docs/webstore/update/>
 - Playwright extension persistent-context testing:

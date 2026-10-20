@@ -926,6 +926,39 @@ class PublishOutputTests(unittest.TestCase):
 class DeploymentSecurityTests(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
 
+    def test_private_handoffs_upload_only_ciphertext_and_bind_exact_artifact_ids(self):
+        workflow = (self.REPO_ROOT / ".github/workflows/daily-pipeline.yml").read_text(encoding="utf-8")
+        for name, filename in [("crawl 입력 state 전달", "input.aead"),
+                               ("재개 state 전달", "resume.aead")]:
+            section = workflow.split(f"- name: {name}\n", 1)[1].split("\n      - name:", 1)[0]
+            self.assertIn(f"path: state-handoff/{filename}", section)
+            self.assertNotIn("pipeline/data/", section)
+            self.assertIn("overwrite: true", section)
+        self.assertEqual(workflow.count("STATE_ARTIFACT_KEY: ${{ secrets.STATE_ARTIFACT_KEY }}"), 4)
+        self.assertIn("needs.prepare-state.outputs.input_artifact_id", workflow)
+        self.assertIn("needs.crawl.outputs.resume_artifact_id != ''", workflow)
+        self.assertIn("artifact-ids: ${{ needs.crawl.outputs.resume_artifact_id }}", workflow)
+        self.assertEqual(workflow.count("merge-multiple: true"), 2)
+        self.assertIn('[[ "$INPUT_ARTIFACT_ID" =~ ^[0-9]+$ ]]', workflow)
+        for line in workflow.splitlines():
+            if "STATE_ARTIFACT_KEY" in line:
+                self.assertIn("${{ secrets.STATE_ARTIFACT_KEY }}", line)
+        # WARP/crawler do not receive either transport key or publisher tokens.
+        for title in ["공식 Cloudflare WARP Client 연결", "크롤러 실행 (API key 외 credential 없음)"]:
+            section = workflow.split(f"- name: {title}", 1)[1].split("\n      - name:", 1)[0]
+            self.assertNotIn("STATE_ARTIFACT_KEY", section)
+            self.assertNotIn("AWS_SECRET_ACCESS_KEY", section)
+
+    def test_handoff_only_verification_cannot_crawl_or_publish(self):
+        workflow = (self.REPO_ROOT / ".github/workflows/daily-pipeline.yml").read_text(encoding="utf-8")
+        for name in ["공식 Cloudflare WARP Client 연결", "크롤러 실행 (API key 외 credential 없음)",
+                     "명시적 full historical bootstrap 실행", "검증된 증분 snapshot generation 및 pointer 게시",
+                     "명시적 full bootstrap 재개 snapshot generation 및 pointer 게시",
+                     "DB 검증 후 immutable 객체→manifest→legacy mirror 게시", "완전 성공한 public 출력 전달"]:
+            section = workflow.split(f"- name: {name}", 1)[1].split("\n      - name:", 1)[0]
+            self.assertIn("inputs.verify_handoff_only != true", section)
+        self.assertIn("암호화 전달 후 비공개 state 전수 검증 (게시 없음)", workflow)
+
     def test_crawl_job_has_no_marketplace_action_or_publish_secrets(self):
         workflow = (
             self.REPO_ROOT / ".github/workflows/daily-pipeline.yml"
@@ -941,7 +974,7 @@ class DeploymentSecurityTests(unittest.TestCase):
         secret_names = set(
             re.findall(r"secrets\.([A-Z0-9_]+)", crawl_section)
         )
-        self.assertEqual(secret_names, {"BUPGOGAE_API_KEY"})
+        self.assertEqual(secret_names, {"BUPGOGAE_API_KEY", "STATE_ARTIFACT_KEY"})
         self.assertNotIn("WARP_PRIVATE_KEY", workflow)
         self.assertLess(
             crawl_section.index("bash .github/scripts/connect-warp.sh"),

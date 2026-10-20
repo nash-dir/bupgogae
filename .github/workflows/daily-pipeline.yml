@@ -241,7 +241,7 @@ jobs:
   finalize:
     name: Trusted state/public 게시
     needs: [prepare-state, crawl]
-    if: ${{ always() && needs.prepare-state.result == 'success' && needs.crawl.result != 'cancelled' && needs.crawl.outputs.resume_artifact_id != '' && (github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true) }}
+    if: ${{ always() && needs.prepare-state.result == 'success' && needs.crawl.result != 'cancelled' && (github.event_name != 'workflow_dispatch' || inputs.verify_state_only != true) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -259,6 +259,11 @@ jobs:
 
       - name: 해시 고정 wheel 의존성 설치
         run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements-crawler.lock'
+
+      - name: 재개 암호문 artifact ID 확인
+        run: '[[ "$RESUME_ARTIFACT_ID" =~ ^[0-9]+$ ]]'
+        env:
+          RESUME_ARTIFACT_ID: ${{ needs.crawl.outputs.resume_artifact_id }}
 
       - name: 재개 state 다운로드
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

@@ -540,7 +540,7 @@ def download_state(data_dir: str, allow_empty_bootstrap: bool = False):
                 _write_state_mode(data_dir, "resume", pointer["generation"])
                 log.info(
                     "✅ 상태 generation 다운로드 완료: "
-                    f"{pointer['generation']}"
+                    f"{pointer['generation']} master_sha256={pointer['master']['sha256']}"
                 )
                 return
 
@@ -559,7 +559,7 @@ def download_state(data_dir: str, allow_empty_bootstrap: bool = False):
             _write_state_mode(data_dir, "resume", previous["generation"])
             log.warning(
                 "⚠️ current state 검증 실패 — 직전 generation 복구 완료: "
-                f"{previous['generation']}"
+                f"{previous['generation']} master_sha256={previous['master']['sha256']}"
             )
             return
 

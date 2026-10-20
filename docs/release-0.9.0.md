@@ -243,7 +243,8 @@ state를 복구한다. 코드 revert만으로 이미 전환된 R2 pointer는 복
   무작위 nonce와 저장소·run ID·
   소스 SHA·전달 방향을 인증하며, 복호화 인증 완료 전에는 파일을 추출하지 않는다.
   재실행을 허용하기 위해 attempt는 고정하지 않고 producer의 정확한 artifact ID를
-  소비한다. 이번 producer가 전달을 완료하지 못하면 finalize를 실행하지 않는다.
+  소비한다. 이번 producer의 ID가 없으면 다운로드·state/DB 게시 전에 실패시켜
+  이전 artifact를 재사용하지 않고 기존 실패 알림 경로를 유지한다.
 - 전달 키는 seal/unseal step에만 주입한다. WARP 연결·크롤러 실행 step에는
   전달하지 않으며 R2·운영 게시 키는 여전히 prepare/finalize job에만 둔다.
   전달 키가 없거나 변조·잘못된 run·경로·크기인 경우 평문 대체 없이 실패한다.
@@ -260,6 +261,9 @@ state를 복구한다. 코드 revert만으로 이미 전환된 R2 pointer는 복
   검토된 `expected_state_sha256`로 prepare→crawl→finalize의 실제 암호화 전달만
   검사할 수 있다. 이 모드는 WARP·수집·state 업로드·공개 DB 게시를 건너뛰고,
   마지막 복호화 DB의 SHA·SQLite 무결성·전체 공개 사건·법원 맵을 대조한다.
+  기대 SHA는 공개 JSON 해시나 과거 generation의 값이 아니라 현재 검토한
+  private snapshot의 값이어야 한다. 다운로드 로그는 검증된 pointer의 master SHA를
+  남기고, 불일치 오류는 기대·실측 SHA만 제공한다. 원문이나 credential은 출력하지 않는다.
 
 - Chrome Web Store update·partial rollout:
   <https://developer.chrome.com/docs/webstore/update/>

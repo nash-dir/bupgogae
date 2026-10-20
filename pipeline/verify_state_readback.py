@@ -21,7 +21,8 @@ def verify(data_dir: Path, expected_sha256: str, reference_path: Path) -> dict:
             checksum.update(chunk)
     digest = checksum.hexdigest()
     if digest != expected_sha256:
-        raise ValueError("state_checksum_mismatch")
+        # Both are validated/computed SHA-256 values, never source data or keys.
+        raise ValueError(f"state_checksum_mismatch expected={expected_sha256} actual={digest}")
     conn = sqlite3.connect(master.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         if conn.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:

@@ -936,10 +936,11 @@ class DeploymentSecurityTests(unittest.TestCase):
             self.assertIn("overwrite: true", section)
         self.assertEqual(workflow.count("STATE_ARTIFACT_KEY: ${{ secrets.STATE_ARTIFACT_KEY }}"), 4)
         self.assertIn("needs.prepare-state.outputs.input_artifact_id", workflow)
-        self.assertIn("needs.crawl.outputs.resume_artifact_id != ''", workflow)
+        self.assertIn('[[ "$RESUME_ARTIFACT_ID" =~ ^[0-9]+$ ]]', workflow)
         self.assertIn("artifact-ids: ${{ needs.crawl.outputs.resume_artifact_id }}", workflow)
         self.assertEqual(workflow.count("merge-multiple: true"), 2)
         self.assertIn('[[ "$INPUT_ARTIFACT_ID" =~ ^[0-9]+$ ]]', workflow)
+        self.assertLess(workflow.index("재개 암호문 artifact ID 확인"), workflow.index("- name: 재개 state 다운로드"))
         for line in workflow.splitlines():
             if "STATE_ARTIFACT_KEY" in line:
                 self.assertIn("${{ secrets.STATE_ARTIFACT_KEY }}", line)

@@ -23,3 +23,10 @@ evidence; all nine preserve their protected published unknown court code 0. Regi
 are not used as trial-court evidence. Exact API fields, original metadata
 (including two title trailing spaces), and whole HTML hashes are pinned separately.
 No generalized title trimming or court inference is performed.
+
+
+`202029-original.json.gz` is the official law.go.kr detail metadata and complete
+judgment body. The list omits four merged members and changes the branch label.
+The dictionary preserves public parent court code 11 and all five explicitly
+written members. The complete 74-character source string remains in metadata;
+the serving record uses 54 canonical characters without dropping any number.

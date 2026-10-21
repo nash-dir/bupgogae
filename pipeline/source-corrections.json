@@ -325,6 +325,43 @@
         "reviewedAt": "2026-10-21",
         "dateEvidence": "matching_official_metadata"
       }
+    },
+    "대법원:202029": {
+      "profile": "law_detail_preserve_reference_v1",
+      "expectedList": {
+        "판례일련번호": "202029",
+        "데이터출처명": "대법원",
+        "사건명": "손해배상(기)",
+        "사건번호": "2014나21277",
+        "선고일자": "2015.11.05",
+        "법원명": "부산고등법원창원재판부",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "손해배상(기)",
+        "사건번호": "2014나21277, 2014나21284(병합), 2014나21291(병합), 2014나21307(병합), 2014나21314(병합)",
+        "선고일자": "20151105",
+        "법원명": "부산고등법원(창원)"
+      },
+      "expectedPreviousRaw": {
+        "serial": "202029",
+        "case_name": "손해배상(기)",
+        "case_number": "2014나21277",
+        "date": "20151105",
+        "court": "부산고등법원"
+      },
+      "judgmentSha256": "47b80af8f4d7a5ffd9ce30c9307a559ca628dfaf50a121499cf69dc0c287b52e",
+      "record": {
+        "serial": "202029",
+        "case_name": "손해배상(기)",
+        "case_number": "2014나21277,2014나21284,2014나21291,2014나21307,2014나21314",
+        "date": "20151105",
+        "court": "부산고등법원"
+      },
+      "evidence": {
+        "rule": "Official detail lists all five merged numbers and 부산고등법원(창원). Preserve the exact published parent court label/code 부산고등법원/11; retain branch metadata here and add all four omitted members. No global alias conversion or member truncation.",
+        "reviewedAt": "2026-10-21"
+      }
     }
   }
 }

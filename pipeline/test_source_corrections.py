@@ -155,6 +155,8 @@ class SourceCorrectionTests(unittest.TestCase):
 
     def test_all_original_metadata_and_body_are_bound_without_global_title_trimming(self):
         for entry in corrections.entries().values():
+            if entry["profile"] != corrections.PROFILE:
+                continue
             sid = entry["record"]["serial"]
             referral = mock.MagicMock(status_code=302, headers={"Location": entry["originalUrl"]})
             referral.__enter__.return_value = referral
@@ -172,3 +174,50 @@ class SourceCorrectionTests(unittest.TestCase):
                 body.iter_content.return_value = [json.dumps(changed).encode()]
                 with self.assertRaisesRegex(CorrectionError, "source_changed"):
                     corrections.fetch_judgment(entry)
+
+    def test_official_merged_detail_preserves_published_parent_and_every_member(self):
+        entry = corrections.entries()["대법원:202029"]
+        detail = json.loads(gzip.decompress((FIXTURES / "202029-original.json.gz").read_bytes()))
+        import reviewed_replays
+        with mock.patch.object(reviewed_replays, "fetch_detail", return_value=detail):
+            receipt = corrections.resolve(entry["expectedList"], fetch=corrections.fetch_judgment)
+        with mock.patch.object(corrections, "resolve", return_value=receipt):
+            row = runner._precedent_case(self.item(entry["expectedList"]), "20151105", 1)
+        with tempfile.TemporaryDirectory() as folder:
+            db = MasterDB(str(Path(folder) / "master.db"))
+            try:
+                db.upsert_raw([entry["expectedPreviousRaw"]])
+                previous, _ = db.export_core()
+                import hashlib
+                from serving_policy import quarantine_digest
+                payload = json.dumps(dict(version="20151105", total=len(previous), cases=previous,
+                                          court_code_map=db.court_resolver.code_map)).encode()
+                digest = hashlib.sha256(payload).hexdigest()
+                review = dict(schema=1, referenceSha256=digest, quarantinedRows=0,
+                              quarantineSha256=quarantine_digest([]))
+                db.conn.execute("INSERT INTO serving_policy VALUES(1,?,?,?)",
+                                (payload, digest, json.dumps(review)))
+                db.conn.commit()
+                # Reproduce the exact failed production snapshot: the ordinary
+                # list update already changed the parent code to branch code.
+                db.conn.execute("UPDATE cases SET court='부산고등법원창원재판부'")
+                db.conn.commit()
+                with self.assertRaisesRegex(ValueError, "reference_record_removed_or_changed"):
+                    db.export_core()
+                db.upsert_raw([row])
+                cases, _ = db.export_core()
+                self.assertEqual(set(cases), {"14Na21277", "14Na21284", "14Na21291", "14Na21307", "14Na21314"})
+                self.assertEqual(cases["14Na21277"], previous["14Na21277"])
+                self.assertTrue(all(records[0][1] == 11 for records in cases.values()))
+                self.assertEqual(db.conn.execute("SELECT court FROM cases").fetchone()[0],
+                                 "부산고등법원창원재판부")
+                before = list(db.conn.iterdump())
+                self.assertEqual(db.upsert_raw([row]), (0, 0, 1))
+                self.assertEqual(list(db.conn.iterdump()), before)
+            finally:
+                db.close()
+        changed = copy.deepcopy(detail)
+        changed["metadata"]["사건번호"] = "2014나21277"
+        with mock.patch.object(reviewed_replays, "fetch_detail", return_value=changed), \
+                self.assertRaisesRegex(CorrectionError, "source_changed"):
+            corrections.fetch_judgment(entry)

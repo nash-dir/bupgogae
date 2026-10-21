@@ -1451,6 +1451,8 @@ def execute_local_crawl(
             )
         except BaselineStateError as exc:
             baseline_error = exc
+            from diagnose_state import safe_error
+            log.error(f"❌ 완료 DB 검증 실패 (reason={safe_error(exc)})")
 
         if not publication_allowed(current_backlog) or baseline_error is not None:
             precedent_failed, failed_pages, detc_failed = backlog_counts(

@@ -11,10 +11,29 @@ from urllib.parse import parse_qs, urlsplit
 import requests
 
 from known_errors import CorrectionError, LIST_FIELDS, validate_record, _unique_object
-from law_normalization import normalize_decision_date, normalize_precedent_identity
+from law_normalization import (normalize_decision_date, normalize_precedent_identity,
+                               expand_merged_case_numbers, is_merged_case_number)
 
 REGISTRY = Path(__file__).with_name("source-corrections.json")
 PROFILE = "nts_judgment_html_sha256_v1"
+LAW_PROFILE = "law_detail_preserve_reference_v1"
+
+
+def explicit_detail_members(value):
+    """Only fully written members in a pinned official-detail profile.
+
+    This does not widen the raw DB's 64-character bound or infer short members.
+    Role-bearing main/counterclaim pairs retain their exact original labels.
+    """
+    if not isinstance(value, str) or len(value) > 4096:
+        raise CorrectionError("known_error_invalid_registry")
+    if any(role in value for role in ("본소", "반소")):
+        return expand_merged_case_numbers(value)
+    matches = [re.fullmatch(r"([0-9]{2,4}[가-힣]{1,4}[0-9]+)(?: *\(병합\))?", token.strip())
+               for token in value.split(",")]
+    if not matches or not all(matches):
+        raise CorrectionError("known_error_invalid_registry")
+    return tuple(match[1] for match in matches)
 
 
 def digest(value):
@@ -31,11 +50,32 @@ def entries():
         fields = entry["expectedList"]
         evidence = entry.get("courtEvidence")
         validate_record(entry["record"], allow_missing_court=evidence == "unknown")
-        if (entry["profile"] != PROFILE or fields["데이터출처명"] != "국세법령정보시스템"
-                or set(fields) != set(LIST_FIELDS)
+        if (set(fields) != set(LIST_FIELDS)
                 or key != fields["데이터출처명"] + ":" + fields["판례일련번호"]
                 or entry["record"]["serial"] != fields["판례일련번호"]
                 or not re.fullmatch(r"[0-9a-f]{64}", entry["judgmentSha256"])):
+            raise CorrectionError("known_error_invalid_registry")
+        if entry["profile"] == LAW_PROFILE:
+            detail, record, previous = entry["expectedDetail"], entry["record"], entry["expectedPreviousRaw"]
+            def members(number):
+                return set(expand_merged_case_numbers(number) if is_merged_case_number(number) else (number,))
+            if (fields["데이터출처명"] != "대법원"
+                    or set(detail) != {"사건명", "사건번호", "선고일자", "법원명"}
+                    or tuple(expand_merged_case_numbers(record["case_number"])) != tuple(
+                        explicit_detail_members(detail["사건번호"]))
+                    or (any(role in detail["사건번호"] for role in ("본소", "반소"))
+                        and record["case_number"] != detail["사건번호"])
+                    or not members(fields["사건번호"]) <= members(record["case_number"])
+                    or not members(previous["case_number"]) <= members(record["case_number"])
+                    or record["case_name"] != detail["사건명"] or record["case_name"] != fields["사건명"]
+                    or record["date"] != detail["선고일자"]
+                    or record["date"] != normalize_decision_date(fields["선고일자"])
+                    or record["court"] != previous["court"]
+                    or any(record[k] != previous[k] for k in ("serial", "case_name", "date"))
+                    or not re.fullmatch(re.escape(record["court"]) + r"\([가-힣]+\)", detail["법원명"])):
+                raise CorrectionError("known_error_invalid_registry")
+            continue
+        if entry["profile"] != PROFILE or fields["데이터출처명"] != "국세법령정보시스템":
             raise CorrectionError("known_error_invalid_registry")
         number, court = normalize_precedent_identity(fields["사건번호"], fields["법원명"], fields["데이터출처명"])
         court_matches = entry["record"]["court"] == court
@@ -58,6 +98,12 @@ def entries():
 
 def fetch_judgment(entry):
     """Follow only the exact reviewed government referral, never generic redirects."""
+    if entry["profile"] == LAW_PROFILE:
+        from reviewed_replays import fetch_detail
+        detail = fetch_detail(entry["record"]["serial"])
+        if detail["metadata"] != entry["expectedDetail"]:
+            raise CorrectionError("known_error_source_changed")
+        return detail["body"].encode()
     from api import _get_session, _read_bounded_body, ResponseBodyTooLarge
     fields = entry["expectedList"]
     session = _get_session()
@@ -123,7 +169,7 @@ def resolve(fields, fetch=fetch_judgment):
         court = re.sub(r"\s+", "", entry.get("verifiedCourt", entry["record"]["court"]))
         if not re.fullmatch(re.escape(court) + r"(?:제[0-9]+민사부판결)?", header):
             raise CorrectionError("known_error_source_changed")
-    return {"profile": PROFILE, "entrySha256": digest(entry), "expectedList": dict(fields),
+    return {"profile": entry["profile"], "entrySha256": digest(entry), "expectedList": dict(fields),
             "record": dict(entry["record"]), "judgmentSha256": entry["judgmentSha256"]}
 
 
@@ -131,7 +177,7 @@ def verify_receipt(raw, receipt):
     fields = receipt.get("expectedList", {})
     key = fields.get("데이터출처명", "") + ":" + fields.get("판례일련번호", "")
     entry = entries().get(key)
-    if (not entry or receipt != {"profile": PROFILE, "entrySha256": digest(entry),
+    if (not entry or receipt != {"profile": entry["profile"], "entrySha256": digest(entry),
                                 "expectedList": entry["expectedList"], "record": entry["record"],
                                 "judgmentSha256": entry["judgmentSha256"]}):
         raise CorrectionError("known_error_receipt_mismatch")

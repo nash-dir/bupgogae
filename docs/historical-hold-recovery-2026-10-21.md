@@ -20,6 +20,12 @@ write; the three updates form one atomic upsert. Repeat application performs no
 recovery writes. Export validates both provenance records and the existing full
 reference snapshot; missing or altered provenance blocks publication.
 
+The same dictionary also supplies the ordinary source-correction resolver when
+there is no old quarantined row, such as a fresh bootstrap. The original header
+must contain the complete case identifier, not just its prefix. This keeps the
+verified judgment date correct on both recovery and future fresh collection,
+without duplicating registry entries or changing a frontend regex.
+
 `pipeline/apply_historical_recovery.py --data-dir DIR` is read-only review;
 `--apply` explicitly applies the verified subset. The daily workflow exposes the
 manual boolean `recover_reviewed_historical`, false by default. It runs only in

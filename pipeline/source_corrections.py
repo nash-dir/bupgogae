@@ -150,7 +150,12 @@ def fetch_judgment(entry):
 def resolve(fields, fetch=fetch_judgment):
     entry = entries().get(fields["데이터출처명"] + ":" + fields["판례일련번호"])
     if entry is None:
-        return None
+        from historical_recovery import source_entry, resolve as resolve_historical
+        entry = source_entry(fields)
+        if entry is None:
+            return None
+        reviewed = resolve_historical(fields, entry["expectedArchivedRaw"], fetch=fetch)
+        return dict(reviewed, profile=entry["profile"])
     if fields != entry["expectedList"]:
         raise CorrectionError("known_error_input_changed")
     body = fetch(entry)
@@ -177,6 +182,9 @@ def verify_receipt(raw, receipt):
     fields = receipt.get("expectedList", {})
     key = fields.get("데이터출처명", "") + ":" + fields.get("판례일련번호", "")
     entry = entries().get(key)
+    if entry is None:
+        from historical_recovery import source_entry
+        entry = source_entry(fields)
     if (not entry or receipt != {"profile": entry["profile"], "entrySha256": digest(entry),
                                 "expectedList": entry["expectedList"], "record": entry["record"],
                                 "judgmentSha256": entry["judgmentSha256"]}):

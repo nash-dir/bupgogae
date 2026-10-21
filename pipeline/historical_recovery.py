@@ -39,6 +39,13 @@ def receipt_for(entry):
             "record": entry["record"], "expectedList": entry["expectedList"]}
 
 
+def source_entry(fields):
+    """The same reviewed source fix also applies when no archived row exists."""
+    if fields.get("데이터출처명") != "국세법령정보시스템":
+        return None
+    return entries().get(fields.get("판례일련번호"))
+
+
 def verify_receipt(raw, receipt):
     entry = entries().get(raw["serial"])
     if (not entry or receipt != receipt_for(entry)

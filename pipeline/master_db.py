@@ -509,7 +509,7 @@ class MasterDB:
         if historical and (policy is None or not historical.keys() <= policy.quarantine.keys()):
             raise ValueError("known_error_receipt_mismatch")
         from historical_recovery import entries as historical_entries
-        if (recoveries.keys() & historical_entries().keys()) != historical.keys():
+        if (recoveries.keys() & historical_entries().keys()) - source_receipts.keys() != historical.keys():
             raise ValueError("known_error_receipt_mismatch")
         restored_historical = 0
         self.export_dates = {}

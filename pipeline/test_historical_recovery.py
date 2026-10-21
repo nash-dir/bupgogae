@@ -189,6 +189,30 @@ class HistoricalRecoveryTests(unittest.TestCase):
             command.recover(self.path, apply=True, fetch=lambda _: ET.Element("prec"))
         self.assertEqual(before, list(self.db.conn.iterdump()))
 
+    def test_same_dictionary_corrects_fresh_collection_without_quarantined_raw(self):
+        import source_corrections
+        resolve = source_corrections.resolve
+        fresh = MasterDB(str(Path(self.directory.name) / "fresh.db"))
+        try:
+            for entry in recovery.entries().values():
+                item = ET.Element("prec")
+                for k, v in entry["expectedList"].items():
+                    ET.SubElement(item, k).text = v
+                with mock.patch.object(source_corrections, "resolve", side_effect=lambda f: resolve(f, fetch=self.body)):
+                    row = runner._precedent_case(item, entry["expectedOriginalMetadata"]["ntstDcmRgtDt"], 1)
+                fresh.upsert_raw([row])
+            cases, skipped = fresh.export_core()
+            self.assertEqual(skipped, 0)
+            self.assertEqual(cases["22Guh1013"][0][:3], [349026, 45, 231116])
+            self.assertEqual(cases["22Guh72770"][0][:3], [242327, 45, 231207])
+            self.assertEqual(fresh.conn.execute("SELECT date FROM cases WHERE serial='349026'").fetchone()[0],
+                             "20230921")
+            fresh.conn.execute("DELETE FROM source_correction_provenance WHERE serial='349026'")
+            with self.assertRaisesRegex(ValueError, "receipt_mismatch"):
+                fresh.export_core()
+        finally:
+            fresh.close()
+
 
 if __name__ == "__main__":
     unittest.main()

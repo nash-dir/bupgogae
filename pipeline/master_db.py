@@ -57,7 +57,8 @@ def _same_source_fields(observed, archived):
 
 def _same_source_replay(raw, case, original):
     if "_source_raw" not in raw:
-        return case == original
+        return ({k: raw.get(k) for k in original} == original
+                and case == sanitize_raw_case(original))
     if not _same_source_fields(raw["_source_raw"], original):
         return False
     number, court = normalize_precedent_identity(
@@ -66,6 +67,23 @@ def _same_source_replay(raw, case, original):
     expected = dict(original, case_number=number, court=court,
                     date=normalize_decision_date(original["date"]))
     return case == expected
+
+
+def _source_normalizes_to_case(raw, case):
+    if "_source_raw" not in raw:
+        return True
+    source = raw["_source_raw"]
+    if (not isinstance(source, dict) or set(source) != set(case)
+            or not all(isinstance(v, str) for v in source.values())):
+        return False
+    try:
+        number, court = normalize_precedent_identity(
+            source["case_number"], source["court"], raw.get("_source_name", ""),
+        )
+    except ValueError:
+        return False
+    return dict(source, case_number=number, court=court,
+                date=normalize_decision_date(source["date"])) == case
 
 
 class MasterDB:
@@ -223,8 +241,12 @@ class MasterDB:
                         _same_source_replay(raw, case, original)
                         or (serving_receipt is not None and case == original and recovery
                             and json.loads(recovery[0]) == serving_receipt["record"])
-                        or (_same_source_fields(raw.get("_source_raw"), original) and recovery
-                            and case == json.loads(recovery[0]))
+                        # A source fix that now equals every already-reviewed
+                        # serving field also introduces no new value. Preserve
+                        # the old raw/provenance rather than overwriting it.
+                        or (recovery and case == json.loads(recovery[0]) and (
+                            _same_source_fields(raw.get("_source_raw"), original)
+                            or _source_normalizes_to_case(raw, case)))
                     ):
                         skipped += 1
                         continue
@@ -329,9 +351,44 @@ class MasterDB:
         historical exclusion.
         """
         policy = load_policy(self.conn)
+        reviewed_ids = {row[0] for row in self.conn.execute("SELECT serial FROM reviewed_recovery_provenance")}
+        from source_corrections import entries as source_entries
+        live_source_ids = {entry["record"]["serial"] for entry in source_entries().values()}
 
-        def check(original):
-            if policy is None or original.get("serial") not in policy.quarantine:
+        def check(original, source_name="", list_fields=None):
+            sid = original.get("serial", "")
+            if sid.isascii() and sid.isdigit() and int(sid) in self.blacklist:
+                # Existing explicit exclusions must precede the parser too;
+                # otherwise a known-invalid row aborts its entire API page.
+                return dict(original, _excluded_serial=True)
+            if policy is None or sid not in policy.quarantine:
+                if sid not in reviewed_ids or sid in live_source_ids:
+                    return None
+                from known_errors import CorrectionError
+                stored = self.conn.execute(
+                    f"SELECT {','.join('c.' + k for k in RAW_COLUMNS)},r.raw_record_json,r.record_json "
+                    "FROM cases c JOIN reviewed_recovery_provenance r USING(serial) WHERE c.serial=?", (sid,)
+                ).fetchone()
+                if stored is None:
+                    raise CorrectionError("known_error_receipt_mismatch")
+                row = dict(zip(RAW_COLUMNS, stored[:len(RAW_COLUMNS)]))
+                archived, corrected = json.loads(stored[-2]), json.loads(stored[-1])
+                if ({k: row[k] for k in archived} != archived
+                        or row["case_number_clean"] != clean_case_number(row["case_number"])):
+                    raise CorrectionError("known_error_receipt_mismatch")
+                if _same_source_fields(original, archived):
+                    return dict(archived, _reviewed_date=corrected["date"])
+                number, court = normalize_precedent_identity(original["case_number"], original["court"], source_name)
+                normalized = dict(original, case_number=number, court=court,
+                                  date=normalize_decision_date(original["date"]))
+                if normalized != corrected:
+                    if list_fields is not None:
+                        from reviewed_replays import verify
+                        if verify(list_fields, archived, corrected):
+                            return dict(archived, _reviewed_date=corrected["date"])
+                    raise CorrectionError("known_error_review_required")
+                # Let the strict parser validate a source that now matches the
+                # reviewed record. upsert will verify and perform no writes.
                 return None
             row = self.conn.execute(
                 f"SELECT {','.join(RAW_COLUMNS)} FROM cases WHERE serial=?", (original["serial"],)

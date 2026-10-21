@@ -67,6 +67,32 @@ class ServingPolicyTests(unittest.TestCase):
         self.assertEqual(self.db.conn.execute("SELECT case_number FROM cases WHERE serial='99'").fetchone()[0],
                          "bad, unknown")
 
+    def test_existing_blacklist_precedes_semantic_parser_but_not_new_bad_ids(self):
+        self.db.blacklist = {123}
+        item = ET.Element("prec")
+        ET.SubElement(item, "판례일련번호").text = "123"
+        checker = self.db.raw_replay_checker()
+        before = list(self.db.conn.iterdump())
+        row = runner._precedent_case(item, "20260101", 1, replay=checker)
+        self.assertTrue(row["_excluded_serial"])
+        self.assertEqual(self.db.upsert_raw([row]), (0, 0, 1))
+        self.assertEqual(list(self.db.conn.iterdump()), before)
+        item.find("판례일련번호").text = "124"
+        with self.assertRaises(runner.RangeFetchError) as caught:
+            runner._precedent_case(item, "20260101", 1, replay=checker)
+        self.assertEqual(caught.exception.reason, "missing_case_number")
+
+    def test_pinned_raw_noop_does_not_rewrite_values_changed_by_sanitizing(self):
+        original = dict(serial="99", case_name="x" * 501, case_number="invalid original",
+                        date="20220101", court="")
+        self.install(original)
+        before = list(self.db.conn.iterdump())
+        row = self.db.raw_replay_checker()(original)
+        self.assertEqual(self.db.upsert_raw([row]), (0, 0, 1))
+        self.assertEqual(list(self.db.conn.iterdump()), before)
+        with self.assertRaisesRegex(ValueError, "raw_changed_requires_review"):
+            self.db.upsert_raw([dict(original, case_name=original["case_name"][:-1])])
+
     def test_exact_source_replay_keeps_held_raw_hash_and_reference_unchanged(self):
         original = dict(serial="624775", case_name="이익처분에 의한 상여금", case_number="대법원-2026-두-31267",
                         date="2026.10.08", court="")

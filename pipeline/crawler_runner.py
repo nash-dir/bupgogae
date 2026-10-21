@@ -818,9 +818,14 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
         "court": get_text(item, "법원명"),
     }
     if replay is not None:
-        held = replay(source_raw)
+        held = replay(source_raw, get_text(item, "데이터출처명"),
+                      {k: get_text(item, k) for k in LIST_FIELDS})
         if held is not None:
+            if held.get("_excluded_serial") is True:
+                return held
             source_date = normalize_decision_date(source_raw["date"])
+            if source_date in (None, "00010101") and "_reviewed_date" in held:
+                source_date = normalize_decision_date(held["_reviewed_date"])
             start, separator, end = date_range.partition("~")
             if source_date is not None and not start <= source_date <= (end if separator else start):
                 raise RangeFetchError(date_range, page, "out_of_range_case_date")
@@ -858,7 +863,7 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
         end_date = start_date
     if not start_date <= case_date <= end_date:
         raise RangeFetchError(date_range, page, "out_of_range_case_date")
-    if not court:
+    if not court and serving_correction is None:
         raise RangeFetchError(date_range, page, "missing_case_court")
     record = {
         "serial": serial,

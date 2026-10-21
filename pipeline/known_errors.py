@@ -68,9 +68,10 @@ def _unique_object(pairs):
     return result
 
 
-def validate_record(record):
+def validate_record(record, *, allow_missing_court=False):
     if (not isinstance(record, dict) or set(record) != set(RECORD_FIELDS)
-            or any(not isinstance(v, str) or not v for v in record.values())
+            or any(not isinstance(v, str) or (not v and not (k == "court" and allow_missing_court))
+                   for k, v in record.items())
             or not re.fullmatch(r"[0-9]{1,32}", record["serial"])
             or sanitize_raw_case(record) != record
             or normalize_decision_date(record["date"]) != record["date"]):

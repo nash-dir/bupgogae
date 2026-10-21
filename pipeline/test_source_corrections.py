@@ -118,3 +118,57 @@ class SourceCorrectionTests(unittest.TestCase):
         with mock.patch.object(runner, "fetch_xml_safe", return_value=xml), \
                 self.assertRaises(runner.RangeFetchError):
             runner._fetch_detc_page(1)
+
+    def test_missing_courts_require_exact_reviewed_original_not_registration_office(self):
+        reviewed = [e for e in corrections.entries().values() if "courtEvidence" in e]
+        self.assertEqual(len(reviewed), 9)
+        self.assertEqual(sum(e["courtEvidence"] == "unknown" for e in reviewed), 6)
+        original_resolve = corrections.resolve
+        def resolve(fields):
+            return original_resolve(fields, fetch=lambda e: gzip.decompress(
+                (FIXTURES / (e["record"]["serial"] + "-judgment.html.gz")).read_bytes()))
+        with tempfile.TemporaryDirectory() as folder:
+            db = MasterDB(str(Path(folder) / "master.db"))
+            try:
+                for entry in reviewed:
+                    fields = entry["expectedList"]
+                    with mock.patch.object(corrections, "resolve", side_effect=resolve):
+                        row = runner._precedent_case(self.item(fields), entry["record"]["date"], 1)
+                    self.assertEqual(row["court"], "")  # Original API remains untouched.
+                    db.upsert_raw([row])
+                    before = list(db.conn.iterdump())
+                    self.assertIsNone(db.raw_replay_checker()(row["_source_raw"], row["_source_name"]))
+                    self.assertEqual(db.upsert_raw([row]), (0, 0, 1))
+                    self.assertEqual(list(db.conn.iterdump()), before)
+                cases, _ = db.export_core()
+                records = [row for rows in cases.values() for row in rows]
+                self.assertEqual(len(records), 9)
+                self.assertEqual(sum(row[1] == 0 for row in records), 6)
+                self.assertIn("대전지방법원 천안지원", db.court_resolver.code_map)
+                self.assertIn("춘천지방법원 원주지원", db.court_resolver.code_map)
+            finally:
+                db.close()
+        fields = dict(reviewed[0]["expectedList"], 판례일련번호="999999998")
+        with self.assertRaises(runner.RangeFetchError) as caught:
+            runner._precedent_case(self.item(fields), reviewed[0]["record"]["date"], 1)
+        self.assertEqual(caught.exception.reason, "missing_case_court")
+
+    def test_all_original_metadata_and_body_are_bound_without_global_title_trimming(self):
+        for entry in corrections.entries().values():
+            sid = entry["record"]["serial"]
+            referral = mock.MagicMock(status_code=302, headers={"Location": entry["originalUrl"]})
+            referral.__enter__.return_value = referral
+            body = mock.MagicMock(status_code=200, headers={})
+            body.__enter__.return_value = body
+            data = (FIXTURES / (sid + "-original.json")).read_bytes()
+            body.iter_content.return_value = [data]
+            session = mock.Mock()
+            session.get.return_value, session.post.return_value = referral, body
+            with self.subTest(serial=sid), mock.patch.object(api, "_get_session", return_value=session):
+                receipt = corrections.resolve(entry["expectedList"], fetch=corrections.fetch_judgment)
+                self.assertEqual(receipt["record"], entry["record"])
+                changed = json.loads(data)
+                changed["data"]["ASIQTB002PR01"]["dcmDVO"]["ntstDcmTtl"] += " "
+                body.iter_content.return_value = [json.dumps(changed).encode()]
+                with self.assertRaisesRegex(CorrectionError, "source_changed"):
+                    corrections.fetch_judgment(entry)

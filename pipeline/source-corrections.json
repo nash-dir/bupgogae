@@ -25,6 +25,303 @@
         "rule": "Original judgment HTML has explicit 판결선고 label immediately followed by 2025.12.11; metadata incorrectly says 2026.12.11. No inferred year.",
         "reviewedAt": "2026-10-21"
       }
+    },
+    "국세법령정보시스템:617561": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "617561",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "소유권이전청구권 가등기 말소",
+        "사건번호": "2023가단122878",
+        "선고일자": "2024.02.06",
+        "법원명": "",
+        "사건종류코드": "400101"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000007159",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000007159",
+        "ntstDcmDscmCntn": "2023가단122878",
+        "ntstDcmTtl": "소유권이전청구권 가등기 말소",
+        "ntstDcmRgtDt": "20240206"
+      },
+      "judgmentSha256": "75c2bb2f5de8fe1b4ed3130607b42425906f87f64a6e62f65c62d95de90d7bd7",
+      "courtEvidence": "unknown",
+      "record": {
+        "serial": "617561",
+        "case_name": "소유권이전청구권 가등기 말소",
+        "case_number": "2023가단122878",
+        "date": "20240206",
+        "court": ""
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "judgment_label"
+      }
+    },
+    "국세법령정보시스템:616675": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "616675",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "대한민국은 적법한 절차에 따라 이 사건 부동산에 압류등기를 행한 것이므로 원고의 이 사건 청구에 대하여 승낙의 의사표시를 해야 할 의무가 없음",
+        "사건번호": "2024가단82714",
+        "선고일자": "2025.04.09",
+        "법원명": "",
+        "사건종류코드": "400107"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000017875",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000017875",
+        "ntstDcmDscmCntn": "2024가단82714",
+        "ntstDcmTtl": "대한민국은 적법한 절차에 따라 이 사건 부동산에 압류등기를 행한 것이므로 원고의 이 사건 청구에 대하여 승낙의 의사표시를 해야 할 의무가 없음",
+        "ntstDcmRgtDt": "20250409"
+      },
+      "judgmentSha256": "c6007daa467fa4b399e0588133b8237be8602e8d45818d64fa27b58443fba9bb",
+      "courtEvidence": "unknown",
+      "record": {
+        "serial": "616675",
+        "case_name": "대한민국은 적법한 절차에 따라 이 사건 부동산에 압류등기를 행한 것이므로 원고의 이 사건 청구에 대하여 승낙의 의사표시를 해야 할 의무가 없음",
+        "case_number": "2024가단82714",
+        "date": "20250409",
+        "court": ""
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "judgment_label"
+      }
+    },
+    "국세법령정보시스템:613741": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "613741",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "공탁금출급청구권에 대한 우선수익권의 권리",
+        "사건번호": "2024가합101226",
+        "선고일자": "2025.08.19",
+        "법원명": "",
+        "사건종류코드": "400101"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000016721",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000016721",
+        "ntstDcmDscmCntn": "2024가합101226",
+        "ntstDcmTtl": "공탁금출급청구권에 대한 우선수익권의 권리 ",
+        "ntstDcmRgtDt": "20250819"
+      },
+      "judgmentSha256": "40231d9f31ec3af371344a2b4f7e9f18d4dee5b99c68bd1a008a8f818ca1fd94",
+      "courtEvidence": "judgment_header",
+      "record": {
+        "serial": "613741",
+        "case_name": "공탁금출급청구권에 대한 우선수익권의 권리",
+        "case_number": "2024가합101226",
+        "date": "20250819",
+        "court": "대전지방법원 천안지원"
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "judgment_label"
+      }
+    },
+    "국세법령정보시스템:615511": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "615511",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "사해행위취소",
+        "사건번호": "2024가단5461",
+        "선고일자": "2025.08.21",
+        "법원명": "",
+        "사건종류코드": "400101"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000017077",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000017077",
+        "ntstDcmDscmCntn": "2024가단5461",
+        "ntstDcmTtl": "사해행위취소",
+        "ntstDcmRgtDt": "20250821"
+      },
+      "judgmentSha256": "791feda67efc2ac815fa8d1a5a4117b8004629b91edd653264a274f8a44a9201",
+      "courtEvidence": "unknown",
+      "record": {
+        "serial": "615511",
+        "case_name": "사해행위취소",
+        "case_number": "2024가단5461",
+        "date": "20250821",
+        "court": ""
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "matching_official_metadata"
+      }
+    },
+    "국세법령정보시스템:618385": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "618385",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "소멸시효 완성에 따른 근저당권말소 청구",
+        "사건번호": "2025가단53469",
+        "선고일자": "2025.11.11",
+        "법원명": "",
+        "사건종류코드": "400101"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000020245",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000020245",
+        "ntstDcmDscmCntn": "2025가단53469",
+        "ntstDcmTtl": "소멸시효 완성에 따른 근저당권말소 청구 ",
+        "ntstDcmRgtDt": "20251111"
+      },
+      "judgmentSha256": "2ed8d9e3ba0d195927ec9e59d01f63acad5f08a6381fd75428775b8f077721ac",
+      "courtEvidence": "judgment_header",
+      "record": {
+        "serial": "618385",
+        "case_name": "소멸시효 완성에 따른 근저당권말소 청구",
+        "case_number": "2025가단53469",
+        "date": "20251111",
+        "court": "춘천지방법원 원주지원"
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "judgment_label"
+      }
+    },
+    "국세법령정보시스템:615215": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "615215",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "유언증서를 작성한 상태에서 사망 전에 부동산 양도대금을 증여한 것은 사해행위에 해당함",
+        "사건번호": "2024가합101943",
+        "선고일자": "2025.11.25",
+        "법원명": "",
+        "사건종류코드": "400101"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000018068",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000018068",
+        "ntstDcmDscmCntn": "2024가합101943",
+        "ntstDcmTtl": "유언증서를 작성한 상태에서 사망 전에 부동산 양도대금을 증여한 것은 사해행위에 해당함",
+        "ntstDcmRgtDt": "20251125"
+      },
+      "judgmentSha256": "aa20df4b028455b921dffde5f21deeec4a60dddcae414233ace11f536d51f26c",
+      "courtEvidence": "judgment_header",
+      "record": {
+        "serial": "615215",
+        "case_name": "유언증서를 작성한 상태에서 사망 전에 부동산 양도대금을 증여한 것은 사해행위에 해당함",
+        "case_number": "2024가합101943",
+        "date": "20251125",
+        "court": "대전지방법원 천안지원"
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "judgment_label"
+      }
+    },
+    "국세법령정보시스템:613605": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "613605",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "사해행위취소",
+        "사건번호": "2025가단21261",
+        "선고일자": "2025.11.27",
+        "법원명": "",
+        "사건종류코드": "400107"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000017350",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000017350",
+        "ntstDcmDscmCntn": "2025가단21261",
+        "ntstDcmTtl": "사해행위취소",
+        "ntstDcmRgtDt": "20251127"
+      },
+      "judgmentSha256": "be08a9cc2aea61c1f3ae1b7d7ec8228919d4ed66edfe67b792a4112bc25af1a0",
+      "courtEvidence": "unknown",
+      "record": {
+        "serial": "613605",
+        "case_name": "사해행위취소",
+        "case_number": "2025가단21261",
+        "date": "20251127",
+        "court": ""
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "matching_official_metadata"
+      }
+    },
+    "국세법령정보시스템:619097": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "619097",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "초과인출금지급이자 필요경비불산입",
+        "사건번호": "2023구합53621",
+        "선고일자": "2025.12.15",
+        "법원명": "",
+        "사건종류코드": "400107"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000020355",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000020355",
+        "ntstDcmDscmCntn": "2023구합53621",
+        "ntstDcmTtl": "초과인출금지급이자 필요경비불산입",
+        "ntstDcmRgtDt": "20251215"
+      },
+      "judgmentSha256": "029c182c354593e2f75f1d5560e44c8387c26f79b7d43db18a2abd76a772f79f",
+      "courtEvidence": "unknown",
+      "record": {
+        "serial": "619097",
+        "case_name": "초과인출금지급이자 필요경비불산입",
+        "case_number": "2023구합53621",
+        "date": "20251215",
+        "court": ""
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "judgment_label"
+      }
+    },
+    "국세법령정보시스템:621045": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "621045",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "부동산 매매대금 미회수채권 압류 추심금 소송",
+        "사건번호": "2024가합13267",
+        "선고일자": "2026.02.12",
+        "법원명": "",
+        "사건종류코드": "400101"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000021857",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000021857",
+        "ntstDcmDscmCntn": "2024가합13267",
+        "ntstDcmTtl": "부동산 매매대금 미회수채권 압류 추심금 소송",
+        "ntstDcmRgtDt": "20260212"
+      },
+      "judgmentSha256": "ecc054bbbfb6dcfd303a8556c4376d372b9bc84c690689484594beecc6dc2de1",
+      "courtEvidence": "unknown",
+      "record": {
+        "serial": "621045",
+        "case_name": "부동산 매매대금 미회수채권 압류 추심금 소송",
+        "case_number": "2024가합13267",
+        "date": "20260212",
+        "court": ""
+      },
+      "evidence": {
+        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "reviewedAt": "2026-10-21",
+        "dateEvidence": "matching_official_metadata"
+      }
     }
   }
 }

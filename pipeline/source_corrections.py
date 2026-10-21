@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from html.parser import HTMLParser
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -28,7 +29,8 @@ def entries():
         raise CorrectionError("known_error_invalid_registry")
     for key, entry in data["entries"].items():
         fields = entry["expectedList"]
-        validate_record(entry["record"])
+        evidence = entry.get("courtEvidence")
+        validate_record(entry["record"], allow_missing_court=evidence == "unknown")
         if (entry["profile"] != PROFILE or fields["데이터출처명"] != "국세법령정보시스템"
                 or set(fields) != set(LIST_FIELDS)
                 or key != fields["데이터출처명"] + ":" + fields["판례일련번호"]
@@ -36,7 +38,13 @@ def entries():
                 or not re.fullmatch(r"[0-9a-f]{64}", entry["judgmentSha256"])):
             raise CorrectionError("known_error_invalid_registry")
         number, court = normalize_precedent_identity(fields["사건번호"], fields["법원명"], fields["데이터출처명"])
-        if (entry["record"]["case_number"] != number or entry["record"]["court"] != court
+        court_matches = entry["record"]["court"] == court
+        if evidence is not None:
+            if court or evidence not in {"unknown", "judgment_header"}:
+                raise CorrectionError("known_error_invalid_registry")
+            court_matches = (not entry["record"]["court"] if evidence == "unknown"
+                             else bool(entry["record"]["court"]))
+        if (entry["record"]["case_number"] != number or not court_matches
                 or entry["record"]["case_name"] != fields["사건명"]):
             raise CorrectionError("known_error_invalid_registry")
         url = urlsplit(entry["originalUrl"])
@@ -70,10 +78,16 @@ def fetch_judgment(entry):
         data = json.loads(body)
         result = data["data"]["ASIQTB002PR01"]
         metadata = result["dcmDVO"]
-        if (data["status"] != "SUCCESS" or metadata["ntstDcmId"] != params["ntstDcmId"]
-                or metadata["ntstDcmDscmCntn"] != fields["사건번호"]
-                or metadata["ntstDcmTtl"] != fields["사건명"]
-                or metadata["ntstDcmRgtDt"] != normalize_decision_date(fields["선고일자"])):
+        expected = entry.get("expectedOriginalMetadata", {
+            "ntstDcmId": params["ntstDcmId"], "ntstDcmDscmCntn": fields["사건번호"],
+            "ntstDcmTtl": fields["사건명"], "ntstDcmRgtDt": normalize_decision_date(fields["선고일자"])})
+        if (data["status"] != "SUCCESS" or set(expected) != {
+                "ntstDcmId", "ntstDcmDscmCntn", "ntstDcmTtl", "ntstDcmRgtDt"}
+                or {k: metadata[k] for k in expected} != expected
+                or expected["ntstDcmId"] != params["ntstDcmId"]
+                or expected["ntstDcmDscmCntn"] != fields["사건번호"]
+                or expected["ntstDcmTtl"].strip() != fields["사건명"]
+                or expected["ntstDcmRgtDt"] != normalize_decision_date(fields["선고일자"])):
             raise CorrectionError("known_error_source_changed")
         html_rows = [row for row in result["dcmHwpEditorDVOList"] if row["dcmFleTy"] == "html"]
         if len(html_rows) != 1 or not isinstance(html_rows[0]["dcmFleByte"], str):
@@ -96,6 +110,19 @@ def resolve(fields, fetch=fetch_judgment):
     body = fetch(entry)
     if not isinstance(body, bytes) or hashlib.sha256(body).hexdigest() != entry["judgmentSha256"]:
         raise CorrectionError("known_error_source_changed")
+    if entry.get("courtEvidence") == "judgment_header":
+        class Text(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.parts = []
+            def handle_data(self, data):
+                self.parts.append(data)
+        parser = Text()
+        parser.feed(body.decode("utf-8"))
+        header = re.sub(r"\s+", "", "".join(parser.parts)).split("사건", 1)[0]
+        court = re.sub(r"\s+", "", entry["record"]["court"])
+        if not re.fullmatch(re.escape(court) + r"(?:제[0-9]+민사부판결)?", header):
+            raise CorrectionError("known_error_source_changed")
     return {"profile": PROFILE, "entrySha256": digest(entry), "expectedList": dict(fields),
             "record": dict(entry["record"]), "judgmentSha256": entry["judgmentSha256"]}
 

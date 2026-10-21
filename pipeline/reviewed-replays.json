@@ -1,0 +1,149 @@
+{
+  "schema": 1,
+  "entries": {
+    "619167": {
+      "expectedList": {
+        "판례일련번호": "619167",
+        "데이터출처명": "대법원",
+        "사건명": "손해배상(기)",
+        "사건번호": "2020나10223",
+        "선고일자": "2020.10.15",
+        "법원명": "부산고등법원창원재판부",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "손해배상(기)",
+        "사건번호": "2020나10223",
+        "선고일자": "20201015",
+        "법원명": "부산고등법원(창원)"
+      },
+      "bodySha256": "4b931d6061c9b3136ab17c36adb25e7b3d8bc9183c9f2105b5f674b0bb27f49e",
+      "expectedArchived": {
+        "case_name": "손해배상(기)",
+        "case_number": "2020나10223",
+        "court": "부산고등법원(창원)",
+        "date": "20201015",
+        "serial": "619167"
+      },
+      "record": {
+        "case_name": "손해배상(기)",
+        "case_number": "2020나10223",
+        "court": "부산고등법원(창원)",
+        "date": "20201015",
+        "serial": "619167"
+      },
+      "evidence": {
+        "rule": "Exact official detail and entire judgment body verified; retain the existing reviewed full identity when list omits merged members or uses a different branch label. Never apply an alias globally.",
+        "reviewedAt": "2026-10-21"
+      }
+    },
+    "616555": {
+      "expectedList": {
+        "판례일련번호": "616555",
+        "데이터출처명": "대법원",
+        "사건명": "근저당권말소·손해배상청구의소",
+        "사건번호": "2022가합546698",
+        "선고일자": "2024.07.24",
+        "법원명": "서울중앙지방법원",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "근저당권말소·손해배상청구의소",
+        "사건번호": "2022가합546698(본소), 2022가합559823(반소)",
+        "선고일자": "20240724",
+        "법원명": "서울중앙지방법원"
+      },
+      "bodySha256": "2bfac9933858eed2099dcb4ca5a54ad70c1bb3a681399baf8e484b1015a91f1d",
+      "expectedArchived": {
+        "case_name": "근저당권말소·손해배상청구의소",
+        "case_number": "2022가합546698(본소), 2022가합559823(반소)",
+        "court": "서울중앙지방법원",
+        "date": "20240724",
+        "serial": "616555"
+      },
+      "record": {
+        "case_name": "근저당권말소·손해배상청구의소",
+        "case_number": "2022가합546698(본소), 2022가합559823(반소)",
+        "court": "서울중앙지방법원",
+        "date": "20240724",
+        "serial": "616555"
+      },
+      "evidence": {
+        "rule": "Exact official detail and entire judgment body verified; retain the existing reviewed full identity when list omits merged members or uses a different branch label. Never apply an alias globally.",
+        "reviewedAt": "2026-10-21"
+      }
+    },
+    "622307": {
+      "expectedList": {
+        "판례일련번호": "622307",
+        "데이터출처명": "대법원",
+        "사건명": "법인세경정거부처분취소",
+        "사건번호": "2020누904",
+        "선고일자": "2022.02.09",
+        "법원명": "서울고등법원",
+        "사건종류코드": "400107"
+      },
+      "expectedDetail": {
+        "사건명": "법인세경정거부처분취소",
+        "사건번호": "(춘천)2020누904",
+        "선고일자": "20220209",
+        "법원명": "서울고등법원"
+      },
+      "bodySha256": "16b04e148cbe7208b34912da3290fa80b81d4773c016db8b07ecd1587ef199bf",
+      "expectedArchived": {
+        "case_name": "법인세경정거부처분취소",
+        "case_number": "2020누904",
+        "court": "서울고등법원(춘천)",
+        "date": "20220209",
+        "serial": "622307"
+      },
+      "record": {
+        "case_name": "법인세경정거부처분취소",
+        "case_number": "2020누904",
+        "court": "서울고등법원(춘천)",
+        "date": "20220209",
+        "serial": "622307"
+      },
+      "evidence": {
+        "rule": "Exact official detail and entire judgment body verified; retain the existing reviewed full identity when list omits merged members or uses a different branch label. Never apply an alias globally.",
+        "reviewedAt": "2026-10-21"
+      }
+    },
+    "622123": {
+      "expectedList": {
+        "판례일련번호": "622123",
+        "데이터출처명": "대법원",
+        "사건명": "가. 산업기술의유출방지및보호에관한법률위반",
+        "사건번호": "2020고단3",
+        "선고일자": "2024.08.29",
+        "법원명": "수원지방법원",
+        "사건종류코드": "400102"
+      },
+      "expectedDetail": {
+        "사건명": "가. 산업기술의유출방지및보호에관한법률위반",
+        "사건번호": "2020고단3, 2020고단3888(병합)",
+        "선고일자": "20240829",
+        "법원명": "수원지방법원"
+      },
+      "bodySha256": "93cfdb52a929ca2be74ed785a958a388afea8872a008ba6a802b9b6c6dec3e95",
+      "expectedArchived": {
+        "case_name": "가. 산업기술의유출방지및보호에관한법률위반",
+        "case_number": "2020고단3, 2020고단3888(병합)",
+        "court": "수원지방법원",
+        "date": "20240829",
+        "serial": "622123"
+      },
+      "record": {
+        "case_name": "가. 산업기술의유출방지및보호에관한법률위반",
+        "case_number": "2020고단3, 2020고단3888(병합)",
+        "court": "수원지방법원",
+        "date": "20240829",
+        "serial": "622123"
+      },
+      "evidence": {
+        "rule": "Exact official detail and entire judgment body verified; retain the existing reviewed full identity when list omits merged members or uses a different branch label. Never apply an alias globally.",
+        "reviewedAt": "2026-10-21"
+      }
+    }
+  }
+}

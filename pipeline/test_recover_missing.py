@@ -188,6 +188,15 @@ class RecoveryMergeTests(unittest.TestCase):
             provenance = db.conn.execute("SELECT * FROM reviewed_recovery_provenance ORDER BY serial").fetchall()
             self.assertEqual(db.upsert_raw([original]), (0, 0, 1))
             self.assertEqual(db.upsert_raw([dict(case(1), _source_raw=original)]), (0, 0, 1))
+            # Provider metadata may catch up with the already-reviewed identity.
+            self.assertIsNone(db.raw_replay_checker()(case(1), "대법원"))
+            self.assertEqual(db.upsert_raw([dict(case(1), _source_raw=case(1), _source_name="대법원")]),
+                             (0, 0, 1))
+            checker = db.raw_replay_checker()
+            self.assertEqual(checker(original)["case_number"], original["case_number"])
+            self.assertEqual(checker(original)["_reviewed_date"], "20250101")
+            with self.assertRaisesRegex(ValueError, "review_required"):
+                checker(dict(original, case_name="changed"))
             self.assertEqual(db.conn.execute("SELECT * FROM cases ORDER BY serial").fetchall(), before)
             self.assertEqual(db.conn.execute("SELECT * FROM reviewed_recovery_provenance ORDER BY serial").fetchall(), provenance)
             with self.assertRaisesRegex(ValueError, "review_required"):

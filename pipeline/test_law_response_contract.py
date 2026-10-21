@@ -119,6 +119,20 @@ class LawResponseContractTests(unittest.TestCase):
             with self.subTest(tag=tag), self.assertRaises(runner.RangeFetchError):
                 runner._precedent_case(changed, "20181101", 1)
 
+    def test_full_court_without_separators_is_lossless_and_source_bound(self):
+        item = ET.fromstring(fixture("day.xml.gz")).find("prec")
+        item.find("사건번호").text = "대법원2026두31124"
+        item.find("법원명").text = ""
+        item.find("선고일자").text = "2026.09.23"
+        row = runner._precedent_case(item, "20260923", 1)
+        self.assertEqual((row["case_number"], row["court"]), ("2026두31124", "대법원"))
+        self.assertEqual(row["_source_raw"]["case_number"], "대법원2026두31124")
+        self.assertNotIn("상세링크", str(row))
+        for number in ("대법2026두31124", "대법원2026두31124,31125", "대법원2026두31124 기타"):
+            item.find("사건번호").text = number
+            with self.subTest(number=number), self.assertRaises(runner.RangeFetchError):
+                runner._precedent_case(item, "20260923", 1)
+
     def test_later_page_failure_keeps_backlog_and_writes_no_partial_rows(self):
         db = mock.Mock()
         with mock.patch.object(runner, "fetch_xml_safe", side_effect=[fixture("month-1.xml.gz"), None]), mock.patch.object(runner.time, "sleep"):
@@ -133,7 +147,29 @@ class LawResponseContractTests(unittest.TestCase):
             self.assertEqual(runner.fetch_recent_ruling_dates(), {"20181101"})
 
     def test_detc_uses_same_date_normalization_without_changing_empty_policy(self):
-        for raw, expected in (("2018.11.01", "20181101"), ("20181101", "20181101"), ("", "")):
+        for raw, expected in (("2018.11.01", "20181101"), ("20181101", "20181101"), ("", ""), ("0", "0")):
             body = f"<DetcSearch><totalCnt>1</totalCnt><Detc><헌재결정례일련번호>1</헌재결정례일련번호><사건번호>2018헌마1</사건번호><종국일자>{raw}</종국일자></Detc></DetcSearch>".encode()
             with mock.patch.object(runner, "fetch_xml_safe", return_value=body):
                 self.assertEqual(runner._fetch_detc_page(1)[0]["date"], expected)
+
+    def test_constitutional_unknown_update_never_erases_known_date(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = MasterDB(str(Path(folder) / "master.db"))
+            try:
+                case = dict(serial="D151068", case_name="사건명", case_number="2001헌마622",
+                            date="20260101", court="헌법재판소")
+                db.upsert_raw([case])
+                db.upsert_raw([dict(case, date="0")])
+                self.assertEqual(db.conn.execute("SELECT date FROM cases").fetchone()[0], "20260101")
+                db.upsert_raw([dict(case, serial="D2", date="0")])
+                self.assertEqual(db.conn.execute("SELECT date FROM cases WHERE serial='D2'").fetchone()[0], "0")
+            finally:
+                db.close()
+
+    def test_constitutional_unknown_sentinel_does_not_accept_other_invalid_dates(self):
+        for raw in ("00", "00000000", "2018.02.30", "2026-1-1", "unknown"):
+            body = f"<DetcSearch><totalCnt>1</totalCnt><Detc><헌재결정례일련번호>1</헌재결정례일련번호><사건번호>2018헌마1</사건번호><종국일자>{raw}</종국일자></Detc></DetcSearch>".encode()
+            with self.subTest(raw=raw), mock.patch.object(runner, "fetch_xml_safe", return_value=body), \
+                    self.assertRaises(runner.RangeFetchError) as caught:
+                runner._fetch_detc_page(1)
+            self.assertEqual(caught.exception.reason, "invalid_case_date")

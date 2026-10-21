@@ -804,13 +804,26 @@ def _required_case_number(raw_number: str, source: str, page: int) -> str:
     return raw_number
 
 
-def _precedent_case(item, date_range: str, page: int) -> dict:
+def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
     serial = _required_numeric_serial(
         get_text(item, "판례일련번호"),
         source=date_range,
         page=page,
         max_length=32,
     )
+    source_raw = {
+        "serial": serial, "case_name": get_text(item, "사건명"),
+        "case_number": get_text(item, "사건번호"), "date": get_text(item, "선고일자"),
+        "court": get_text(item, "법원명"),
+    }
+    if replay is not None:
+        held = replay(source_raw)
+        if held is not None:
+            source_date = normalize_decision_date(source_raw["date"])
+            start, separator, end = date_range.partition("~")
+            if source_date is not None and not start <= source_date <= (end if separator else start):
+                raise RangeFetchError(date_range, page, "out_of_range_case_date")
+            return held
     try:
         corrected = registry().resolve({k: get_text(item, k) for k in LIST_FIELDS}, fetch_source_body)
     except CorrectionError as exc:
@@ -847,10 +860,14 @@ def _precedent_case(item, date_range: str, page: int) -> dict:
         "case_number": case_number,
         "date": case_date,
         "court": court,
+        "_source_name": get_text(item, "데이터출처명"),
+        # Original five fields, before deterministic normalization. No detail
+        # links (which contain OC), URLs or response bodies enter this receipt.
+        "_source_raw": source_raw,
     }
 
 
-def fetch_cases_for_range(date_range: str) -> list[dict]:
+def fetch_cases_for_range(date_range: str, *, replay=None) -> list[dict]:
     """날짜(범위) 판례 수집.
 
     Args:
@@ -869,7 +886,7 @@ def fetch_cases_for_range(date_range: str) -> list[dict]:
         source=date_range,
         page=1,
     )
-    cases.extend(_precedent_case(item, date_range, 1) for item in items)
+    cases.extend(_precedent_case(item, date_range, 1, replay) for item in items)
     total_pages = math.ceil(total_cnt / 100)
     if total_pages > PRECEDENT_MAX_PAGES_PER_RANGE:
         raise RangeFetchError(
@@ -892,7 +909,7 @@ def fetch_cases_for_range(date_range: str) -> list[dict]:
         )
         if page_total != total_cnt:
             raise RangeFetchError(date_range, p, "total_count_changed")
-        cases.extend(_precedent_case(item, date_range, p) for item in items)
+        cases.extend(_precedent_case(item, date_range, p, replay) for item in items)
     if len(cases) != total_cnt:
         raise RangeFetchError(date_range, total_pages or 1, "result_count_mismatch")
     if len({case["serial"] for case in cases}) != len(cases):
@@ -937,7 +954,7 @@ def get_detc_pages_for_today(today: date) -> list[int]:
     return pages
 
 
-def _fetch_detc_page(page: int) -> list[dict]:
+def _fetch_detc_page(page: int, *, replay=None) -> list[dict]:
     """단일 detc 페이지 수집 (sort=efdes)."""
     xml_content = fetch_xml_safe(
         target="detc", query="*", page=page, sort="efdes",
@@ -963,13 +980,26 @@ def _fetch_detc_page(page: int) -> list[dict]:
             page=page,
             max_length=31,
         )
+        source_raw = {
+            "serial": f"D{raw_serial}", "case_name": get_text(item, "사건명"),
+            "case_number": get_text(item, "사건번호"), "date": get_text(item, "종국일자"),
+            "court": "헌법재판소",
+        }
+        if replay is not None:
+            held = replay(source_raw)
+            if held is not None:
+                cases.append(held)
+                continue
         case_number = _required_case_number(
             get_text(item, "사건번호"), "detc", page
         )
         raw_date = get_text(item, "종국일자")
-        decision_date = normalize_decision_date(raw_date) if raw_date else ""
-        # 실제 헌재 원천에는 종국일자 공란이 존재한다. 다만 값이 있으면
-        # 반드시 calendar date여야 하며, 잘못된 값은 기존 정상 행을 덮지 않는다.
+        decision_date = (raw_date if raw_date == "0" else
+                         normalize_decision_date(raw_date) if raw_date else "")
+        # 실제 헌재 원천에는 종국일자 공란과 '0' sentinel이 존재한다.
+        # '0' is the observed unknown-date sentinel, retained verbatim rather
+        # than fabricated into a calendar date. Other nonempty values must be
+        # valid calendar dates. An unknown update cannot erase a known date.
         if decision_date is None:
             raise RangeFetchError("detc", page, "invalid_case_date")
         cases.append({
@@ -1347,10 +1377,12 @@ def execute_local_crawl(
                 retain_empty=retain_empty,
             )
 
+        replay = db.raw_replay_checker()
         crawl_result = crawl_scan_ranges(
             db,
             scan_ranges,
             prior_backlog,
+            fetcher=lambda date_range: fetch_cases_for_range(date_range, replay=replay),
             persist_backlog=persist_backlog,
         )
         total_ins = crawl_result["total_ins"]
@@ -1372,6 +1404,7 @@ def execute_local_crawl(
             db,
             detc_pages,
             current_backlog,
+            fetcher=lambda page: _fetch_detc_page(page, replay=replay),
             persist_backlog=persist_backlog,
         )
         detc_cases_count = detc_result["cases"]

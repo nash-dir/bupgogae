@@ -31,11 +31,41 @@ from compress import (  # noqa: E402
 )
 from api import clean_case_number  # noqa: E402
 from validate import sanitize_raw_case  # noqa: E402
-from law_normalization import is_merged_case_number, expand_merged_case_numbers
+from law_normalization import (is_merged_case_number, expand_merged_case_numbers,
+                               normalize_decision_date, normalize_precedent_identity)
 from log_setup import get_logger  # noqa: E402
-from serving_policy import SCHEMA as SERVING_SCHEMA, load_policy, table_exists
+from serving_policy import SCHEMA as SERVING_SCHEMA, load_policy, table_exists, RAW_COLUMNS
 
 log = get_logger(__name__)
+
+
+def _same_source_fields(observed, archived):
+    if observed == archived:
+        return True
+    if not isinstance(observed, dict) or set(observed) != set(archived):
+        return False
+    # The API alternates YYYYMMDD and YYYY.MM.DD. Compare only validated
+    # calendar equivalents; unknown sentinels and actual date changes are not
+    # interchangeable. Never mutate the archive to match a display format.
+    if any(observed[k] != archived[k] for k in archived if k != "date"):
+        return False
+    if not isinstance(observed["date"], str) or not isinstance(archived["date"], str):
+        return False
+    left = normalize_decision_date(observed["date"])
+    return left is not None and left == normalize_decision_date(archived["date"])
+
+
+def _same_source_replay(raw, case, original):
+    if "_source_raw" not in raw:
+        return case == original
+    if not _same_source_fields(raw["_source_raw"], original):
+        return False
+    number, court = normalize_precedent_identity(
+        original["case_number"], original["court"], raw.get("_source_name", ""),
+    )
+    expected = dict(original, case_number=number, court=court,
+                    date=normalize_decision_date(original["date"]))
+    return case == expected
 
 
 class MasterDB:
@@ -135,11 +165,6 @@ class MasterDB:
                 except ValueError:
                     pass
 
-                # Validate the original before a length cap can discard a tail.
-                # Explicit blacklist exclusions above retain their prior meaning.
-                raw_number = raw.get("case_number")
-                if isinstance(raw_number, str) and is_merged_case_number(raw_number):
-                    expand_merged_case_numbers(raw_number)
                 case_number_clean = clean_case_number(case["case_number"])
 
                 # One indexed lookup also checks whether a reviewed row is protected.
@@ -151,14 +176,48 @@ class MasterDB:
                 ).fetchone()
 
                 if policy and serial in policy.quarantine:
-                    # Historical archive entries are not a permanent source
-                    # filter. A changed source record needs an explicit review
-                    # that preserves the earlier full raw/member evidence.
+                    # An exact replay of held raw is not a source change.
+                    # Validate every archived byte through the pinned row hash,
+                    # then compare ALL five incoming source fields (only
+                    # validated equivalent date display forms may differ). Do not
+                    # update, release, or reinterpret the archived row.
+                    held_row = cur.execute(
+                        f"SELECT {','.join(RAW_COLUMNS)} FROM cases WHERE serial=?", (serial,)
+                    ).fetchone()
+                    if held_row is not None:
+                        held_row = dict(zip(RAW_COLUMNS, held_row))
+                        policy.held(held_row)
+                        original = {k: held_row[k] or "" for k in
+                                    ("serial", "case_name", "case_number", "date", "court")}
+                        if _same_source_replay(raw, case, original):
+                            skipped += 1
+                            continue
                     raise ValueError("quarantined_raw_changed_requires_review")
 
                 receipt = raw.get("_known_error")
-                if existing and existing[4] and json.loads(existing[4]) != case:
+                if existing and existing[4]:
                     from known_errors import CorrectionError
+                    # Serving corrections intentionally leave the raw row
+                    # unchanged. An identical source/serving replay must not
+                    # overwrite it with normalized fields or delete provenance.
+                    recovery = cur.execute(
+                        "SELECT record_json FROM reviewed_recovery_provenance WHERE serial=?", (serial,)
+                    ).fetchone()
+                    stored = cur.execute(
+                        f"SELECT {','.join(RAW_COLUMNS)} FROM cases WHERE serial=?", (serial,)
+                    ).fetchone()
+                    stored = dict(zip(RAW_COLUMNS, stored))
+                    original = json.loads(existing[4])
+                    if ({k: stored[k] for k in original} != original
+                            or stored["case_number_clean"] != clean_case_number(stored["case_number"])):
+                        raise CorrectionError("known_error_receipt_mismatch")
+                    if receipt is None and (
+                        _same_source_replay(raw, case, original)
+                        or (_same_source_fields(raw.get("_source_raw"), original) and recovery
+                            and case == json.loads(recovery[0]))
+                    ):
+                        skipped += 1
+                        continue
                     raise CorrectionError("known_error_review_required")
                 if receipt is not None:
                     from known_errors import registry
@@ -167,6 +226,13 @@ class MasterDB:
                     # A plain response cannot erase a previously reviewed fix.
                     from known_errors import CorrectionError
                     raise CorrectionError("known_error_receipt_mismatch")
+
+                # Protected exact replays above never write or publish their
+                # invalid historical number. New/changed input must still pass
+                # the complete merged-member check before any SQL mutation.
+                raw_number = raw.get("case_number")
+                if isinstance(raw_number, str) and is_merged_case_number(raw_number):
+                    expand_merged_case_numbers(raw_number)
 
                 if existing:
                     # An update containing only a leading member must not erase
@@ -194,7 +260,9 @@ class MasterDB:
                         case["case_name"],
                         case["case_number"],
                         case_number_clean,
-                        case["date"],
+                        # Constitutional API '0' means unknown, not a newer
+                        # calendar value. Keep an existing known date intact.
+                        "" if serial.startswith("D") and case["date"] == "0" else case["date"],
                         case["court"],
                         serial,
                     ))
@@ -228,6 +296,35 @@ class MasterDB:
             raise
         finally:
             cur.close()
+
+    def raw_replay_checker(self):
+        """Recognize only unchanged pinned historical exclusions before parsing.
+
+        Capture one validated inventory for this collection. Every matched row
+        is re-read and hashed; calendar-equivalent date display forms are the
+        only source-field equivalence. Final export revalidates the whole
+        inventory. A new serial or any changed source field cannot inherit a
+        historical exclusion.
+        """
+        policy = load_policy(self.conn)
+
+        def check(original):
+            if policy is None or original.get("serial") not in policy.quarantine:
+                return None
+            row = self.conn.execute(
+                f"SELECT {','.join(RAW_COLUMNS)} FROM cases WHERE serial=?", (original["serial"],)
+            ).fetchone()
+            if row is None:
+                raise ValueError("quarantined_raw_missing")
+            row = dict(zip(RAW_COLUMNS, row))
+            policy.held(row)
+            archived = {key: row[key] or "" for key in
+                        ("serial", "case_name", "case_number", "date", "court")}
+            if not _same_source_fields(original, archived):
+                raise ValueError("quarantined_raw_changed_requires_review")
+            return archived
+
+        return check
 
     # ════════════════════════════════════════════════
     # 조회

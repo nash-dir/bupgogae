@@ -86,6 +86,14 @@ def normalize_precedent_identity(number: str, court: str, source: str) -> tuple[
         number,
     )
     if not match:
+        # Also observed verbatim: 대법원2026두31124. Only a fully written
+        # court and a complete year/code/serial are accepted, never aliases or
+        # a leading member extracted from an unparsed merged-case suffix.
+        match = re.fullmatch(
+            r"(대법원|[가-힣]{2,48}(?:법원|지원)(?:\([가-힣]{1,12}\))?)"
+            r"([0-9]{4})([가-힣]{1,4})([0-9]+)", number,
+        )
+    if not match:
         return number, court
     supplied_court, year, code, serial = match.groups()
     if len(supplied_court) > 64 or (court and court != supplied_court):

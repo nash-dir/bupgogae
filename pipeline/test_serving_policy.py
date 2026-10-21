@@ -11,6 +11,9 @@ from baseline_health import core_coverage, require_coverage
 from master_db import MasterDB
 from compress import CourtCodeResolver
 from serving_policy import quarantine_digest, row_hash
+from api import clean_case_number
+import crawler_runner as runner
+import xml.etree.ElementTree as ET
 
 
 class ServingPolicyTests(unittest.TestCase):
@@ -31,12 +34,21 @@ class ServingPolicyTests(unittest.TestCase):
         self.db.close()
         self.directory.cleanup()
 
-    def install(self):
-        self.db.conn.execute("INSERT INTO cases(serial,case_number,case_number_clean,date) VALUES('99','bad, unknown','bad','')")
+    def install(self, original=None):
+        if original is None:
+            self.db.conn.execute("INSERT INTO cases(serial,case_number,case_number_clean,date) VALUES('99','bad, unknown','bad','')")
+            sid = "99"
+        else:
+            sid = original["serial"]
+            self.db.conn.execute(
+                "INSERT INTO cases(serial,case_name,case_number,case_number_clean,date,court) VALUES(?,?,?,?,?,?)",
+                (sid, original["case_name"], original["case_number"], clean_case_number(original["case_number"]),
+                 original["date"], original["court"]),
+            )
         self.db.conn.row_factory = __import__("sqlite3").Row
-        raw = self.db.conn.execute("SELECT * FROM cases WHERE serial='99'").fetchone()
+        raw = self.db.conn.execute("SELECT * FROM cases WHERE serial=?", (sid,)).fetchone()
         self.db.conn.row_factory = None
-        rows = [("99", row_hash(raw), "legacy_not_in_reviewed_snapshot", "a" * 64)]
+        rows = [(sid, row_hash(raw), "legacy_not_in_reviewed_snapshot", "a" * 64)]
         review = dict(schema=1, referenceSha256=hashlib.sha256(self.payload).hexdigest(),
                       quarantinedRows=1, quarantineSha256=quarantine_digest(rows))
         self.db.conn.executemany("INSERT INTO export_quarantine VALUES(?,?,?,?)", rows)
@@ -54,6 +66,57 @@ class ServingPolicyTests(unittest.TestCase):
         self.assertEqual(skipped, 1)
         self.assertEqual(self.db.conn.execute("SELECT case_number FROM cases WHERE serial='99'").fetchone()[0],
                          "bad, unknown")
+
+    def test_exact_source_replay_keeps_held_raw_hash_and_reference_unchanged(self):
+        original = dict(serial="624775", case_name="이익처분에 의한 상여금", case_number="대법원-2026-두-31267",
+                        date="2026.10.08", court="")
+        self.install(original)
+        before = self.db.conn.execute("SELECT * FROM cases ORDER BY serial").fetchall()
+        replay = dict(original, case_number="2026두31267", date="20261008", court="대법원",
+                      _source_raw=original, _source_name="국세법령정보시스템")
+        self.assertEqual(self.db.upsert_raw([replay]), (0, 0, 1))
+        self.assertEqual(self.db.conn.execute("SELECT * FROM cases ORDER BY serial").fetchall(), before)
+        self.assertEqual(self.db.export_core()[0], json.loads(self.payload)["cases"])
+        checker = self.db.raw_replay_checker()
+        for date_text in ("20261008", "2026.10.08", "2026-10-08", "2026/10/08"):
+            held = checker(dict(original, date=date_text))
+            self.assertEqual(self.db.upsert_raw([held]), (0, 0, 1))
+        with self.assertRaisesRegex(ValueError, "raw_changed_requires_review"):
+            checker(dict(original, date="20261009"))
+        for field in ("case_name", "case_number", "date", "court"):
+            changed = dict(replay, _source_raw=dict(original, **{field: original[field] + "1"}))
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "raw_changed_requires_review"):
+                self.db.upsert_raw([changed])
+        with self.assertRaisesRegex(ValueError, "raw_changed_requires_review"):
+            self.db.upsert_raw([dict(replay, court="서울고등법원")])
+        self.db.conn.execute("UPDATE cases SET case_name='tampered' WHERE serial='624775'")
+        with self.assertRaisesRegex(ValueError, "raw_changed_requires_review"):
+            self.db.upsert_raw([replay])
+
+    def test_pinned_unparseable_replay_is_not_a_rule_for_new_or_changed_rows(self):
+        self.install()
+        replay = self.db.raw_replay_checker()
+        item = ET.fromstring("<prec><판례일련번호>99</판례일련번호><사건번호>bad, unknown</사건번호></prec>")
+        before = self.db.conn.execute("SELECT * FROM cases ORDER BY serial").fetchall()
+        row = runner._precedent_case(item, "20260101", 1, replay)
+        self.assertEqual(self.db.upsert_raw([row]), (0, 0, 1))
+        self.assertEqual(self.db.conn.execute("SELECT * FROM cases ORDER BY serial").fetchall(), before)
+        item.find("판례일련번호").text = "100"
+        with self.assertRaises(runner.RangeFetchError):
+            runner._precedent_case(item, "20260101", 1, replay)
+        item.find("판례일련번호").text = "99"
+        item.find("사건번호").text = "changed"
+        with self.assertRaisesRegex(ValueError, "raw_changed_requires_review"):
+            runner._precedent_case(item, "20260101", 1, replay)
+        self.assertEqual(self.db.export_core()[0], json.loads(self.payload)["cases"])
+
+    def test_changed_quarantine_replay_rolls_back_entire_batch(self):
+        original = dict(serial="99", case_name="사건", case_number="2026다99", date="20260101", court="대법원")
+        self.install(original)
+        with self.assertRaisesRegex(ValueError, "raw_changed_requires_review"):
+            self.db.upsert_raw([dict(original, serial="100"), dict(original, case_name="changed")])
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM cases WHERE serial='100'").fetchone()[0], 0)
+        self.assertEqual(self.db.export_core()[0], json.loads(self.payload)["cases"])
 
     def test_changed_or_missing_raw_and_inventory_fail_closed(self):
         self.install()

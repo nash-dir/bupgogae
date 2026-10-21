@@ -184,7 +184,14 @@ class RecoveryMergeTests(unittest.TestCase):
         try:
             self.assertEqual(db.conn.execute("SELECT case_number FROM cases WHERE serial='1'").fetchone()[0], "2024다1판결")
             self.assertEqual(set(db.export_core()[0]), {"24Da1", "24Da2", "24Da3"})
-            self.assertEqual(db.upsert_raw([original]), (0, 1, 0))
+            before = db.conn.execute("SELECT * FROM cases ORDER BY serial").fetchall()
+            provenance = db.conn.execute("SELECT * FROM reviewed_recovery_provenance ORDER BY serial").fetchall()
+            self.assertEqual(db.upsert_raw([original]), (0, 0, 1))
+            self.assertEqual(db.upsert_raw([dict(case(1), _source_raw=original)]), (0, 0, 1))
+            self.assertEqual(db.conn.execute("SELECT * FROM cases ORDER BY serial").fetchall(), before)
+            self.assertEqual(db.conn.execute("SELECT * FROM reviewed_recovery_provenance ORDER BY serial").fetchall(), provenance)
+            with self.assertRaisesRegex(ValueError, "review_required"):
+                db.upsert_raw([dict(case(1), _source_raw=dict(original, case_name="changed"))])
             db.conn.execute("UPDATE cases SET case_number='2024다999' WHERE serial='1'")
             with self.assertRaisesRegex(ValueError, "receipt_mismatch"):
                 db.export_all()

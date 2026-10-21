@@ -94,6 +94,10 @@ class MasterDB:
         record_json TEXT NOT NULL,
         raw_record_json TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS source_correction_provenance (
+        serial TEXT PRIMARY KEY REFERENCES cases(serial),
+        receipt_json TEXT NOT NULL
+    );
     """ + SERVING_SCHEMA
 
     def __init__(self, db_path: str, *, read_only: bool = False):
@@ -195,6 +199,10 @@ class MasterDB:
                     raise ValueError("quarantined_raw_changed_requires_review")
 
                 receipt = raw.get("_known_error")
+                serving_receipt = raw.get("_serving_correction")
+                if serving_receipt is not None:
+                    from source_corrections import verify_receipt
+                    verify_receipt(raw, serving_receipt)
                 if existing and existing[4]:
                     from known_errors import CorrectionError
                     # Serving corrections intentionally leave the raw row
@@ -213,6 +221,8 @@ class MasterDB:
                         raise CorrectionError("known_error_receipt_mismatch")
                     if receipt is None and (
                         _same_source_replay(raw, case, original)
+                        or (serving_receipt is not None and case == original and recovery
+                            and json.loads(recovery[0]) == serving_receipt["record"])
                         or (_same_source_fields(raw.get("_source_raw"), original) and recovery
                             and case == json.loads(recovery[0]))
                     ):
@@ -288,6 +298,18 @@ class MasterDB:
                         "ON CONFLICT(serial) DO UPDATE SET receipt_json=excluded.receipt_json",
                         (serial, json.dumps(receipt, ensure_ascii=False, sort_keys=True)),
                     )
+                if serving_receipt is not None:
+                    from source_corrections import digest
+                    cur.execute("INSERT INTO reviewed_recovery_provenance VALUES(?,?,?,?,?) "
+                                "ON CONFLICT(serial) DO UPDATE SET recovery_sha256=excluded.recovery_sha256, "
+                                "catalog_sha256=excluded.catalog_sha256, record_json=excluded.record_json, "
+                                "raw_record_json=excluded.raw_record_json",
+                                (serial, serving_receipt["entrySha256"], digest(serving_receipt["expectedList"]),
+                                 json.dumps(serving_receipt["record"], ensure_ascii=False),
+                                 json.dumps(case, ensure_ascii=False)))
+                    cur.execute("INSERT INTO source_correction_provenance VALUES(?,?) "
+                                "ON CONFLICT(serial) DO UPDATE SET receipt_json=excluded.receipt_json",
+                                (serial, json.dumps(serving_receipt, ensure_ascii=False, sort_keys=True)))
 
             self.conn.commit()
             return inserted, updated, skipped
@@ -352,6 +374,10 @@ class MasterDB:
             "SELECT serial, record_json, raw_record_json FROM reviewed_recovery_provenance")} if table_exists(
                 self.conn, "reviewed_recovery_provenance") else {}
         held = 0
+        source_receipts = (dict(self.conn.execute("SELECT serial, receipt_json FROM source_correction_provenance"))
+                           if table_exists(self.conn, "source_correction_provenance") else {})
+        from source_corrections import entries as source_correction_entries
+        reviewed_source_ids = {entry["record"]["serial"] for entry in source_correction_entries().values()}
         checked = set()
         self.export_dates = {}
 
@@ -362,6 +388,20 @@ class MasterDB:
                 skipped += 1
                 continue
             recovered = recoveries.get(row["serial"])
+            if recovered is not None and row["serial"] in reviewed_source_ids and row["serial"] not in source_receipts:
+                raise ValueError("known_error_receipt_mismatch")
+            if row["serial"] in source_receipts:
+                from source_corrections import verify_receipt, digest
+                source_receipt = json.loads(source_receipts[row["serial"]])
+                verify_receipt(dict(row), source_receipt)
+                if recovered is None or json.loads(recovered[0]) != source_receipt["record"]:
+                    raise ValueError("known_error_receipt_mismatch")
+                pins = self.conn.execute(
+                    "SELECT recovery_sha256,catalog_sha256 FROM reviewed_recovery_provenance WHERE serial=?",
+                    (row["serial"],),
+                ).fetchone()
+                if pins != (source_receipt["entrySha256"], digest(source_receipt["expectedList"])):
+                    raise ValueError("known_error_receipt_mismatch")
             if recovered:
                 from known_errors import CorrectionError, RECORD_FIELDS
                 if ({k: row[k] for k in RECORD_FIELDS} != json.loads(recovered[1])

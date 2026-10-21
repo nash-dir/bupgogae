@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "entries": {
+    "국세법령정보시스템:613735": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "613735",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "보유주식을 배우자게 증여하고 다시 회사가 증여가액으로 매수하여 소각한 이 거래를 의제배당에 대한 회피로 본 당초 처분은 적법함",
+        "사건번호": "대법원-2025-두-34754",
+        "선고일자": "2026.12.11",
+        "법원명": "",
+        "사건종류코드": "400107"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000016870",
+      "judgmentSha256": "576e32076ada8cf4c2142fa2545c06dcc3d76c3df16811c88536d57cef2680c5",
+      "record": {
+        "serial": "613735",
+        "case_name": "보유주식을 배우자게 증여하고 다시 회사가 증여가액으로 매수하여 소각한 이 거래를 의제배당에 대한 회피로 본 당초 처분은 적법함",
+        "case_number": "2025두34754",
+        "date": "20251211",
+        "court": "대법원"
+      },
+      "evidence": {
+        "rule": "Original judgment HTML has explicit 판결선고 label immediately followed by 2025.12.11; metadata incorrectly says 2026.12.11. No inferred year.",
+        "reviewedAt": "2026-10-21"
+      }
+    }
+  }
+}

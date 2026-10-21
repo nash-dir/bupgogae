@@ -52,6 +52,7 @@ from api import (  # noqa: E402
 from compress import compress_case_number  # noqa: E402
 from master_db import MasterDB  # noqa: E402
 from known_errors import CorrectionError, LIST_FIELDS, registry, fetch_source_body
+import source_corrections
 from law_normalization import (
     normalize_decision_date, normalize_precedent_identity,
     is_merged_case_number, expand_merged_case_numbers,
@@ -825,7 +826,9 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
                 raise RangeFetchError(date_range, page, "out_of_range_case_date")
             return held
     try:
-        corrected = registry().resolve({k: get_text(item, k) for k in LIST_FIELDS}, fetch_source_body)
+        fields = {k: get_text(item, k) for k in LIST_FIELDS}
+        serving_correction = source_corrections.resolve(fields)
+        corrected = registry().resolve(fields, fetch_source_body)
     except CorrectionError as exc:
         raise RangeFetchError(date_range, page, str(exc)) from exc
     if corrected is not None:
@@ -847,6 +850,9 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
     case_date = normalize_decision_date(raw_date)
     if case_date is None:
         raise RangeFetchError(date_range, page, "invalid_case_date")
+    korea_today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
+    if case_date > korea_today and serving_correction is None:
+        raise RangeFetchError(date_range, page, "invalid_case_date")
     start_date, separator, end_date = date_range.partition("~")
     if not separator:
         end_date = start_date
@@ -854,7 +860,7 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
         raise RangeFetchError(date_range, page, "out_of_range_case_date")
     if not court:
         raise RangeFetchError(date_range, page, "missing_case_court")
-    return {
+    record = {
         "serial": serial,
         "case_name": get_text(item, "사건명"),
         "case_number": case_number,
@@ -865,6 +871,9 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
         # links (which contain OC), URLs or response bodies enter this receipt.
         "_source_raw": source_raw,
     }
+    if serving_correction is not None:
+        record["_serving_correction"] = serving_correction
+    return record
 
 
 def fetch_cases_for_range(date_range: str, *, replay=None) -> list[dict]:
@@ -1000,7 +1009,8 @@ def _fetch_detc_page(page: int, *, replay=None) -> list[dict]:
         # '0' is the observed unknown-date sentinel, retained verbatim rather
         # than fabricated into a calendar date. Other nonempty values must be
         # valid calendar dates. An unknown update cannot erase a known date.
-        if decision_date is None:
+        if (decision_date is None or decision_date >
+                datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")):
             raise RangeFetchError("detc", page, "invalid_case_date")
         cases.append({
             "serial": f"D{raw_serial}",

@@ -75,7 +75,7 @@ def resolve(fields, raw, *, fetch=fetch_judgment):
     date_match = re.search(r"판결선고([0-9]{4})\.([0-9]{1,2})\.([0-9]{1,2})\.", header)
     judgment_date = (normalize_decision_date("{}{:02d}{:02d}".format(
         date_match[1], int(date_match[2]), int(date_match[3]))) if date_match else None)
-    if (not header.startswith("사건" + entry["record"]["case_number"])
+    if (not re.match("사건" + re.escape(entry["record"]["case_number"]) + r"(?![0-9])", header)
             or judgment_date != entry["record"]["date"]):
         raise CorrectionError("known_error_source_changed")
     return receipt

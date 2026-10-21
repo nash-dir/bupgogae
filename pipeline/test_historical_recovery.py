@@ -102,6 +102,15 @@ class HistoricalRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(CorrectionError, "receipt_mismatch"):
             self.db.upsert_raw([changed])
 
+    def test_body_identifier_cannot_be_a_longer_number_with_same_prefix(self):
+        entry = copy.deepcopy(recovery.entries()["349026"])
+        body = self.body(entry).replace("2022구합1013".encode(), "2022구합10130".encode())
+        self.assertNotEqual(body, self.body(entry))
+        entry["judgmentSha256"] = hashlib.sha256(body).hexdigest()
+        with mock.patch.object(recovery, "entries", return_value={"349026": entry}), \
+                self.assertRaisesRegex(CorrectionError, "source_changed"):
+            recovery.resolve(entry["expectedList"], entry["expectedArchivedRaw"], fetch=lambda _: body)
+
     def test_batch_failure_rolls_back_every_overlay(self):
         rows = [self.incoming(e) for e in recovery.entries().values()]
         rows[1]["_historical_recovery"]["judgmentSha256"] = "0" * 64

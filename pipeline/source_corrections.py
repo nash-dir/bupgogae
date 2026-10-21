@@ -110,7 +110,7 @@ def resolve(fields, fetch=fetch_judgment):
     body = fetch(entry)
     if not isinstance(body, bytes) or hashlib.sha256(body).hexdigest() != entry["judgmentSha256"]:
         raise CorrectionError("known_error_source_changed")
-    if entry.get("courtEvidence") == "judgment_header":
+    if entry.get("courtEvidence") == "judgment_header" or entry.get("verifiedCourt"):
         class Text(HTMLParser):
             def __init__(self):
                 super().__init__()
@@ -120,7 +120,7 @@ def resolve(fields, fetch=fetch_judgment):
         parser = Text()
         parser.feed(body.decode("utf-8"))
         header = re.sub(r"\s+", "", "".join(parser.parts)).split("사건", 1)[0]
-        court = re.sub(r"\s+", "", entry["record"]["court"])
+        court = re.sub(r"\s+", "", entry.get("verifiedCourt", entry["record"]["court"]))
         if not re.fullmatch(re.escape(court) + r"(?:제[0-9]+민사부판결)?", header):
             raise CorrectionError("known_error_source_changed")
     return {"profile": PROFILE, "entrySha256": digest(entry), "expectedList": dict(fields),

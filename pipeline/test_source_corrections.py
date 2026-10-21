@@ -122,7 +122,7 @@ class SourceCorrectionTests(unittest.TestCase):
     def test_missing_courts_require_exact_reviewed_original_not_registration_office(self):
         reviewed = [e for e in corrections.entries().values() if "courtEvidence" in e]
         self.assertEqual(len(reviewed), 9)
-        self.assertEqual(sum(e["courtEvidence"] == "unknown" for e in reviewed), 6)
+        self.assertEqual(sum(e["courtEvidence"] == "unknown" for e in reviewed), 9)
         original_resolve = corrections.resolve
         def resolve(fields):
             return original_resolve(fields, fetch=lambda e: gzip.decompress(
@@ -143,9 +143,9 @@ class SourceCorrectionTests(unittest.TestCase):
                 cases, _ = db.export_core()
                 records = [row for rows in cases.values() for row in rows]
                 self.assertEqual(len(records), 9)
-                self.assertEqual(sum(row[1] == 0 for row in records), 6)
-                self.assertIn("대전지방법원 천안지원", db.court_resolver.code_map)
-                self.assertIn("춘천지방법원 원주지원", db.court_resolver.code_map)
+                self.assertEqual(sum(row[1] == 0 for row in records), 9)
+                self.assertEqual({e.get("verifiedCourt") for e in reviewed if e.get("verifiedCourt")},
+                                 {"대전지방법원 천안지원", "춘천지방법원 원주지원"})
             finally:
                 db.close()
         fields = dict(reviewed[0]["expectedList"], 판례일련번호="999999998")

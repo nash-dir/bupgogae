@@ -54,7 +54,7 @@
         "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "judgment_label"
       }
@@ -87,7 +87,7 @@
         "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "judgment_label"
       }
@@ -111,19 +111,20 @@
         "ntstDcmRgtDt": "20250819"
       },
       "judgmentSha256": "40231d9f31ec3af371344a2b4f7e9f18d4dee5b99c68bd1a008a8f818ca1fd94",
-      "courtEvidence": "judgment_header",
+      "courtEvidence": "unknown",
       "record": {
         "serial": "613741",
         "case_name": "공탁금출급청구권에 대한 우선수익권의 권리",
         "case_number": "2024가합101226",
         "date": "20250819",
-        "court": "대전지방법원 천안지원"
+        "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "judgment_label"
-      }
+      },
+      "verifiedCourt": "대전지방법원 천안지원"
     },
     "국세법령정보시스템:615511": {
       "profile": "nts_judgment_html_sha256_v1",
@@ -153,7 +154,7 @@
         "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "matching_official_metadata"
       }
@@ -177,19 +178,20 @@
         "ntstDcmRgtDt": "20251111"
       },
       "judgmentSha256": "2ed8d9e3ba0d195927ec9e59d01f63acad5f08a6381fd75428775b8f077721ac",
-      "courtEvidence": "judgment_header",
+      "courtEvidence": "unknown",
       "record": {
         "serial": "618385",
         "case_name": "소멸시효 완성에 따른 근저당권말소 청구",
         "case_number": "2025가단53469",
         "date": "20251111",
-        "court": "춘천지방법원 원주지원"
+        "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "judgment_label"
-      }
+      },
+      "verifiedCourt": "춘천지방법원 원주지원"
     },
     "국세법령정보시스템:615215": {
       "profile": "nts_judgment_html_sha256_v1",
@@ -210,19 +212,20 @@
         "ntstDcmRgtDt": "20251125"
       },
       "judgmentSha256": "aa20df4b028455b921dffde5f21deeec4a60dddcae414233ace11f536d51f26c",
-      "courtEvidence": "judgment_header",
+      "courtEvidence": "unknown",
       "record": {
         "serial": "615215",
         "case_name": "유언증서를 작성한 상태에서 사망 전에 부동산 양도대금을 증여한 것은 사해행위에 해당함",
         "case_number": "2024가합101943",
         "date": "20251125",
-        "court": "대전지방법원 천안지원"
+        "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "judgment_label"
-      }
+      },
+      "verifiedCourt": "대전지방법원 천안지원"
     },
     "국세법령정보시스템:613605": {
       "profile": "nts_judgment_html_sha256_v1",
@@ -252,7 +255,7 @@
         "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "matching_official_metadata"
       }
@@ -285,7 +288,7 @@
         "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "judgment_label"
       }
@@ -318,7 +321,7 @@
         "court": ""
       },
       "evidence": {
-        "rule": "Exact API identity and original-source metadata/body verified. Full court copied only from judgment header; otherwise native unknown court code 0 is retained. Registry references to registration offices are not trial-court evidence.",
+        "rule": "Exact official identity and original metadata/body verified. Existing published unknown court code 0 is retained; any full court verified in the judgment header is evidence only, not a replacement for the protected reference court code.",
         "reviewedAt": "2026-10-21",
         "dateEvidence": "matching_official_metadata"
       }

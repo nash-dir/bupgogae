@@ -18,8 +18,8 @@ are omitted. `613735-judgment.html.gz` preserves the exact embedded judgment HTM
 
 
 Nine additional reviewed NTS court decisions (2026-10-21) preserve missing court
-information explicitly. Three judgment headers supply the full branch court;
-six retain native unknown court code 0. Registration offices mentioned in orders
+information explicitly. Three judgment headers verify the full branch court, retained in `verifiedCourt`
+evidence; all nine preserve their protected published unknown court code 0. Registration offices mentioned in orders
 are not used as trial-court evidence. Exact API fields, original metadata
 (including two title trailing spaces), and whole HTML hashes are pinned separately.
 No generalized title trimming or court inference is performed.

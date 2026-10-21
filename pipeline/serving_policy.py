@@ -59,6 +59,14 @@ class ServingPolicy:
                 or quarantine_digest(rows) != self.review.get("quarantineSha256")):
             raise ValueError("quarantine_inventory_changed")
         self.quarantine = {r[0]: (r[1], r[2], r[3]) for r in rows}
+        self.reference_titles = {}
+        for records in self.reference["cases"].values():
+            for record in records:
+                sid, title = str(record[0]), record[3]
+                if sid in self.reference_titles and self.reference_titles[sid] != title:
+                    self.reference_titles[sid] = None
+                else:
+                    self.reference_titles[sid] = title
         reference_ids = {str(record[0]) for records in self.reference["cases"].values() for record in records}
         if reference_ids & self.quarantine.keys():
             raise ValueError("quarantine_would_remove_reference_record")

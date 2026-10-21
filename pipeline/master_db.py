@@ -116,6 +116,12 @@ class MasterDB:
         serial TEXT PRIMARY KEY REFERENCES cases(serial),
         receipt_json TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS reference_title_provenance (
+        serial TEXT PRIMARY KEY REFERENCES cases(serial),
+        reference_sha256 TEXT NOT NULL,
+        raw_record_json TEXT NOT NULL,
+        title TEXT NOT NULL
+    );
     """ + SERVING_SCHEMA
 
     def __init__(self, db_path: str, *, read_only: bool = False):
@@ -314,6 +320,25 @@ class MasterDB:
                     ))
                     inserted += 1
 
+                if policy and receipt is None and serving_receipt is None:
+                    title = policy.reference_titles.get(serial)
+                    stored = cur.execute(
+                        "SELECT serial,case_name,case_number,date,court FROM cases WHERE serial=?", (serial,)
+                    ).fetchone()
+                    original = dict(zip(("serial", "case_name", "case_number", "date", "court"), stored))
+                    if title is not None and original["case_name"] != title:
+                        # A list summary must not replace the previously reviewed
+                        # public title. Bind the overlay to this exact new raw;
+                        # identity, date, court and every reference member still
+                        # pass the unchanged final preserve_reference gate.
+                        cur.execute("INSERT INTO reference_title_provenance VALUES(?,?,?,?) "
+                                    "ON CONFLICT(serial) DO UPDATE SET reference_sha256=excluded.reference_sha256, "
+                                    "raw_record_json=excluded.raw_record_json,title=excluded.title",
+                                    (serial, policy.review["referenceSha256"],
+                                     json.dumps(original, ensure_ascii=False), title))
+                    else:
+                        cur.execute("DELETE FROM reference_title_provenance WHERE serial=?", (serial,))
+
                 if receipt is not None:
                     cur.execute(
                         "INSERT INTO known_error_provenance VALUES(?,?) "
@@ -433,6 +458,9 @@ class MasterDB:
         held = 0
         source_receipts = (dict(self.conn.execute("SELECT serial, receipt_json FROM source_correction_provenance"))
                            if table_exists(self.conn, "source_correction_provenance") else {})
+        title_receipts = {sid: (reference, raw, title) for sid, reference, raw, title in self.conn.execute(
+            "SELECT serial,reference_sha256,raw_record_json,title FROM reference_title_provenance")} if table_exists(
+                self.conn, "reference_title_provenance") else {}
         from source_corrections import entries as source_correction_entries
         reviewed_source_ids = {entry["record"]["serial"] for entry in source_correction_entries().values()}
         checked = set()
@@ -473,6 +501,17 @@ class MasterDB:
                 registry().verify_receipt(dict(row), json.loads(receipt))
                 if row["case_number_clean"] != clean_case_number(row["case_number"]):
                     raise CorrectionError("known_error_receipt_mismatch")
+            title_receipt = title_receipts.get(row["serial"])
+            if title_receipt is not None:
+                from known_errors import RECORD_FIELDS
+                reference, raw, title = title_receipt
+                if (policy is None or recovered or receipt or row["serial"] in source_receipts
+                        or reference != policy.review["referenceSha256"]
+                        or title != policy.reference_titles.get(row["serial"])
+                        or {k: row[k] for k in RECORD_FIELDS} != json.loads(raw)
+                        or row["case_number_clean"] != clean_case_number(row["case_number"])):
+                    raise ValueError("reference_title_receipt_mismatch")
+                row = dict(row, case_name=title)
             raw_number = row["case_number"] or row["case_number_clean"] or ""
             clean_number = row["case_number_clean"] or ""
             if is_merged_case_number(raw_number) or is_merged_case_number(clean_number):

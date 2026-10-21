@@ -181,6 +181,42 @@ class ServingPolicyTests(unittest.TestCase):
             self.db.conn.execute("ROLLBACK TO mutation")
             self.db.conn.execute("RELEASE mutation")
 
+    def test_list_title_update_keeps_reviewed_title_and_binds_exact_new_raw(self):
+        self.install()
+        row = dict(serial="1", case_name="목록의 짧은 제목", case_number="1950두1",
+                   date="1950.01.01", court="대법원")
+        self.db.upsert_raw([row])
+        cases, _ = self.db.export_core()
+        self.assertEqual(cases["50Du1"][0][3], "세금")
+        self.assertEqual(self.db.conn.execute("SELECT case_name FROM cases WHERE serial='1'").fetchone()[0],
+                         "목록의 짧은 제목")
+        self.assertEqual(self.db.export_core()[0], json.loads(self.payload)["cases"])
+        for sql in ("UPDATE cases SET case_name='tampered' WHERE serial='1'",
+                    "UPDATE reference_title_provenance SET title='tampered' WHERE serial='1'",
+                    "UPDATE reference_title_provenance SET reference_sha256='tampered' WHERE serial='1'",
+                    "UPDATE cases SET date='19500102' WHERE serial='1'"):
+            self.db.conn.execute("SAVEPOINT mutation")
+            self.db.conn.execute(sql)
+            with self.subTest(sql=sql), self.assertRaisesRegex(ValueError, "reference_title_receipt_mismatch"):
+                self.db.export_core()
+            self.db.conn.execute("ROLLBACK TO mutation")
+            self.db.conn.execute("RELEASE mutation")
+        self.db.upsert_raw([dict(row, case_name="세금")])
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM reference_title_provenance").fetchone()[0], 0)
+        self.assertEqual(self.db.export_core()[0], json.loads(self.payload)["cases"])
+
+    def test_reference_title_binding_does_not_allow_identity_or_court_changes(self):
+        self.install()
+        for field, value in (("case_number", "1950두999"), ("court", "서울고등법원"), ("date", "19500102")):
+            row = dict(serial="1", case_name="목록 제목", case_number="1950두1",
+                       date="1950.01.01", court="대법원")
+            self.db.upsert_raw([dict(row, **{field: value})])
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "reference_record_removed_or_changed"):
+                self.db.export_core()
+            # upsert commits its own transaction; restore the exact baseline for the next case.
+            self.db.upsert_raw([dict(serial="1", case_name="세금", case_number="1950두1",
+                                    date="1950.01.01", court="대법원")])
+
     def test_administrative_serials_are_rejected_without_partial_upsert(self):
         for serial in ("T1", "KP1"):
             with self.assertRaisesRegex(ValueError, "unsupported_publication_serial"):

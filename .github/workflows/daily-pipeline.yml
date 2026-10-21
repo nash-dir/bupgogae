@@ -24,6 +24,11 @@ on:
         description: '다운로드 전용 검증에서 요구할 master.db SHA-256'
         required: false
         type: string
+      recover_reviewed_historical:
+        description: '원문 검증한 과거 보류 2건과 누락 617561을 원본 보존 overlay로 복구'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -176,6 +181,13 @@ jobs:
       - name: 같은 runner의 법제처 연결 진단 (API key 없음)
         if: ${{ inputs.verify_handoff_only != true }}
         run: timeout --signal=TERM --kill-after=5s 240s python pipeline/network_diagnostics.py
+
+      - name: 원문 대조한 과거 보류만 복구 (명시적 수동 실행)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.recover_reviewed_historical == true && inputs.verify_handoff_only != true }}
+        run: timeout --signal=TERM --kill-after=10s 10m python pipeline/apply_historical_recovery.py --data-dir ./pipeline/data --apply
+        env:
+          BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
+          BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000
 
       - name: 크롤러 실행 (API key 외 credential 없음)
         if: ${{ (github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true) && inputs.verify_handoff_only != true }}

@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "entries": {
+    "349026": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "349026",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "탈세제보포상금 지급대상에 해당하지 아니한다는 이유로 포상금 지급 청구를 거부한 당초처분은 적법함",
+        "사건번호": "수원지방법원-2022-구합-1013",
+        "선고일자": "2023.09.21",
+        "법원명": "",
+        "사건종류코드": "400107"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000003019",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000003019",
+        "ntstDcmDscmCntn": "수원지방법원-2022-구합-1013",
+        "ntstDcmTtl": "탈세제보포상금 지급대상에 해당하지 아니한다는 이유로 포상금 지급 청구를 거부한 당초처분은 적법함",
+        "ntstDcmRgtDt": "20230921"
+      },
+      "judgmentSha256": "bf7133c227382d0b2f52a79873df11f33341bf0fa561c24bf03f93071c1745ce",
+      "expectedArchivedRaw": {
+        "serial": "349026",
+        "case_name": "탈세제보포상금 지급대상에 해당하지 아니한다는 이유로 포상금 지급 청구를 거부한 당초처분은 적법함",
+        "case_number": "서울지방법원-2022-구합-1013",
+        "case_number_clean": "서울지방법원2022구합1013",
+        "date": "20230921",
+        "court": "",
+        "inserted_at": "2026-03-21 12:23:41"
+      },
+      "archivedRawSha256": "8a4da4e56328bbf9d5082ed12aa44996b541a6875ae593e3d529b001c286322a",
+      "record": {
+        "serial": "349026",
+        "case_name": "탈세제보포상금 지급대상에 해당하지 아니한다는 이유로 포상금 지급 청구를 거부한 당초처분은 적법함",
+        "case_number": "2022구합1013",
+        "date": "20231116",
+        "court": "수원지방법원"
+      },
+      "evidence": {
+        "reviewedAt": "2026-10-21",
+        "number": "Explicit original judgment 사건 header and current official full court-prefixed identifier",
+        "date": "Explicit original judgment 판결선고 header; hearing closure is not judgment date",
+        "court": "Verbatim full 수원지방법원 in current NTS document identifier; no abbreviated court expansion"
+      }
+    },
+    "242327": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "242327",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "이 사건 화해금 중 지연손해금 부분은 기타소득으로 봄이 타당하고, 특수한 성공보수 산정방식에 기인한 민사변호사비용은 공제 대상 필요경비로 볼 수 없음",
+        "사건번호": "수원지방법원-2022-구합-72770",
+        "선고일자": "2023.12.07",
+        "법원명": "",
+        "사건종류코드": "400107"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000009791",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000009791",
+        "ntstDcmDscmCntn": "수원지방법원-2022-구합-72770",
+        "ntstDcmTtl": "이 사건 화해금 중 지연손해금 부분은 기타소득으로 봄이 타당하고, 특수한 성공보수 산정방식에 기인한 민사변호사비용은 공제 대상 필요경비로 볼 수 없음",
+        "ntstDcmRgtDt": "20231207"
+      },
+      "judgmentSha256": "5b2af2c18ff9c82ccd7837a6367bc410f699d6b4d76b2e97e62e23aae7d9199b",
+      "expectedArchivedRaw": {
+        "serial": "242327",
+        "case_name": "이 사건 화해금 중 지연손해금 부분은 기타소득으로 봄이 타당하고, 특수한 성공보수 산정방식에 기인한 민사변호사비용은 공제 대상 필요경비로 볼 수 없음",
+        "case_number": "수원지방법원-2023-구합-72770",
+        "case_number_clean": "수원지방법원2023구합72770",
+        "date": "20231207",
+        "court": "",
+        "inserted_at": "2026-03-21 12:23:41"
+      },
+      "archivedRawSha256": "a50f8a519d11e0d197378b009c3bd9b1158600fef4ac22a91ec8c2f0af644bfd",
+      "record": {
+        "serial": "242327",
+        "case_name": "이 사건 화해금 중 지연손해금 부분은 기타소득으로 봄이 타당하고, 특수한 성공보수 산정방식에 기인한 민사변호사비용은 공제 대상 필요경비로 볼 수 없음",
+        "case_number": "2022구합72770",
+        "date": "20231207",
+        "court": "수원지방법원"
+      },
+      "evidence": {
+        "reviewedAt": "2026-10-21",
+        "number": "Explicit original judgment 사건 header and current official full court-prefixed identifier",
+        "date": "Explicit original judgment 판결선고 header; hearing closure is not judgment date",
+        "court": "Verbatim full 수원지방법원 in current NTS document identifier; no abbreviated court expansion"
+      }
+    }
+  }
+}

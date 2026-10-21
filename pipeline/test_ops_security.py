@@ -983,7 +983,7 @@ class DeploymentSecurityTests(unittest.TestCase):
         )
         warp_step = crawl_section.split(
             "- name: 공식 Cloudflare WARP Client 연결", 1
-        )[1].split("- name: 크롤러 실행", 1)[0]
+        )[1].split("\n      - name:", 1)[0]
         self.assertIn(
             "vars.CLOUDFLARE_WARP_TOS_ACCEPTED",
             warp_step,
@@ -992,9 +992,15 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertNotIn("BUPGOGAE_API_KEY", warp_step)
         self.assertIn("WARP_ROUTE_MODE: proxy", warp_step)
         self.assertIn("timeout-minutes: 15", warp_step)
+        recovery_step = crawl_section.split("- name: 원문 대조한 과거 보류만 복구", 1)[1].split(
+            "\n      - name:", 1)[0]
+        self.assertIn("inputs.recover_reviewed_historical == true", recovery_step)
+        self.assertIn("github.event_name == 'workflow_dispatch'", recovery_step)
+        self.assertEqual(set(re.findall(r"secrets\.([A-Z0-9_]+)", recovery_step)), {"BUPGOGAE_API_KEY"})
+        self.assertIn("BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000", recovery_step)
         self.assertEqual(crawl_section.count(
             "BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000"
-        ), 2)
+        ), 3)
         self.assertLess(
             crawl_section.index("명시적 full historical bootstrap 실행"),
             crawl_section.index("WARP 연결 및 ephemeral 등록 정리"),

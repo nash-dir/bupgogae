@@ -122,6 +122,10 @@ class MasterDB:
         raw_record_json TEXT NOT NULL,
         title TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS historical_recovery_provenance (
+        serial TEXT PRIMARY KEY REFERENCES export_quarantine(serial),
+        receipt_json TEXT NOT NULL
+    );
     """ + SERVING_SCHEMA
 
     def __init__(self, db_path: str, *, read_only: bool = False):
@@ -215,6 +219,36 @@ class MasterDB:
                     if held_row is not None:
                         held_row = dict(zip(RAW_COLUMNS, held_row))
                         policy.held(held_row)
+                        historical = raw.get("_historical_recovery")
+                        if historical is not None:
+                            from historical_recovery import verify_receipt
+                            verify_receipt(held_row, historical)
+                            if any(raw.get(k) != held_row[k] for k in
+                                   ("serial", "case_name", "case_number", "date", "court")):
+                                raise ValueError("known_error_receipt_mismatch")
+                            encoded = json.dumps(historical, ensure_ascii=False, sort_keys=True)
+                            from source_corrections import digest
+                            original_json = json.dumps({k: held_row[k] for k in
+                                ("serial", "case_name", "case_number", "date", "court")}, ensure_ascii=False)
+                            recovery_values = (historical["entrySha256"], digest(historical["expectedList"]),
+                                               json.dumps(historical["record"], ensure_ascii=False), original_json)
+                            recovery_prior = cur.execute(
+                                "SELECT recovery_sha256,catalog_sha256,record_json,raw_record_json "
+                                "FROM reviewed_recovery_provenance WHERE serial=?", (serial,)).fetchone()
+                            prior = cur.execute("SELECT receipt_json FROM historical_recovery_provenance WHERE serial=?",
+                                                (serial,)).fetchone()
+                            if prior is not None:
+                                if json.loads(prior[0]) != historical or recovery_prior != recovery_values:
+                                    raise ValueError("known_error_receipt_mismatch")
+                                skipped += 1
+                            else:
+                                if recovery_prior is not None:
+                                    raise ValueError("known_error_receipt_mismatch")
+                                cur.execute("INSERT INTO historical_recovery_provenance VALUES(?,?)", (serial, encoded))
+                                cur.execute("INSERT INTO reviewed_recovery_provenance VALUES(?,?,?,?,?)",
+                                            (serial, *recovery_values))
+                                updated += 1
+                            continue
                         original = {k: held_row[k] or "" for k in
                                     ("serial", "case_name", "case_number", "date", "court")}
                         if _same_source_replay(raw, case, original):
@@ -422,6 +456,12 @@ class MasterDB:
                 raise ValueError("quarantined_raw_missing")
             row = dict(zip(RAW_COLUMNS, row))
             policy.held(row)
+            if list_fields is not None:
+                from historical_recovery import resolve
+                historical = resolve(list_fields, row)
+                if historical is not None:
+                    return dict({k: row[k] for k in ("serial", "case_name", "case_number", "date", "court")},
+                                _historical_recovery=historical)
             archived = {key: row[key] or "" for key in
                         ("serial", "case_name", "case_number", "date", "court")}
             if not _same_source_fields(original, archived):
@@ -464,14 +504,35 @@ class MasterDB:
         from source_corrections import entries as source_correction_entries
         reviewed_source_ids = {entry["record"]["serial"] for entry in source_correction_entries().values()}
         checked = set()
+        historical = (dict(self.conn.execute("SELECT serial,receipt_json FROM historical_recovery_provenance"))
+                      if table_exists(self.conn, "historical_recovery_provenance") else {})
+        if historical and (policy is None or not historical.keys() <= policy.quarantine.keys()):
+            raise ValueError("known_error_receipt_mismatch")
+        from historical_recovery import entries as historical_entries
+        if (recoveries.keys() & historical_entries().keys()) != historical.keys():
+            raise ValueError("known_error_receipt_mismatch")
+        restored_historical = 0
         self.export_dates = {}
 
         for row in rows:
             if policy and policy.held(row):
                 checked.add(row["serial"])
-                held += 1
-                skipped += 1
-                continue
+                if row["serial"] not in historical:
+                    held += 1
+                    skipped += 1
+                    continue
+                from historical_recovery import verify_receipt
+                corrected = verify_receipt(dict(row), json.loads(historical[row["serial"]]))
+                recovered_entry = recoveries.get(row["serial"])
+                if recovered_entry is None or json.loads(recovered_entry[0]) != corrected:
+                    raise ValueError("known_error_receipt_mismatch")
+                from source_corrections import digest
+                pins = self.conn.execute("SELECT recovery_sha256,catalog_sha256 FROM reviewed_recovery_provenance "
+                                         "WHERE serial=?", (row["serial"],)).fetchone()
+                pinned_receipt = json.loads(historical[row["serial"]])
+                if pins != (pinned_receipt["entrySha256"], digest(pinned_receipt["expectedList"])):
+                    raise ValueError("known_error_receipt_mismatch")
+                restored_historical += 1
             recovered = recoveries.get(row["serial"])
             if recovered is not None and row["serial"] in reviewed_source_ids and row["serial"] not in source_receipts:
                 raise ValueError("known_error_receipt_mismatch")
@@ -541,6 +602,7 @@ class MasterDB:
         if require_full and policy and checked != policy.quarantine.keys():
             raise ValueError("quarantined_raw_missing")
         self.last_export_report = {"quarantinedRows": held, "legacyUnclassifiedSkips": skipped - held,
+                                   "reviewedQuarantineRows": restored_historical,
                                    "servingIds": len(self.export_dates)}
         return dict(compressed), skipped
 

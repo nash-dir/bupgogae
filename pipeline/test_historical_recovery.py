@@ -207,6 +207,16 @@ class HistoricalRecoveryTests(unittest.TestCase):
             self.assertEqual(cases["22Guh72770"][0][:3], [242327, 45, 231207])
             self.assertEqual(fresh.conn.execute("SELECT date FROM cases WHERE serial='349026'").fetchone()[0],
                              "20230921")
+            before = list(fresh.conn.iterdump())
+            for entry in recovery.entries().values():
+                item = ET.Element("prec")
+                for k, v in entry["expectedList"].items():
+                    ET.SubElement(item, k).text = v
+                with mock.patch.object(source_corrections, "resolve", side_effect=lambda f: resolve(f, fetch=self.body)):
+                    row = runner._precedent_case(item, entry["expectedOriginalMetadata"]["ntstDcmRgtDt"], 1,
+                                                  fresh.raw_replay_checker())
+                self.assertEqual(fresh.upsert_raw([row]), (0, 0, 1))
+            self.assertEqual(before, list(fresh.conn.iterdump()))
             fresh.conn.execute("DELETE FROM source_correction_provenance WHERE serial='349026'")
             with self.assertRaisesRegex(ValueError, "receipt_mismatch"):
                 fresh.export_core()

@@ -413,6 +413,8 @@ class MasterDB:
         reviewed_ids = {row[0] for row in self.conn.execute("SELECT serial FROM reviewed_recovery_provenance")}
         from source_corrections import entries as source_entries
         live_source_ids = {entry["record"]["serial"] for entry in source_entries().values()}
+        from historical_recovery import entries as historical_entries
+        live_source_ids.update(historical_entries())
 
         def check(original, source_name="", list_fields=None):
             sid = original.get("serial", "")

@@ -1,9 +1,9 @@
 # Ingestion integrity repair — 2026-10-24
 
-Status: production recovery is INCOMPLETE while the ordinary legacy fixed-URL
-mirror still serves a cached previous payload. Normal collection, state/public
-publication and exact private/immutable-public readback have passed; these do not
-waive the remaining fixed-URL check. Do not declare recovery complete yet.
+Status: production recovery verified on 2026-10-24 after normal complete
+collection, trusted state/public publication, exact private/public readback and
+both ordinary fixed-URL mirror checks. Final public verification exited zero at
+03:48 UTC; no expected hash, URL or integrity gate was bypassed.
 
 ## Confirmed starting point
 
@@ -157,7 +157,7 @@ five reviewed changes, and 161,133 protected keys. Its preserved raw digest is
 Migration success alone is not publication/recovery success. The normal complete
 crawl, trusted/public publication and readback must all succeed independently.
 
-## Production checks — closure pending
+## Production verification
 
 The complete normal [run 40056234131](https://github.com/nash-dir/bupgogae/actions/runs/40056234131)
 succeeded. It processed all 689 scheduled/reviewed/backlogged date ranges and
@@ -197,14 +197,16 @@ historical recovery replay, deletion or integrity bypass was used.
 The modern and legacy manifests agree on the new immutable hash; the contract
 mirror also agrees. The unchanged old-client `adapters.json` is HTTP 200 with SHA
 `134999d07dee2014536522000f4ba949faf03ee3f530e29fa77a7963b8624812`.
-The ordinary `db.json.gz` mirror check is still failing, so the overall public
-verification script exits unsuccessfully. Partial results are ignored local
-evidence at `backfill/2026-10-24-integrity/after/report.json`.
+At 03:48 UTC both ordinary fixed mirrors (`db.json.gz` and `db-v0.9.0.json.gz`)
+matched the new payload SHA. The complete public verification script exited zero,
+including all prior-record, court-map, reviewed-identity, historical-recovery and
+adapters preservation checks. Final ignored local evidence is at
+`backfill/2026-10-24-integrity/after/report.json`.
 
 At 03:35 UTC that bare URL served the prior healthy payload from Cloudflare
-(`HIT`, age 2,798, `public, max-age=3600`). Closure still requires both ordinary
-fixed mirrors to equal the new payload SHA. Do not change the expected hash,
-bypass the ordinary URL, or treat cached old content as current.
+(`HIT`, age 2,798, `public, max-age=3600`). The ordinary GET check was kept failing
+until cache expiry and the new body was actually observed. It did not change the
+expected hash, bypass the ordinary URL or treat cached old content as current.
 
 See [known-errors.md](known-errors.md) for the dictionary/exception review process.
 

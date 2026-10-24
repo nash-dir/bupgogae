@@ -111,6 +111,7 @@ BACKLOG_FAILURE_REASONS = {
     "known_error_receipt_mismatch",
     "quarantined_raw_changed_requires_review",
     "merged_case_members_removed",
+    "reference_metadata_migration_required",
     "unsupported_publication_serial",
     "unreviewed_unexportable_case",
     "api_error_envelope",
@@ -834,6 +835,9 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
         fields = {k: get_text(item, k) for k in LIST_FIELDS}
         serving_correction = source_corrections.resolve(fields)
         corrected = registry().resolve(fields, fetch_source_body)
+        if corrected is None and serving_correction is None:
+            from reviewed_replays import resolve as resolve_reviewed_replay
+            corrected = resolve_reviewed_replay(fields)
     except CorrectionError as exc:
         raise RangeFetchError(date_range, page, str(exc)) from exc
     if corrected is not None:

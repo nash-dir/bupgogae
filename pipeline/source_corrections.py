@@ -17,6 +17,7 @@ from law_normalization import (normalize_decision_date, normalize_precedent_iden
 REGISTRY = Path(__file__).with_name("source-corrections.json")
 PROFILE = "nts_judgment_html_sha256_v1"
 LAW_PROFILE = "law_detail_preserve_reference_v1"
+METADATA_PROFILE = "law_detail_metadata_correction_v1"
 
 
 def explicit_detail_members(value):
@@ -55,6 +56,24 @@ def entries():
                 or entry["record"]["serial"] != fields["판례일련번호"]
                 or not re.fullmatch(r"[0-9a-f]{64}", entry["judgmentSha256"])):
             raise CorrectionError("known_error_invalid_registry")
+        if entry["profile"] == METADATA_PROFILE:
+            from compress import compress_case_number, compress_date, compress_case_name, COURT_CODE_MAP
+            previous, record, detail = entry["expectedPreviousRaw"], entry["record"], entry["expectedDetail"]
+            number, court = normalize_precedent_identity(fields["사건번호"], fields["법원명"], fields["데이터출처명"])
+            # Only an explicit, reviewed metadata change on the same full identity.
+            # Published reference changes require the separate atomic migration.
+            if (fields["데이터출처명"] != "대법원" or set(previous) != set(record)
+                    or record != dict(serial=fields["판례일련번호"], case_name=fields["사건명"],
+                                      case_number=number, date=normalize_decision_date(fields["선고일자"]), court=court)
+                    or set(detail) != {"사건명", "사건번호", "선고일자", "법원명"}
+                    or detail["사건명"] != record["case_name"] or detail["사건번호"] != record["case_number"]
+                    or detail["선고일자"] != record["date"]
+                    or any(previous[k] != record[k] for k in ("serial", "case_name", "case_number"))
+                    or entry["expectedReferenceKey"] != compress_case_number(previous["case_number"])
+                    or entry["expectedReferenceRecord"] != [int(previous["serial"]), COURT_CODE_MAP[previous["court"]],
+                                                           compress_date(previous["date"]), compress_case_name(previous["case_name"])]):
+                raise CorrectionError("known_error_invalid_registry")
+            continue
         if entry["profile"] == LAW_PROFILE:
             detail, record, previous = entry["expectedDetail"], entry["record"], entry["expectedPreviousRaw"]
             def members(number):
@@ -98,7 +117,7 @@ def entries():
 
 def fetch_judgment(entry):
     """Follow only the exact reviewed government referral, never generic redirects."""
-    if entry["profile"] == LAW_PROFILE:
+    if entry["profile"] in (LAW_PROFILE, METADATA_PROFILE):
         from reviewed_replays import fetch_detail
         detail = fetch_detail(entry["record"]["serial"])
         if detail["metadata"] != entry["expectedDetail"]:
@@ -192,7 +211,11 @@ def verify_receipt(raw, receipt):
     number, court = normalize_precedent_identity(fields["사건번호"], fields["법원명"], fields["데이터출처명"])
     original = dict(serial=fields["판례일련번호"], case_name=fields["사건명"], case_number=number,
                     date=normalize_decision_date(fields["선고일자"]), court=court)
-    if {k: raw.get(k) for k in original} != original:
+    if entry["profile"] == METADATA_PROFILE:
+        observed = {k: raw.get(k) for k in original}
+        if observed not in (original, entry["expectedPreviousRaw"]):
+            raise CorrectionError("known_error_receipt_mismatch")
+    elif {k: raw.get(k) for k in original} != original:
         raise CorrectionError("known_error_receipt_mismatch")
     source_raw = dict(original, case_number=fields["사건번호"], date=fields["선고일자"], court=fields["법원명"])
     if (("_source_raw" in raw and raw["_source_raw"] != source_raw)

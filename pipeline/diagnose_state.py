@@ -26,6 +26,14 @@ def diagnose(path):
         except ValueError as error:
             report["exportError"] = safe_error(error)
         policy = load_policy(db.conn)
+        report["referenceSha256"] = policy.review["referenceSha256"] if policy else None
+        report["reviewedMetadataRaw"] = {}
+        for sid in ("69909", "185122"):
+            row = db.conn.execute("SELECT serial,case_name,case_number,date,court FROM cases WHERE serial=?", (sid,)).fetchone()
+            if row is not None:
+                report["reviewedMetadataRaw"][sid] = dict(zip(
+                    ("serial", "case_name", "case_number", "date", "court"), row))
+
         try:
             cases, skipped = db.compress_rows(db.get_all_cases())
         except ValueError as error:

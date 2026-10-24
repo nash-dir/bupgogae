@@ -30,3 +30,13 @@ judgment body. The list omits four merged members and changes the branch label.
 The dictionary preserves public parent court code 11 and all five explicitly
 written members. The complete 74-character source string remains in metadata;
 the serving record uses 54 canonical characters without dropping any number.
+
+## 2026-10-24 metadata corrections
+
+69909 and 185122 add public-only official law.go.kr detail fixtures. Their exact
+list fields, metadata and full body digests are pinned in source-corrections.json.
+These entries require an explicit atomic reference migration for an existing
+published DB; ordinary collection cannot silently alter its reference. The owner
+approved the verified date correction (2004-10-28 to 2004-10-07) and the explicit
+서울고등법원 춘천재판부 correction. Original raw rows and the complete old reference
+remain in the migration audit. See docs/ingestion-integrity-repair-2026-10-24.md.

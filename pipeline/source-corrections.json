@@ -362,6 +362,94 @@
         "rule": "Official detail lists all five merged numbers and 부산고등법원(창원). Preserve the exact published parent court label/code 부산고등법원/11; retain branch metadata here and add all four omitted members. No global alias conversion or member truncation.",
         "reviewedAt": "2026-10-21"
       }
+    },
+    "대법원:69909": {
+      "profile": "law_detail_metadata_correction_v1",
+      "expectedList": {
+        "판례일련번호": "69909",
+        "데이터출처명": "대법원",
+        "사건명": "배당이의",
+        "사건번호": "2004가단14869",
+        "선고일자": "2004.10.07",
+        "법원명": "광주지방법원",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "배당이의",
+        "사건번호": "2004가단14869",
+        "선고일자": "20041007",
+        "법원명": "광주지법"
+      },
+      "expectedPreviousRaw": {
+        "serial": "69909",
+        "case_name": "배당이의",
+        "case_number": "2004가단14869",
+        "date": "2004.10.28",
+        "court": "광주지방법원"
+      },
+      "expectedReferenceKey": "04Gad14869",
+      "expectedReferenceRecord": [
+        69909,
+        51,
+        41028,
+        "배당이의"
+      ],
+      "judgmentSha256": "770ce150d43aacabfec4eb596dcb58a3602ff030c127a0ea25ab8a336a9aa561",
+      "record": {
+        "serial": "69909",
+        "case_name": "배당이의",
+        "case_number": "2004가단14869",
+        "date": "20041007",
+        "court": "광주지방법원"
+      },
+      "evidence": {
+        "reviewedAt": "2026-10-24",
+        "rule": "Owner-approved explicit metadata correction. Official list and exact detail metadata plus complete judgment body are pinned. Preserve archived raw and old reference payload in the migration audit; replace only this reference record atomically. No global alias or guessed date."
+      }
+    },
+    "대법원:185122": {
+      "profile": "law_detail_metadata_correction_v1",
+      "expectedList": {
+        "판례일련번호": "185122",
+        "데이터출처명": "대법원",
+        "사건명": "특정범죄가중처벌등에관한법률위반(보복상해등)[인정된죄명:특정범죄가중처벌등에관한법률위반(면담강요등)·상해]",
+        "사건번호": "2017노5",
+        "선고일자": "2017.04.19",
+        "법원명": "서울고등법원춘천재판부",
+        "사건종류코드": "400102"
+      },
+      "expectedDetail": {
+        "사건명": "특정범죄가중처벌등에관한법률위반(보복상해등)[인정된죄명:특정범죄가중처벌등에관한법률위반(면담강요등)·상해]",
+        "사건번호": "2017노5",
+        "선고일자": "20170419",
+        "법원명": "서울고법(춘천)"
+      },
+      "expectedPreviousRaw": {
+        "serial": "185122",
+        "case_name": "특정범죄가중처벌등에관한법률위반(보복상해등)[인정된죄명:특정범죄가중처벌등에관한법률위반(면담강요등)·상해]",
+        "case_number": "2017노5",
+        "date": "20170419",
+        "court": "서울고등법원"
+      },
+      "expectedReferenceKey": "17No5",
+      "expectedReferenceRecord": [
+        185122,
+        10,
+        170419,
+        "특정범죄가중처벌등에관한법률위반(보복상해등)[인정된죄명:특정범죄가중처벌등에관한법률위반(면담강요등)·상해]"
+      ],
+      "judgmentSha256": "4e42d9a962bb1fa3fa4d7057a79bb451c726c8fcfbc12fb5f6f351285b9fe63a",
+      "record": {
+        "serial": "185122",
+        "case_name": "특정범죄가중처벌등에관한법률위반(보복상해등)[인정된죄명:특정범죄가중처벌등에관한법률위반(면담강요등)·상해]",
+        "case_number": "2017노5",
+        "date": "20170419",
+        "court": "서울고등법원춘천재판부"
+      },
+      "evidence": {
+        "reviewedAt": "2026-10-24",
+        "rule": "Owner-approved explicit metadata correction. Official list and exact detail metadata plus complete judgment body are pinned. Preserve archived raw and old reference payload in the migration audit; replace only this reference record atomically. No global alias or guessed date."
+      }
     }
   }
 }

@@ -144,6 +144,186 @@
         "rule": "Exact official detail and entire judgment body verified; retain the existing reviewed full identity when list omits merged members or uses a different branch label. Never apply an alias globally.",
         "reviewedAt": "2026-10-21"
       }
+    },
+    "192184": {
+      "expectedList": {
+        "판례일련번호": "192184",
+        "데이터출처명": "대법원",
+        "사건명": "공직선거법위반",
+        "사건번호": "2013노1",
+        "선고일자": "2013.07.24",
+        "법원명": "대전고등법원",
+        "사건종류코드": "400102"
+      },
+      "expectedDetail": {
+        "사건명": "공직선거법위반",
+        "사건번호": "2013노1, 209(병합)",
+        "선고일자": "20130724",
+        "법원명": "대전고법"
+      },
+      "bodySha256": "323c069c5ca1794426b4500bbd90a90938a43262802a29a60c5c0d07c80c8f9e",
+      "expectedArchived": {
+        "serial": "192184",
+        "case_name": "공직선거법위반",
+        "case_number": "2013노1, 209(병합)",
+        "date": "20130724",
+        "court": "대전고등법원"
+      },
+      "record": {
+        "serial": "192184",
+        "case_name": "공직선거법위반",
+        "case_number": "2013노1, 209(병합)",
+        "date": "20130724",
+        "court": "대전고등법원"
+      },
+      "evidence": {
+        "rule": "The list exposes only the leading number. Exact official detail metadata and complete judgment body bind all existing merged/main/counterclaim members; raw, court and date remain unchanged. No shorthand inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
+    },
+    "623971": {
+      "expectedList": {
+        "판례일련번호": "623971",
+        "데이터출처명": "대법원",
+        "사건명": "계약금반환 등·손해배상(기)",
+        "사건번호": "2023가단13936",
+        "선고일자": "2024.09.26",
+        "법원명": "수원지방법원",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "계약금반환 등·손해배상(기)",
+        "사건번호": "2023가단13936(본소), 2024가단4762(반소)",
+        "선고일자": "20240926",
+        "법원명": "수원지방법원"
+      },
+      "bodySha256": "93723699374c3f29ef1b7fdd60b730b129426c855cd0ffe2c2960721f11ca240",
+      "expectedArchived": {
+        "serial": "623971",
+        "case_name": "계약금반환 등·손해배상(기)",
+        "case_number": "2023가단13936(본소), 2024가단4762(반소)",
+        "date": "20240926",
+        "court": "수원지방법원"
+      },
+      "record": {
+        "case_name": "계약금반환 등·손해배상(기)",
+        "case_number": "2023가단13936(본소), 2024가단4762(반소)",
+        "court": "수원지방법원",
+        "date": "20240926",
+        "serial": "623971"
+      },
+      "evidence": {
+        "rule": "The list exposes only the leading number. Exact official detail metadata and complete judgment body bind all existing merged/main/counterclaim members; raw, court and date remain unchanged. No shorthand inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
+    },
+    "624491": {
+      "expectedList": {
+        "판례일련번호": "624491",
+        "데이터출처명": "대법원",
+        "사건명": "공사대금등청구의소·건물철거등청구",
+        "사건번호": "2020가합571614",
+        "선고일자": "2024.09.10",
+        "법원명": "서울중앙지방법원",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "공사대금등청구의소·건물철거등청구",
+        "사건번호": "2020가합571614(본소), 2022가합521507(반소)",
+        "선고일자": "20240910",
+        "법원명": "서울중앙지방법원"
+      },
+      "bodySha256": "4ac2bd5087c20ebe4f349545ed7f0763edc860a3e0f7ce7e9c7fca5bcd426565",
+      "expectedArchived": {
+        "serial": "624491",
+        "case_name": "공사대금등청구의소·건물철거등청구",
+        "case_number": "2020가합571614(본소), 2022가합521507(반소)",
+        "date": "20240910",
+        "court": "서울중앙지방법원"
+      },
+      "record": {
+        "case_name": "공사대금등청구의소·건물철거등청구",
+        "case_number": "2020가합571614(본소), 2022가합521507(반소)",
+        "court": "서울중앙지방법원",
+        "date": "20240910",
+        "serial": "624491"
+      },
+      "evidence": {
+        "rule": "The list exposes only the leading number. Exact official detail metadata and complete judgment body bind all existing merged/main/counterclaim members; raw, court and date remain unchanged. No shorthand inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
+    },
+    "614353": {
+      "expectedList": {
+        "판례일련번호": "614353",
+        "데이터출처명": "대법원",
+        "사건명": "건물인도·손해배상(기)",
+        "사건번호": "2024나11658",
+        "선고일자": "2024.10.23",
+        "법원명": "울산지방법원",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "건물인도·손해배상(기)",
+        "사건번호": "2024나11658(본소), 2024나11665(반소)",
+        "선고일자": "20241023",
+        "법원명": "울산지방법원"
+      },
+      "bodySha256": "93788be226834ecc35a98c2013942b314e14dd14d3c4e3c178427d775dcd367f",
+      "expectedArchived": {
+        "serial": "614353",
+        "case_name": "건물인도·손해배상(기)",
+        "case_number": "2024나11658(본소), 2024나11665(반소)",
+        "date": "20241023",
+        "court": "울산지방법원"
+      },
+      "record": {
+        "case_name": "건물인도·손해배상(기)",
+        "case_number": "2024나11658(본소), 2024나11665(반소)",
+        "court": "울산지방법원",
+        "date": "20241023",
+        "serial": "614353"
+      },
+      "evidence": {
+        "rule": "The list exposes only the leading number. Exact official detail metadata and complete judgment body bind all existing merged/main/counterclaim members; raw, court and date remain unchanged. No shorthand inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
+    },
+    "616625": {
+      "expectedList": {
+        "판례일련번호": "616625",
+        "데이터출처명": "대법원",
+        "사건명": "산업기술의유출방지및보호에관한법률위반·부정경쟁방지및영업비밀보호에관한법률위반(영업비밀국외누설등)·업무상배임",
+        "사건번호": "2023고합1098",
+        "선고일자": "2024.10.16",
+        "법원명": "서울중앙지방법원",
+        "사건종류코드": "400102"
+      },
+      "expectedDetail": {
+        "사건명": "산업기술의유출방지및보호에관한법률위반·부정경쟁방지및영업비밀보호에관한법률위반(영업비밀국외누설등)·업무상배임",
+        "사건번호": "2023고합1098, 2024고합41(병합), 116(병합)",
+        "선고일자": "20241016",
+        "법원명": "서울중앙지방법원"
+      },
+      "bodySha256": "96989c0eca9c80a966be6e48b28ae42858cf10eaf2121a0dc515875e578c562a",
+      "expectedArchived": {
+        "serial": "616625",
+        "case_name": "산업기술의유출방지및보호에관한법률위반·부정경쟁방지및영업비밀보호에관한법률위반(영업비밀국외누설등)·업무상배임",
+        "case_number": "2023고합1098,2024고합41(병합),2024고합116(병합)",
+        "date": "20241016",
+        "court": "서울중앙지방법원"
+      },
+      "record": {
+        "case_name": "산업기술의유출방지및보호에관한법률위반·부정경쟁방지및영업비밀보호에관한법률위반(영업비밀국외누설등)·업무상배임",
+        "case_number": "2023고합1098,2024고합41(병합),2024고합116(병합)",
+        "court": "서울중앙지방법원",
+        "date": "20241016",
+        "serial": "616625"
+      },
+      "evidence": {
+        "rule": "The list exposes only the leading number. Exact official detail metadata and complete judgment body bind all existing merged/main/counterclaim members; raw, court and date remain unchanged. No shorthand inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
     }
   }
 }

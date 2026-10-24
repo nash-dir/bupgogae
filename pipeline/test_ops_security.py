@@ -503,6 +503,24 @@ class AtomicStateSyncTests(unittest.TestCase):
                     sync_state.upload_state(data_dir, allow_partial_bootstrap=True)
                 get_client.assert_not_called()
 
+    def test_state_failure_logs_only_allowlisted_integrity_reasons(self):
+        self.assertEqual(sync_state.safe_state_failure(ValueError("reference_record_removed_or_changed")),
+                         "reference_record_removed_or_changed")
+        for message in ("https://private.invalid?token=SECRET", "SECRET", "unexpected_reason"):
+            self.assertEqual(sync_state.safe_state_failure(ValueError(message)), "ValueError")
+        with tempfile.TemporaryDirectory() as data_dir:
+            conn = _create_master(os.path.join(data_dir, "master.db"))
+            conn.close()
+            with (mock.patch.object(sync_state, "_verify_incremental_health",
+                                    side_effect=ValueError("reference_record_removed_or_changed")),
+                  mock.patch.object(sync_state, "get_r2_client") as client,
+                  mock.patch.dict(os.environ, {"R2_BUCKET": "bucket", "R2_STATE_BUCKET": "private-state"}),
+                  self.assertLogs(sync_state.log, level="ERROR") as logs,
+                  self.assertRaises(SystemExit)):
+                sync_state.upload_state(data_dir)
+            client.assert_not_called()
+            self.assertIn("reason=reference_record_removed_or_changed", " ".join(logs.output))
+
     def test_wrong_cases_schema_is_rejected(self):
         with tempfile.TemporaryDirectory() as data_dir:
             path = os.path.join(data_dir, "master.db")
@@ -1000,7 +1018,12 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertIn("BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000", recovery_step)
         self.assertEqual(crawl_section.count(
             "BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000"
-        ), 3)
+        ), 4)
+        metadata_step = crawl_section.split("- name: 원문 대조한 메타데이터만", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("inputs.correct_reviewed_metadata == true", metadata_step)
+        self.assertIn("inputs.full_bootstrap != true", metadata_step)
+        self.assertIn("github.event_name == 'workflow_dispatch'", metadata_step)
+        self.assertEqual(set(re.findall(r"secrets\.([A-Z0-9_]+)", metadata_step)), {"BUPGOGAE_API_KEY"})
         self.assertLess(
             crawl_section.index("명시적 full historical bootstrap 실행"),
             crawl_section.index("WARP 연결 및 ephemeral 등록 정리"),

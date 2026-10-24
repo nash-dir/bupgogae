@@ -8,6 +8,13 @@ on:
         required: true
         type: string
 
+      state_phase:
+        description: '수집 전 입력 또는 실패 후 재개 snapshot (읽기 전용)'
+        required: true
+        default: resume
+        type: choice
+        options: [resume, input]
+
 permissions:
   contents: read
   actions: read
@@ -27,6 +34,7 @@ jobs:
       - name: 원본 실행의 저장소·main·workflow·SHA 검증
         id: source
         env:
+          STATE_PHASE: ${{ inputs.state_phase || 'resume' }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -36,6 +44,7 @@ jobs:
           import json, os, re
           from pathlib import Path
           run = json.loads(Path('source-run.json').read_bytes())
+          assert os.environ['STATE_PHASE'] in {'input', 'resume'}
           assert run['head_repository']['full_name'] == os.environ['GITHUB_REPOSITORY']
           assert run['head_branch'] == 'main' and run['path'] == '.github/workflows/daily-pipeline.yml'
           assert run['status'] == 'completed' and re.fullmatch(r'[0-9a-f]{40}', run['head_sha'])
@@ -44,12 +53,13 @@ jobs:
           PY
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: crawler-resume-state-encrypted
+          name: crawler-${{ inputs.state_phase || 'resume' }}-state-encrypted
           path: encrypted-state
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
       - name: 원본 실행 context로 인증 복호화 (R2/API credential 없음)
         env:
+          STATE_PHASE: ${{ inputs.state_phase || 'resume' }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           STATE_ARTIFACT_KEY: ${{ secrets.STATE_ARTIFACT_KEY }}
@@ -61,7 +71,9 @@ jobs:
           from state_artifact import unseal
           os.environ['GITHUB_RUN_ID'] = os.environ['SOURCE_RUN_ID']
           os.environ['GITHUB_SHA'] = os.environ['SOURCE_SHA']
-          unseal(Path('encrypted-state/resume.aead'), Path('diagnostic-state'), 'resume')
+          phase = os.environ['STATE_PHASE']
+          assert phase in {'input', 'resume'}
+          unseal(Path('encrypted-state') / (phase + '.aead'), Path('diagnostic-state'), phase)
           print('authenticated diagnostic snapshot opened')
           PY
       - name: 읽기 전용 DB 진단 (공개 판례 필드·안전한 enum만 출력)

@@ -163,3 +163,24 @@ class MetadataCorrectionTests(unittest.TestCase):
                 db.export_core()
         finally:
             db.close()
+
+
+    def test_migration_protects_verified_records_added_after_the_old_reference(self):
+        db = MasterDB(str(self.path))
+        db.upsert_raw([dict(serial='456', case_name='newly published', case_number='2026다456',
+                            date='20260101', court='대법원')])
+        db.close()
+        result = self.run_migration(apply=True)
+        self.assertEqual(result['protectedKeys'], 4)
+        db = MasterDB(str(self.path))
+        try:
+            reference = json.loads(db.conn.execute('SELECT reference_payload FROM serving_policy').fetchone()[0])
+            self.assertIn('26Da456', reference['cases'])
+            saved, sha = db.conn.execute('SELECT before_export_payload,before_export_sha256 FROM reference_metadata_migrations').fetchone()
+            self.assertEqual(hashlib.sha256(saved).hexdigest(), sha)
+            self.assertIn('26Da456', json.loads(saved)['cases'])
+            db.conn.execute("UPDATE cases SET date='20260102' WHERE serial='456'")
+            with self.assertRaisesRegex(ValueError, 'reference_record_removed_or_changed'):
+                db.export_core()
+        finally:
+            db.close()

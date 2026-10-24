@@ -16,7 +16,8 @@ import source_corrections as sources
 MIGRATION = "official_metadata_20261024"
 SCHEMA = """CREATE TABLE IF NOT EXISTS reference_metadata_migrations (
     id TEXT PRIMARY KEY, before_payload BLOB NOT NULL, before_review TEXT NOT NULL,
-    before_sha256 TEXT NOT NULL, after_sha256 TEXT NOT NULL,
+    before_sha256 TEXT NOT NULL, before_export_payload BLOB NOT NULL,
+    before_export_sha256 TEXT NOT NULL, after_sha256 TEXT NOT NULL,
     corrections_sha256 TEXT NOT NULL, raw_sha256 TEXT NOT NULL
 )"""
 
@@ -50,7 +51,8 @@ def migrate(path, *, apply=False, fetch=current_item, fetch_judgment=None):
         policy = load_policy(db.conn)
         # A normal full export must pass both before and after the migration.
         # Corrupt failed-run artifacts are diagnostic inputs, never repair inputs.
-        db.export_core()
+        before_cases, _ = db.export_core()
+        before_courts = dict(db.court_resolver.code_map)
         audit = db.conn.execute("SELECT before_payload,before_review,before_sha256,after_sha256,corrections_sha256 "
                                 "FROM reference_metadata_migrations WHERE id=?", (MIGRATION,)).fetchone() \
             if table_exists(db.conn, "reference_metadata_migrations") else None
@@ -61,6 +63,15 @@ def migrate(path, *, apply=False, fetch=current_item, fetch_judgment=None):
             return {"applied": False, "alreadyApplied": True, "sourceProofsVerified": True,
                     "beforeSha256": audit[2], "afterSha256": audit[3], "correctionsSha256": pins}
         updated = copy.deepcopy(policy.reference)
+        # Protect the entire healthy serving snapshot, including records/court
+        # assignments added since the original reference was established.
+        updated["cases"] = copy.deepcopy(before_cases)
+        updated["court_code_map"] = before_courts
+        updated["total"] = len(before_cases)
+        if "keys" in updated:
+            updated["keys"] = len(before_cases)
+        before_export_payload = json.dumps(updated, ensure_ascii=False, separators=(",", ":")).encode()
+        before_export_sha = hashlib.sha256(before_export_payload).hexdigest()
         resolver = CourtCodeResolver(updated["court_code_map"])
         changes = []
         for entry in entries.values():
@@ -90,7 +101,8 @@ def migrate(path, *, apply=False, fetch=current_item, fetch_judgment=None):
     finally:
         db.close()
     report = {"applied": False, "sourceProofsVerified": True, "beforeSha256": before_sha,
-              "afterSha256": after_sha, "correctionsSha256": pins, "rawSha256": raw_sha, "changes": changes}
+              "beforeExportSha256": before_export_sha, "afterSha256": after_sha, "correctionsSha256": pins,
+              "rawSha256": raw_sha, "protectedKeys": len(before_cases), "changes": changes}
     if not apply:
         return report
     db = MasterDB(str(path))
@@ -115,8 +127,8 @@ def migrate(path, *, apply=False, fetch=current_item, fetch_judgment=None):
         # Only the reference hash changes: existing title/raw bindings remain exact.
         db.conn.execute("UPDATE reference_title_provenance SET reference_sha256=? WHERE reference_sha256=?", (after_sha, before_sha))
         db.conn.execute(SCHEMA)
-        db.conn.execute("INSERT INTO reference_metadata_migrations VALUES(?,?,?,?,?,?,?)",
-                        (MIGRATION, before_payload, before_review, before_sha, after_sha, pins, raw_sha))
+        db.conn.execute("INSERT INTO reference_metadata_migrations VALUES(?,?,?,?,?,?,?,?,?)",
+                        (MIGRATION, before_payload, before_review, before_sha, before_export_payload, before_export_sha, after_sha, pins, raw_sha))
         db.export_core()
         if raw_digest(db.conn) != raw_sha:
             raise ValueError("metadata_migration_raw_changed")

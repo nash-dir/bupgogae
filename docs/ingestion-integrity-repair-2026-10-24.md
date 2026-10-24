@@ -73,10 +73,12 @@ originals before any writable connection is opened.
 `--apply` atomically applies only 69909 and 185122. It starts from a healthy export,
 not the corrupt failed-run snapshot. Existing raw rows, inserted_at values,
 quarantine rows, and all unaffected reference records remain intact. New serving
-receipts expose the verified corrected date/court. The old reference payload,
+receipts expose the verified corrected date/court. The old reference payload, the complete healthy pre-migration serving snapshot,
 review JSON, before/after hashes, corrections dictionary digest and full raw
 inventory digest remain in `reference_metadata_migrations` for audit/rollback.
-Existing title receipts retain their exact raw/title bindings and are rebound to
+The new reference also protects every already-verified serving record and court-code
+assignment added since the original reference was established. Only the two
+reviewed metadata values change. Existing title receipts retain their exact raw/title bindings and are rebound to
 the new reference hash inside the same transaction. Full export must pass before
 commit; any failure rolls back reference and receipt writes. Repeat application
 revalidates source proofs and performs no recovery writes.

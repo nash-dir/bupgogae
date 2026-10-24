@@ -30,13 +30,24 @@ Court-code mappings already in the reference had not changed.
 | 616625 | 2023고합1098, 2024고합41, 2024고합116 | List omits merged members; detail uses mixed-year shorthand | Exact reviewed metadata/body and explicit canonical record; no new global shorthand rule |
 | 69909 | 2004가단14869 | Reference/raw says 2004-10-28; current official list/detail says 2004-10-07 | Owner explicitly authorized source-verified metadata migration |
 | 185122 | 2017노5 | Reference/raw uses 서울고등법원/code 10; current list/detail identifies 춘천재판부/code 164 | Same; retain every existing court-code assignment |
+| 613299 | 2021나51458 | Full normal crawl: list says 대전고등법원청주재판부; official detail and existing reviewed record say 대전고등법원(청주) | Exact proof-backed replay; no existing value changes |
+| 614417 | 2022노82 | Full normal crawl: 부산고등법원울산재판부 versus 부산고등법원(울산) | Same |
+| 618471 | 2023고단1179, 2024고단1582(병합) | Full normal crawl: list omits second member; detail retains it | Same; preserve both members |
+| 623981 | 2024누10023 | Full normal crawl: list omits (울산) prefix present in official detail case number | Same; retain existing 부산고등법원(울산) |
 
 The first five failures are an incomplete reviewed replay policy, not evidence
 that the original merged members disappeared. Fresh collection also needs the
 same proof-backed resolver, rather than relying on preexisting provenance rows.
-The last two are current upstream metadata differences from the archived raw and
+69909 and 185122 are current upstream metadata differences from the archived raw and
 reference; a parser retry cannot reconcile them. Their precise upstream change
 date is not established by the retained evidence.
+
+The first operational attempt, 40052603491, passed all three incident months but
+also exposed the four additional replay conflicts above in its normal scheduled
+2022-05, 2023-08 and 2024-11 windows. Each was independently compared with current
+official detail and existing reviewed provenance before adding an exact replay.
+The normal crawl remains mandatory; passing only the original incident windows
+does not satisfy recovery.
 
 The trusted finalizer calls `_verify_incremental_health`, which calls the same
 full `export_core()` reference-preservation gate, before creating an R2 client or
@@ -61,6 +72,10 @@ request URLs or administrative fields. Full body SHA-256 values:
 | 616625 | `96989c0eca9c80a966be6e48b28ae42858cf10eaf2121a0dc515875e578c562a` |
 | 69909 | `770ce150d43aacabfec4eb596dcb58a3602ff030c127a0ea25ab8a336a9aa561` |
 | 185122 | `4e42d9a962bb1fa3fa4d7057a79bb451c726c8fcfbc12fb5f6f351285b9fe63a` |
+| 613299 | `3ce83ed14a2467213b500dd3bb6b35c0107fe9fb287d862b224ff9ff1190e270` |
+| 614417 | `663d782aa0b87f13accf2309af7d332b21d9ce008dcdf7430c3512460139d625` |
+| 618471 | `d1be78acfff42424d443102901f59fe7fbbeef7417a296d75077c53568287a12` |
+| 623981 | `f5fd076596a665b22b69980848d571252d54d4436d1aa24f43ca688153e217a3` |
 
 Proof entry dictionaries bind every current list field, exact detail metadata,
 archived identity, canonical identity and body digest. Future source drift fails

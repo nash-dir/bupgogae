@@ -13,3 +13,10 @@ Their list summaries omit merged members or counterclaims while the exact offici
 metadata and full bodies retain them. The pinned canonical records preserve every
 existing member, date and court. The resolver also verifies these proofs on fresh
 collection; no existing DB row is required to reconstruct the reviewed identity.
+
+The full normal crawl then exposed four more existing reviewed identities:
+613299 (2022-05), 614417 (2023-08), and 618471/623981 (2024-11).
+The first two lists spell the branch as 재판부; 618471 omits the merged
+2024고단1582; 623981 omits the (울산) prefix present in official detail.
+Their four public metadata fields and complete bodies are pinned in the same
+format. Existing raw, reviewed serving records, dates and courts are preserved.

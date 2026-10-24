@@ -324,6 +324,150 @@
         "rule": "The list exposes only the leading number. Exact official detail metadata and complete judgment body bind all existing merged/main/counterclaim members; raw, court and date remain unchanged. No shorthand inference or blanket replay exception.",
         "reviewedAt": "2026-10-24"
       }
+    },
+    "613299": {
+      "expectedList": {
+        "판례일련번호": "613299",
+        "데이터출처명": "대법원",
+        "사건명": "소유권이전등기",
+        "사건번호": "2021나51458",
+        "선고일자": "2022.05.19",
+        "법원명": "대전고등법원청주재판부",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "소유권이전등기",
+        "사건번호": "2021나51458",
+        "선고일자": "20220519",
+        "법원명": "대전고등법원(청주)"
+      },
+      "bodySha256": "3ce83ed14a2467213b500dd3bb6b35c0107fe9fb287d862b224ff9ff1190e270",
+      "expectedArchived": {
+        "serial": "613299",
+        "case_name": "소유권이전등기",
+        "case_number": "2021나51458",
+        "date": "20220519",
+        "court": "대전고등법원(청주)"
+      },
+      "record": {
+        "case_name": "소유권이전등기",
+        "case_number": "2021나51458",
+        "court": "대전고등법원(청주)",
+        "date": "20220519",
+        "serial": "613299"
+      },
+      "evidence": {
+        "rule": "The list omits merged members or uses a different branch label. Exact official detail metadata and complete judgment body agree with the existing reviewed serving identity; raw, court, date and every member remain unchanged. No global branch inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
+    },
+    "614417": {
+      "expectedList": {
+        "판례일련번호": "614417",
+        "데이터출처명": "대법원",
+        "사건명": "뇌물수수·뇌물공여·사기",
+        "사건번호": "2022노82",
+        "선고일자": "2023.08.10",
+        "법원명": "부산고등법원울산재판부",
+        "사건종류코드": "400102"
+      },
+      "expectedDetail": {
+        "사건명": "뇌물수수·뇌물공여·사기",
+        "사건번호": "2022노82",
+        "선고일자": "20230810",
+        "법원명": "부산고등법원(울산)"
+      },
+      "bodySha256": "663d782aa0b87f13accf2309af7d332b21d9ce008dcdf7430c3512460139d625",
+      "expectedArchived": {
+        "serial": "614417",
+        "case_name": "뇌물수수·뇌물공여·사기",
+        "case_number": "2022노82",
+        "date": "20230810",
+        "court": "부산고등법원(울산)"
+      },
+      "record": {
+        "case_name": "뇌물수수·뇌물공여·사기",
+        "case_number": "2022노82",
+        "court": "부산고등법원(울산)",
+        "date": "20230810",
+        "serial": "614417"
+      },
+      "evidence": {
+        "rule": "The list omits merged members or uses a different branch label. Exact official detail metadata and complete judgment body agree with the existing reviewed serving identity; raw, court, date and every member remain unchanged. No global branch inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
+    },
+    "618471": {
+      "expectedList": {
+        "판례일련번호": "618471",
+        "데이터출처명": "대법원",
+        "사건명": "강제추행·성폭력범죄의처벌등에관한특례법위반(카메라등이용촬영·반포등)",
+        "사건번호": "2023고단1179",
+        "선고일자": "2024.11.13",
+        "법원명": "전주지방법원",
+        "사건종류코드": "400102"
+      },
+      "expectedDetail": {
+        "사건명": "강제추행·성폭력범죄의처벌등에관한특례법위반(카메라등이용촬영·반포등)",
+        "사건번호": "2023고단1179, 2024고단1582(병합)",
+        "선고일자": "20241113",
+        "법원명": "전주지방법원"
+      },
+      "bodySha256": "d1be78acfff42424d443102901f59fe7fbbeef7417a296d75077c53568287a12",
+      "expectedArchived": {
+        "serial": "618471",
+        "case_name": "강제추행·성폭력범죄의처벌등에관한특례법위반(카메라등이용촬영·반포등)",
+        "case_number": "2023고단1179, 2024고단1582(병합)",
+        "date": "20241113",
+        "court": "전주지방법원"
+      },
+      "record": {
+        "case_name": "강제추행·성폭력범죄의처벌등에관한특례법위반(카메라등이용촬영·반포등)",
+        "case_number": "2023고단1179, 2024고단1582(병합)",
+        "court": "전주지방법원",
+        "date": "20241113",
+        "serial": "618471"
+      },
+      "evidence": {
+        "rule": "The list omits merged members or uses a different branch label. Exact official detail metadata and complete judgment body agree with the existing reviewed serving identity; raw, court, date and every member remain unchanged. No global branch inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
+    },
+    "623981": {
+      "expectedList": {
+        "판례일련번호": "623981",
+        "데이터출처명": "대법원",
+        "사건명": "손실보상금",
+        "사건번호": "2024누10023",
+        "선고일자": "2024.11.13",
+        "법원명": "부산고등법원",
+        "사건종류코드": "400107"
+      },
+      "expectedDetail": {
+        "사건명": "손실보상금",
+        "사건번호": "(울산)2024누10023",
+        "선고일자": "20241113",
+        "법원명": "부산고등법원"
+      },
+      "bodySha256": "f5fd076596a665b22b69980848d571252d54d4436d1aa24f43ca688153e217a3",
+      "expectedArchived": {
+        "serial": "623981",
+        "case_name": "손실보상금",
+        "case_number": "2024누10023",
+        "date": "20241113",
+        "court": "부산고등법원(울산)"
+      },
+      "record": {
+        "case_name": "손실보상금",
+        "case_number": "2024누10023",
+        "court": "부산고등법원(울산)",
+        "date": "20241113",
+        "serial": "623981"
+      },
+      "evidence": {
+        "rule": "The list omits merged members or uses a different branch label. Exact official detail metadata and complete judgment body agree with the existing reviewed serving identity; raw, court, date and every member remain unchanged. No global branch inference or blanket replay exception.",
+        "reviewedAt": "2026-10-24"
+      }
     }
   }
 }

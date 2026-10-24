@@ -1,8 +1,9 @@
 # Ingestion integrity repair — 2026-10-24
 
-Status: local repair verified; production recovery requires a fully successful
-normal crawl, trusted state publication, public publication and readback. Do not
-use this document alone as evidence of operational recovery.
+Status: production recovery is INCOMPLETE while the ordinary legacy fixed-URL
+mirror still serves a cached previous payload. Normal collection, state/public
+publication and exact private/immutable-public readback have passed; these do not
+waive the remaining fixed-URL check. Do not declare recovery complete yet.
 
 ## Confirmed starting point
 
@@ -38,12 +39,15 @@ Court-code mappings already in the reference had not changed.
 | 164098 | 2011나506 | Full normal crawl: reference/raw says 광주고등법원; official list/detail says 제주재판부 | Same |
 | 176537 | 2014노268 | Full normal crawl: reference/raw says 부산고등법원; official list/detail says 창원재판부 | Same |
 
-The first five failures are an incomplete reviewed replay policy, not evidence
-that the original merged members disappeared. Fresh collection also needs the
+The five original replay failures and four additional replay conflicts expose an
+incomplete reviewed replay policy, not removed merged members. Fresh collection also needs the
 same proof-backed resolver, rather than relying on preexisting provenance rows.
-69909, 185122, 64808, 164098 and 176537 are current upstream metadata differences from the archived raw and
-reference; a parser retry cannot reconcile them. Their precise upstream change
-date is not established by the retained evidence.
+69909, 185122, 64808, 164098 and 176537 have differences between current official
+metadata and the archived raw/reference; a parser retry cannot reconcile them.
+The retained raw/reference proves the mismatch, but without an older official
+list/detail capture it does not establish whether the government edited the
+source or the archived metadata was already wrong. The current parser reproduces
+the current official fields; no date/court guessing is used to reconcile them.
 
 The first operational attempt, 40052603491, passed all three incident months but
 also exposed the four additional replay conflicts above in its normal scheduled
@@ -132,6 +136,77 @@ changed field and safe reason code. Unknown serials, additional changed fields,
 missing dictionary entries, changed input and changed original bodies raise
 explicit exceptions and continue to block publication. Calendar formatting alone
 is not treated as a second metadata change. No catch-and-continue bypass is added.
+
+## Production migration audit
+
+Run 40056234131 uses main commit
+`e6a27371a55ab6f376db1a4827b51a80c2eca60d`, whose tree matches the fully tested
+PR 4 head. Both PR CI 40055754703 and main CI 40056232246 passed (232 Python,
+254 Jest and 29 real Store ZIP E2E tests, plus WARP smoke).
+The explicit migration reported `sourceProofsVerified=true`, `applied=true`,
+five reviewed changes, and 161,133 protected keys. Its preserved raw digest is
+`49680b90fc5ef943149209f156456d17fbbd4997863a0cbc265799d24f40edad`.
+
+| Audit value | SHA-256 |
+| --- | --- |
+| Previous reference | `40bc539ccd6796ee0639e67ade19290a81720a7e2f7f54ad878149a7cad01b17` |
+| Complete healthy pre-migration serving snapshot | `d87106abee0002c8af222922ee61b3d7e27224bf03f2dcd0212e464040265d2d` |
+| New reference after exactly five changes | `4c928ab7b5e0ec326727ee6bcf3762de67547beadc7f493e79478a6322b0c83c` |
+| Metadata correction dictionary | `88c3003900ff17e62c8906ba666db3acab761b0331a4c466034d795a12fe218e` |
+
+Migration success alone is not publication/recovery success. The normal complete
+crawl, trusted/public publication and readback must all succeed independently.
+
+## Production checks — closure pending
+
+The complete normal [run 40056234131](https://github.com/nash-dir/bupgogae/actions/runs/40056234131)
+succeeded. It processed all 689 scheduled/reviewed/backlogged date ranges and
+36 Constitutional Court pages (3,500 decisions). Failed date/page backlog was
+cleared; the full completed-baseline/export gates passed. The private DB has
+212,621 raw rows (+125). The new immutable public payload has 161,225 keys and
+163,049 records, version 20261024. Historical recovery was disabled.
+
+Trusted generation `20261024T033301630491Z-2474750e442c4d088fa8735354161f01`
+was uploaded before the validated immutable public object and manifests/mirrors.
+Its exact master SHA-256 is
+`21152a52e3875e37ea2ede9ea85590b43c9ed9d5456eaaa17c6ac375b463521f`.
+The public raw payload SHA-256 is
+`dd71674a09041a7f74befbb51b2bab89a71ea80e4e9023efef693539491b9f36`.
+
+Read-only [R2 readback 40058835074](https://github.com/nash-dir/bupgogae/actions/runs/40058835074)
+downloaded that exact master hash, passed SQLite integrity and the entire export,
+and reported `reviewedCasesAndCourtsMatch=true` against the hash-verified latest
+manifest/immutable payload. It did not collect, upload or publish anything.
+This verifies the current generation, not expiry of older CDN fixed-key caches.
+
+Independent [artifact diagnostic 40058837589](https://github.com/nash-dir/bupgogae/actions/runs/40058837589)
+reported `exportError=null`, `differenceCount=0`, `changedCourtCodes={}` and the
+expected new reference hash. All five archived raw metadata rows still contain
+their original values. Its authenticated resume-artifact master hash is
+`0d30f3c589a867ed3d7cade66dd175a63cbae4fe06619fca6cc519c2c13ba66b`;
+the uploaded SQLite backup has the separate exact hash above. Both exports agree.
+
+The local immutable-public comparison checks every record of the previous healthy
+161,133-key publication. Only the five explicitly approved metadata replacements
+are allowed; unapproved old-record differences are zero. All old court-code
+assignments, every member/value of the nine reviewed replay identities, and the
+three 21 October recoveries are intact. Physical quarantine remains 49,662;
+49,660 rows remain skipped during export. No unverified quarantine release,
+historical recovery replay, deletion or integrity bypass was used.
+
+The modern and legacy manifests agree on the new immutable hash; the contract
+mirror also agrees. The unchanged old-client `adapters.json` is HTTP 200 with SHA
+`134999d07dee2014536522000f4ba949faf03ee3f530e29fa77a7963b8624812`.
+The ordinary `db.json.gz` mirror check is still failing, so the overall public
+verification script exits unsuccessfully. Partial results are ignored local
+evidence at `backfill/2026-10-24-integrity/after/report.json`.
+
+At 03:35 UTC that bare URL served the prior healthy payload from Cloudflare
+(`HIT`, age 2,798, `public, max-age=3600`). Closure still requires both ordinary
+fixed mirrors to equal the new payload SHA. Do not change the expected hash,
+bypass the ordinary URL, or treat cached old content as current.
+
+See [known-errors.md](known-errors.md) for the dictionary/exception review process.
 
 ## Local verification boundary
 

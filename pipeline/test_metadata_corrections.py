@@ -184,3 +184,13 @@ class MetadataCorrectionTests(unittest.TestCase):
                 db.export_core()
         finally:
             db.close()
+
+
+    def test_repeat_migration_rejects_changed_audit_snapshot(self):
+        self.run_migration(apply=True)
+        db = MasterDB(str(self.path))
+        db.conn.execute("UPDATE reference_metadata_migrations SET before_export_payload=?", (b"changed",))
+        db.conn.commit()
+        db.close()
+        with self.assertRaisesRegex(ValueError, 'metadata_migration_receipt_mismatch'):
+            self.run_migration(apply=True)

@@ -53,15 +53,17 @@ def migrate(path, *, apply=False, fetch=current_item, fetch_judgment=None):
         # Corrupt failed-run artifacts are diagnostic inputs, never repair inputs.
         before_cases, _ = db.export_core()
         before_courts = dict(db.court_resolver.code_map)
-        audit = db.conn.execute("SELECT before_payload,before_review,before_sha256,after_sha256,corrections_sha256 "
+        audit = db.conn.execute("SELECT before_payload,before_review,before_sha256,after_sha256,corrections_sha256,before_export_payload,before_export_sha256 "
                                 "FROM reference_metadata_migrations WHERE id=?", (MIGRATION,)).fetchone() \
             if table_exists(db.conn, "reference_metadata_migrations") else None
         if audit:
             if (hashlib.sha256(audit[0]).hexdigest() != audit[2] or audit[3] != before_sha or audit[4] != pins
-                    or json.loads(audit[1])["referenceSha256"] != audit[2]):
+                    or json.loads(audit[1])["referenceSha256"] != audit[2]
+                    or hashlib.sha256(audit[5]).hexdigest() != audit[6]):
                 raise ValueError("metadata_migration_receipt_mismatch")
             return {"applied": False, "alreadyApplied": True, "sourceProofsVerified": True,
-                    "beforeSha256": audit[2], "afterSha256": audit[3], "correctionsSha256": pins}
+                    "beforeSha256": audit[2], "beforeExportSha256": audit[6],
+                    "afterSha256": audit[3], "correctionsSha256": pins}
         updated = copy.deepcopy(policy.reference)
         # Protect the entire healthy serving snapshot, including records/court
         # assignments added since the original reference was established.

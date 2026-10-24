@@ -76,6 +76,10 @@ quarantine rows, and all unaffected reference records remain intact. New serving
 receipts expose the verified corrected date/court. The old reference payload, the complete healthy pre-migration serving snapshot,
 review JSON, before/after hashes, corrections dictionary digest and full raw
 inventory digest remain in `reference_metadata_migrations` for audit/rollback.
+Existing historical serving overlays are admitted to that full reference only
+when the original seven raw fields/hash and existing source-bound recovery receipt
+are valid and the reference exactly equals the recovered record. Missing or altered
+proof blocks export; no historical recovery is reapplied.
 The new reference also protects every already-verified serving record and court-code
 assignment added since the original reference was established. Only the two
 reviewed metadata values change. Existing title receipts retain their exact raw/title bindings and are rebound to

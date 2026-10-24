@@ -261,6 +261,10 @@ class MasterDB:
                 if serving_receipt is not None:
                     from source_corrections import verify_receipt
                     verify_receipt(raw, serving_receipt)
+                if serving_receipt is not None and policy and existing and not existing[4]:
+                    from source_corrections import METADATA_PROFILE
+                    if serving_receipt["profile"] == METADATA_PROFILE:
+                        raise ValueError("reference_metadata_migration_required")
                 if existing and existing[4]:
                     from known_errors import CorrectionError
                     # Serving corrections intentionally leave the raw row

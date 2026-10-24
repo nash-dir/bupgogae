@@ -52,3 +52,49 @@ class ReviewedReplayTests(unittest.TestCase):
                                           entry["expectedArchived"], entry["record"], fetch=lambda serial: detail)
                 finally:
                     db.close()
+
+
+    def test_fresh_collection_reconstructs_only_pinned_full_members(self):
+        for sid, entry in replay.entries().items():
+            detail = json.loads(gzip.decompress((Path(__file__).parent / "fixtures" /
+                                                 "reviewed-replays" / (sid + ".json.gz")).read_bytes()))
+            with self.subTest(serial=sid), tempfile.TemporaryDirectory() as folder:
+                db = MasterDB(str(Path(folder) / "master.db"))
+                try:
+                    item = ET.Element("prec")
+                    for key, value in entry["expectedList"].items():
+                        ET.SubElement(item, key).text = value
+                    with mock.patch.object(replay, "fetch_detail", return_value=detail):
+                        row = runner._precedent_case(item, entry["record"]["date"], 1,
+                                                     replay=db.raw_replay_checker())
+                    self.assertEqual(row, entry["record"])
+                    self.assertEqual(db.upsert_raw([row]), (1, 0, 0))
+                    expected, _ = db.export_core()
+                    before = list(db.conn.iterdump())
+                    with mock.patch.object(replay, "fetch_detail", return_value=detail):
+                        again = runner._precedent_case(item, entry["record"]["date"], 1,
+                                                       replay=db.raw_replay_checker())
+                    db.upsert_raw([again])
+                    self.assertEqual(db.export_core()[0], expected)
+                    self.assertEqual(list(db.conn.iterdump()), before)
+                    self.assertEqual(db.conn.execute("SELECT case_number FROM cases").fetchone()[0],
+                                     entry["record"]["case_number"])
+                finally:
+                    db.close()
+
+    def test_detail_changes_and_unreviewed_lists_never_inherit_a_replay(self):
+        sid, entry = next(iter(replay.entries().items()))
+        detail = json.loads(gzip.decompress((Path(__file__).parent / "fixtures" /
+                                             "reviewed-replays" / (sid + ".json.gz")).read_bytes()))
+        for field in detail["metadata"]:
+            changed = copy.deepcopy(detail)
+            changed["metadata"][field] += "changed"
+            with self.subTest(field=field), self.assertRaisesRegex(CorrectionError, "source_changed"):
+                replay.resolve(entry["expectedList"], fetch=lambda serial: changed)
+        changed = copy.deepcopy(detail)
+        changed["body"] += " "
+        with self.assertRaisesRegex(CorrectionError, "source_changed"):
+            replay.resolve(entry["expectedList"], fetch=lambda serial: changed)
+        fetch = mock.Mock()
+        self.assertIsNone(replay.resolve(dict(entry["expectedList"], 판례일련번호="999999999"), fetch=fetch))
+        fetch.assert_not_called()

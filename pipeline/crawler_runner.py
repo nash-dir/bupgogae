@@ -111,6 +111,7 @@ BACKLOG_FAILURE_REASONS = {
     "known_error_receipt_mismatch",
     "quarantined_raw_changed_requires_review",
     "merged_case_members_removed",
+    "reference_metadata_migration_required",
     "unsupported_publication_serial",
     "unreviewed_unexportable_case",
     "api_error_envelope",
@@ -834,6 +835,9 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
         fields = {k: get_text(item, k) for k in LIST_FIELDS}
         serving_correction = source_corrections.resolve(fields)
         corrected = registry().resolve(fields, fetch_source_body)
+        if corrected is None and serving_correction is None:
+            from reviewed_replays import resolve as resolve_reviewed_replay
+            corrected = resolve_reviewed_replay(fields)
     except CorrectionError as exc:
         raise RangeFetchError(date_range, page, str(exc)) from exc
     if corrected is not None:
@@ -1519,6 +1523,16 @@ def execute_local_crawl(
 # Main
 # ════════════════════════════════════════════════════════════
 
+REVIEWED_FAILURE_RANGES = (
+    ("20130701", "20130731"), ("20240901", "20240930"), ("20241001", "20241031"),
+)
+
+
+def include_reviewed_failure_ranges(ranges):
+    """Add the incident windows without replacing scheduled/backlogged work."""
+    return list(dict.fromkeys([*REVIEWED_FAILURE_RANGES, *ranges]))
+
+
 def main():
     default_data_dir = os.environ.get("DATA_DIR", "/app/data")
 
@@ -1530,9 +1544,13 @@ def main():
         action="store_true",
         help="빈/불신 master DB를 정부수립일부터 전량 구축",
     )
+    parser.add_argument("--verify-reviewed-ranges", action="store_true",
+                        help="정상 전체 계획에 이번 무결성 실패의 세 범위를 추가 검증")
     parser.add_argument("--data-dir", default=default_data_dir,
                         help=f"Data directory (default: {default_data_dir})")
     args = parser.parse_args()
+    if args.verify_reviewed_ranges and args.full_bootstrap:
+        parser.error("reviewed incident verification requires an incremental baseline")
 
     data_dir = args.data_dir
     master_db_path = os.path.join(data_dir, "master.db")
@@ -1546,6 +1564,8 @@ def main():
         recent_dates = set()
         scan_ranges = get_today_scan_ranges(today, recent_dates=recent_dates)
         detc_pages = get_detc_pages_for_today(today)
+    if args.verify_reviewed_ranges:
+        scan_ranges = include_reviewed_failure_ranges(scan_ranges)
     summary = scan_plan_summary(scan_ranges, today, recent_count=len(recent_dates))
 
     log.info("=" * 55)
@@ -1631,6 +1651,8 @@ def main():
             recent_dates = set()
         scheduled = get_today_scan_ranges(today, recent_dates=recent_dates)
         scan_ranges = merge_scan_ranges(scheduled, prior_backlog)
+        if args.verify_reviewed_ranges:
+            scan_ranges = include_reviewed_failure_ranges(scan_ranges)
         summary = scan_plan_summary(
             scheduled, today, recent_count=len(recent_dates)
         )

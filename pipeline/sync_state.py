@@ -589,6 +589,23 @@ def _generation_id() -> str:
     return f"{timestamp}-{uuid.uuid4().hex}"
 
 
+# These explicit enums are safe to expose; arbitrary exception text can contain
+# state endpoints, credentials, or response content.
+STATE_INTEGRITY_REASONS = frozenset({
+    "reference_record_removed_or_changed", "reference_court_codes_changed",
+    "quarantined_raw_changed_requires_review", "quarantine_inventory_changed",
+    "known_error_receipt_mismatch", "reference_title_receipt_mismatch",
+    "unreviewed_unexportable_case", "unsupported_publication_serial",
+    "insufficient_precedent_count", "historical_coverage_missing",
+    "recent_coverage_missing", "detc_coverage_missing",
+})
+
+
+def safe_state_failure(error):
+    reason = str(error)
+    return reason if reason in STATE_INTEGRITY_REASONS else type(error).__name__
+
+
 def upload_state(data_dir: str, *, allow_partial_bootstrap: bool = False):
     """검증된 snapshot/backlog generation을 올리고 pointer를 마지막에 게시."""
     db_path = os.path.join(data_dir, "master.db")
@@ -660,9 +677,9 @@ def upload_state(data_dir: str, *, allow_partial_bootstrap: bool = False):
         # Commit point: generation과 previous 기록이 모두 성공한 뒤에만
         # current generation을 교체한다.
         _put_pointer(client, bucket, STATE_POINTER_KEY, pointer)
-        log.info(f"✅ 상태 generation 업로드 완료: {generation}")
+        log.info(f"✅ 상태 generation 업로드 완료: {generation} master_sha256={master_descriptor['sha256']}")
     except Exception as error:
-        log.error(f"❌ R2 상태 업로드 실패: {type(error).__name__}")
+        log.error(f"❌ R2 상태 업로드 실패: {type(error).__name__} (reason={safe_state_failure(error)})")
         sys.exit(1)
     finally:
         if snapshot_path and os.path.exists(snapshot_path):

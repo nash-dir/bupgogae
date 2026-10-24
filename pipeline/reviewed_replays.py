@@ -62,3 +62,16 @@ def verify(fields, archived, corrected, *, fetch=fetch_detail):
             or hashlib.sha256(detail["body"].encode()).hexdigest() != entry["bodySha256"]):
         raise CorrectionError("known_error_source_changed")
     return True
+
+
+def resolve(fields, *, fetch=None):
+    """Reconstruct only a fully reviewed identity, including on a fresh DB.
+
+    List summaries are not evidence that merged members were removed. Every
+    field and the complete official detail/body must match the pinned review.
+    """
+    entry = entries().get(fields.get("판례일련번호", ""))
+    if entry is None:
+        return None
+    verify(fields, entry["expectedArchived"], entry["record"], fetch=fetch or fetch_detail)
+    return dict(entry["record"])

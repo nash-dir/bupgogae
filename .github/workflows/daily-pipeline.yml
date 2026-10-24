@@ -24,6 +24,11 @@ on:
         description: '다운로드 전용 검증에서 요구할 master.db SHA-256'
         required: false
         type: string
+      correct_reviewed_metadata:
+        description: '원문·해시 대조한 69909/185122 메타데이터만 원자적으로 정정 (raw 보존)'
+        required: false
+        type: boolean
+        default: false
       recover_reviewed_historical:
         description: '원문 검증한 과거 보류 2건과 누락 617561을 원본 보존 overlay로 복구'
         required: false
@@ -189,9 +194,16 @@ jobs:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
           BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000
 
+      - name: 원문 대조한 메타데이터만 명시적 정정 (전체 수집·게시 gate 유지)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.correct_reviewed_metadata == true && inputs.verify_handoff_only != true && inputs.full_bootstrap != true }}
+        run: timeout --signal=TERM --kill-after=10s 10m python pipeline/apply_metadata_corrections.py --data-dir ./pipeline/data --apply
+        env:
+          BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
+          BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000
+
       - name: 크롤러 실행 (API key 외 credential 없음)
         if: ${{ (github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true) && inputs.verify_handoff_only != true }}
-        run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data
+        run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data ${{ inputs.correct_reviewed_metadata == true && '--verify-reviewed-ranges' || '' }}
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
           BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000

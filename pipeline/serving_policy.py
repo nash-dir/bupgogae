@@ -68,8 +68,27 @@ class ServingPolicy:
                 else:
                     self.reference_titles[sid] = title
         reference_ids = {str(record[0]) for records in self.reference["cases"].values() for record in records}
-        if reference_ids & self.quarantine.keys():
-            raise ValueError("quarantine_would_remove_reference_record")
+        for sid in reference_ids & self.quarantine.keys():
+            # A later full reference can include an ALREADY verified historical
+            # overlay. Physical quarantine and immutable raw stay pinned; absence
+            # or alteration of its proof must still block the entire export.
+            from historical_recovery import verify_receipt
+            from compress import compress_case_number, compress_date, compress_case_name
+            if not table_exists(conn, "historical_recovery_provenance"):
+                raise ValueError("quarantine_would_remove_reference_record")
+            receipt = conn.execute("SELECT receipt_json FROM historical_recovery_provenance WHERE serial=?", (sid,)).fetchone()
+            raw = conn.execute("SELECT " + ",".join(RAW_COLUMNS) + " FROM cases WHERE serial=?", (sid,)).fetchone()
+            if receipt is None or raw is None:
+                raise ValueError("quarantine_would_remove_reference_record")
+            raw = dict(zip(RAW_COLUMNS, raw))
+            self.held(raw)
+            corrected = verify_receipt(raw, json.loads(receipt[0]))
+            court = self.reference["court_code_map"].get(corrected["court"])
+            expected = [int(sid), court, compress_date(corrected["date"]), compress_case_name(corrected["case_name"])]
+            actual = [(key, record) for key, records in self.reference["cases"].items()
+                      for record in records if str(record[0]) == sid]
+            if court is None or actual != [(compress_case_number(corrected["case_number"]), expected)]:
+                raise ValueError("known_error_receipt_mismatch")
 
     def held(self, row):
         hold = self.quarantine.get(row["serial"])

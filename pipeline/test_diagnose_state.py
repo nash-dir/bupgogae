@@ -30,6 +30,8 @@ class DiagnosticTests(unittest.TestCase):
             report = diagnose(path)
             self.assertEqual(report["exportError"], "reference_record_removed_or_changed")
             self.assertEqual(report["differenceCount"], 1)
+            self.assertEqual(report["referenceSha256"], digest)
+            self.assertEqual(report["reviewedMetadataRaw"], {})
             self.assertEqual(report["differences"][0]["expected"][1], 1)
             self.assertEqual(report["differences"][0]["actual"][0]["record"][1], 10)
             self.assertEqual(path.read_bytes(), before)

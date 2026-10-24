@@ -58,6 +58,35 @@ class HistoricalRecoveryTests(unittest.TestCase):
         return dict({k: entry["expectedArchivedRaw"][k] for k in
                      ("serial", "case_name", "case_number", "date", "court")}, _historical_recovery=receipt)
 
+    def test_existing_verified_holds_can_be_protected_by_a_later_full_reference(self):
+        self.db.upsert_raw([self.incoming(entry) for entry in recovery.entries().values()])
+        cases, _ = self.db.export_core()
+        payload = json.dumps(dict(version="20261024", total=len(cases), cases=cases,
+                                  court_code_map=self.db.court_resolver.code_map)).encode()
+        review = json.loads(self.db.conn.execute("SELECT review_json FROM serving_policy").fetchone()[0])
+        review["referenceSha256"] = hashlib.sha256(payload).hexdigest()
+        self.db.conn.execute("UPDATE serving_policy SET reference_payload=?,reference_sha256=?,review_json=?",
+                             (payload, review["referenceSha256"], json.dumps(review)))
+        self.db.conn.commit()
+        before = list(self.db.conn.iterdump())
+        self.assertEqual(self.db.export_core()[0], cases)
+        self.assertEqual(list(self.db.conn.iterdump()), before)
+        self.assertEqual(self.db.conn.execute("SELECT COUNT(*) FROM export_quarantine").fetchone()[0], 2)
+        self.db.conn.execute("SAVEPOINT proof")
+        self.db.conn.execute("DELETE FROM historical_recovery_provenance WHERE serial='349026'")
+        with self.assertRaisesRegex(ValueError, "quarantine_would_remove_reference_record"):
+            self.db.export_core()
+        self.db.conn.execute("ROLLBACK TO proof")
+        self.db.conn.execute("RELEASE proof")
+        cases["22Guh1013"][0][2] = 231117
+        wrong = json.dumps(dict(version="20261024", total=len(cases), cases=cases,
+                                court_code_map=self.db.court_resolver.code_map)).encode()
+        review["referenceSha256"] = hashlib.sha256(wrong).hexdigest()
+        self.db.conn.execute("UPDATE serving_policy SET reference_payload=?,reference_sha256=?,review_json=?",
+                             (wrong, review["referenceSha256"], json.dumps(review)))
+        with self.assertRaisesRegex(ValueError, "known_error_receipt_mismatch"):
+            self.db.export_core()
+
     def test_both_original_headers_and_five_immutable_fields_are_preserved(self):
         before = self.db.conn.execute("SELECT * FROM cases ORDER BY serial").fetchall()
         inventory = self.db.conn.execute("SELECT * FROM export_quarantine ORDER BY serial").fetchall()

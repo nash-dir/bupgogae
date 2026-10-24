@@ -203,7 +203,7 @@ jobs:
 
       - name: 크롤러 실행 (API key 외 credential 없음)
         if: ${{ (github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true) && inputs.verify_handoff_only != true }}
-        run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data
+        run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data ${{ inputs.correct_reviewed_metadata == true && '--verify-reviewed-ranges' || '' }}
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
           BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000

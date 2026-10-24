@@ -676,5 +676,25 @@ class PublicationGateTests(unittest.TestCase):
         fake_db.close.assert_called_once_with()
 
 
+class ReviewedIncidentScheduleTests(unittest.TestCase):
+    def test_incident_windows_are_additive_and_their_failures_still_block_publication(self):
+        scheduled = [("20261024", "20261024"), ("20130701", "20130731")]
+        ranges = crawler_runner.include_reviewed_failure_ranges(scheduled)
+        self.assertTrue(set(scheduled) <= set(ranges))
+        self.assertTrue(set(crawler_runner.REVIEWED_FAILURE_RANGES) <= set(ranges))
+        self.assertEqual(len(ranges), len(set(ranges)))
+        calls = []
+        def fetch(dates):
+            calls.append(dates)
+            if dates == "20240901~20240930":
+                raise crawler_runner.RangeFetchError(dates, 1, "known_error_review_required")
+            return one_case(str(len(calls)))
+        result = crawler_runner.crawl_scan_ranges(FakeDB(), ranges, fetcher=fetch, sleep_fn=lambda: None)
+        self.assertIn("20261024", calls)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(result["errors"], 1)
+        self.assertFalse(crawler_runner.publication_allowed(result["failed"]))
+
+
 if __name__ == "__main__":
     unittest.main()

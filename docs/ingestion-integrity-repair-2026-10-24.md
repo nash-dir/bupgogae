@@ -90,6 +90,9 @@ revalidates source proofs and performs no recovery writes.
 The manual `correct_reviewed_metadata` workflow input defaults to false, is
 restricted to the API-only crawl job, and does not introduce R2 credentials there.
 The ordinary full crawl and existing trusted/public publishing gates still run.
+The explicit metadata-repair run additionally includes all three incident months
+through `--verify-reviewed-ranges`; it never replaces scheduled or backlogged work.
+Failure of any added month still blocks public publication.
 Use `recover_reviewed_historical=false`; the 21 October recoveries are complete.
 
 ## Local verification boundary

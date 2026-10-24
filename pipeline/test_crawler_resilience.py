@@ -691,7 +691,7 @@ class ReviewedIncidentScheduleTests(unittest.TestCase):
             return one_case(str(len(calls)))
         result = crawler_runner.crawl_scan_ranges(FakeDB(), ranges, fetcher=fetch, sleep_fn=lambda: None)
         self.assertIn("20261024", calls)
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(len(calls), len(crawler_runner.REVIEWED_FAILURE_RANGES) + 1)
         self.assertEqual(result["errors"], 1)
         self.assertFalse(crawler_runner.publication_allowed(result["failed"]))
 

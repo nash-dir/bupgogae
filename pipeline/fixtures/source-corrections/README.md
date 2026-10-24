@@ -40,3 +40,11 @@ published DB; ordinary collection cannot silently alter its reference. The owner
 approved the verified date correction (2004-10-28 to 2004-10-07) and the explicit
 서울고등법원 춘천재판부 correction. Original raw rows and the complete old reference
 remain in the migration audit. See docs/ingestion-integrity-repair-2026-10-24.md.
+
+The full normal crawl additionally exposed 64808 (2008-08-11 to 2008-08-21),
+164098 (광주고등법원 to 제주재판부), and 176537 (부산고등법원 to 창원재판부).
+The owner separately approved all three exact changes. Their public-only metadata
+and complete bodies use the same fixture format and source-bound hashes.
+`KNOWN_METADATA_ERRORS` fixes the five serials, the one permitted changed field
+for each, and a safe reason code. Extra fields, unknown serials or missing entries
+fail with explicit exceptions; this is not a general metadata replacement rule.

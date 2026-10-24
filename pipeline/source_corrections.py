@@ -19,6 +19,26 @@ PROFILE = "nts_judgment_html_sha256_v1"
 LAW_PROFILE = "law_detail_preserve_reference_v1"
 METADATA_PROFILE = "law_detail_metadata_correction_v1"
 
+# Explicitly reviewed exceptions, never a general permission to replace metadata.
+# Exact list/detail/body/previous-reference evidence remains in the JSON registry.
+KNOWN_METADATA_ERRORS = {
+    "69909": {"fields": ("date",), "reason": "official_decision_date"},
+    "185122": {"fields": ("court",), "reason": "official_branch_court"},
+    "64808": {"fields": ("date",), "reason": "official_decision_date"},
+    "164098": {"fields": ("court",), "reason": "official_branch_court"},
+    "176537": {"fields": ("court",), "reason": "official_branch_court"},
+}
+
+
+def validate_metadata_exception(previous, record):
+    exception = KNOWN_METADATA_ERRORS.get(record["serial"])
+    if exception is None or not isinstance(previous, dict) or set(previous) != set(record):
+        raise CorrectionError("known_error_unreviewed_metadata")
+    comparable = dict(previous, date=normalize_decision_date(previous["date"]))
+    changed = {key for key in record if comparable[key] != record[key]}
+    if changed != set(exception["fields"]):
+        raise CorrectionError("known_error_unreviewed_metadata")
+
 
 def explicit_detail_members(value):
     """Only fully written members in a pinned official-detail profile.
@@ -59,6 +79,7 @@ def entries():
         if entry["profile"] == METADATA_PROFILE:
             from compress import compress_case_number, compress_date, compress_case_name, COURT_CODE_MAP
             previous, record, detail = entry["expectedPreviousRaw"], entry["record"], entry["expectedDetail"]
+            validate_metadata_exception(previous, record)
             number, court = normalize_precedent_identity(fields["사건번호"], fields["법원명"], fields["데이터출처명"])
             # Only an explicit, reviewed metadata change on the same full identity.
             # Published reference changes require the separate atomic migration.
@@ -113,6 +134,13 @@ def entries():
                 or len(parse_qs(url.query)["ntstDcmId"]) != 1):
             raise CorrectionError("known_error_invalid_registry")
     return data["entries"]
+
+
+def metadata_entries():
+    reviewed = {key: entry for key, entry in entries().items() if entry["profile"] == METADATA_PROFILE}
+    if {entry["record"]["serial"] for entry in reviewed.values()} != set(KNOWN_METADATA_ERRORS):
+        raise CorrectionError("metadata_migration_inventory_mismatch")
+    return reviewed
 
 
 def fetch_judgment(entry):

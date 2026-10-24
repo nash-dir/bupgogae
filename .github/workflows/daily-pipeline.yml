@@ -25,7 +25,7 @@ on:
         required: false
         type: string
       correct_reviewed_metadata:
-        description: '원문·해시 대조한 69909/185122 메타데이터만 원자적으로 정정 (raw 보존)'
+        description: '원문·해시 대조한 5건의 메타데이터만 원자적으로 정정 (raw 보존)'
         required: false
         type: boolean
         default: false

@@ -8,6 +8,7 @@ import re
 
 from master_db import MasterDB
 from serving_policy import load_policy
+from source_corrections import KNOWN_METADATA_ERRORS
 
 
 def safe_error(error):
@@ -28,7 +29,7 @@ def diagnose(path):
         policy = load_policy(db.conn)
         report["referenceSha256"] = policy.review["referenceSha256"] if policy else None
         report["reviewedMetadataRaw"] = {}
-        for sid in ("69909", "185122"):
+        for sid in KNOWN_METADATA_ERRORS:
             row = db.conn.execute("SELECT serial,case_name,case_number,date,court FROM cases WHERE serial=?", (sid,)).fetchone()
             if row is not None:
                 report["reviewedMetadataRaw"][sid] = dict(zip(

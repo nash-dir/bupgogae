@@ -34,11 +34,14 @@ Court-code mappings already in the reference had not changed.
 | 614417 | 2022노82 | Full normal crawl: 부산고등법원울산재판부 versus 부산고등법원(울산) | Same |
 | 618471 | 2023고단1179, 2024고단1582(병합) | Full normal crawl: list omits second member; detail retains it | Same; preserve both members |
 | 623981 | 2024누10023 | Full normal crawl: list omits (울산) prefix present in official detail case number | Same; retain existing 부산고등법원(울산) |
+| 64808 | 2008도3090 | Full normal crawl: reference/raw says 2008-08-11; official list/detail says 2008-08-21 | Separately owner-approved metadata correction |
+| 164098 | 2011나506 | Full normal crawl: reference/raw says 광주고등법원; official list/detail says 제주재판부 | Same |
+| 176537 | 2014노268 | Full normal crawl: reference/raw says 부산고등법원; official list/detail says 창원재판부 | Same |
 
 The first five failures are an incomplete reviewed replay policy, not evidence
 that the original merged members disappeared. Fresh collection also needs the
 same proof-backed resolver, rather than relying on preexisting provenance rows.
-69909 and 185122 are current upstream metadata differences from the archived raw and
+69909, 185122, 64808, 164098 and 176537 are current upstream metadata differences from the archived raw and
 reference; a parser retry cannot reconcile them. Their precise upstream change
 date is not established by the retained evidence.
 
@@ -48,6 +51,14 @@ also exposed the four additional replay conflicts above in its normal scheduled
 official detail and existing reviewed provenance before adding an exact replay.
 The normal crawl remains mandatory; passing only the original incident windows
 does not satisfy recovery.
+
+Read-only diagnostic 40054878787 of that complete run identified exactly the
+three additional metadata differences above, with no court-code map changes.
+The five-entry correction procedure is explicitly approved by the owner. The
+first two-entry attempt never reached private state or public publication;
+40054036296 was cancelled before publication after the new conflict was found.
+The final migration must start from healthy trusted input, never either failed
+resume artifact. Historical recovery remains disabled.
 
 The trusted finalizer calls `_verify_incremental_health`, which calls the same
 full `export_core()` reference-preservation gate, before creating an R2 client or
@@ -76,6 +87,9 @@ request URLs or administrative fields. Full body SHA-256 values:
 | 614417 | `663d782aa0b87f13accf2309af7d332b21d9ce008dcdf7430c3512460139d625` |
 | 618471 | `d1be78acfff42424d443102901f59fe7fbbeef7417a296d75077c53568287a12` |
 | 623981 | `f5fd076596a665b22b69980848d571252d54d4436d1aa24f43ca688153e217a3` |
+| 64808 | `6021e2ac035ba6e67067aebd0b3bbc4b725c08a2f17918530fbe54e21d3455e9` |
+| 164098 | `703048bc9bdba395194ea956ef01a18682c8b503ecbc7bec196fc762cc7d379f` |
+| 176537 | `8485a1acd61b8883c94666da4e7c92a0ec1e5118d3e609f3680a185b1f96e4c6` |
 
 Proof entry dictionaries bind every current list field, exact detail metadata,
 archived identity, canonical identity and body digest. Future source drift fails
@@ -85,7 +99,7 @@ originals before any writable connection is opened.
 ## Explicit metadata migration
 
 `pipeline/apply_metadata_corrections.py --data-dir DIR` is review-only;
-`--apply` atomically applies only 69909 and 185122. It starts from a healthy export,
+`--apply` atomically applies only the five reviewed metadata corrections. It starts from a healthy export,
 not the corrupt failed-run snapshot. Existing raw rows, inserted_at values,
 quarantine rows, and all unaffected reference records remain intact. New serving
 receipts expose the verified corrected date/court. The old reference payload, the complete healthy pre-migration serving snapshot,
@@ -96,7 +110,7 @@ when the original seven raw fields/hash and existing source-bound recovery recei
 are valid and the reference exactly equals the recovered record. Missing or altered
 proof blocks export; no historical recovery is reapplied.
 The new reference also protects every already-verified serving record and court-code
-assignment added since the original reference was established. Only the two
+assignment added since the original reference was established. Only the five
 reviewed metadata values change. Existing title receipts retain their exact raw/title bindings and are rebound to
 the new reference hash inside the same transaction. Full export must pass before
 commit; any failure rolls back reference and receipt writes. Repeat application
@@ -105,10 +119,19 @@ revalidates source proofs and performs no recovery writes.
 The manual `correct_reviewed_metadata` workflow input defaults to false, is
 restricted to the API-only crawl job, and does not introduce R2 credentials there.
 The ordinary full crawl and existing trusted/public publishing gates still run.
-The explicit metadata-repair run additionally includes all three incident months
+The explicit metadata-repair run additionally includes all eleven reviewed months
 through `--verify-reviewed-ranges`; it never replaces scheduled or backlogged work.
 Failure of any added month still blocks public publication.
 Use `recover_reviewed_historical=false`; the 21 October recoveries are complete.
+
+Known errors are data, not blanket exception handlers: `known-errors.json` holds
+reviewed original-source errors; `reviewed-replays.json` holds exact list/detail
+replay exceptions; `source-corrections.json` holds source-bound serving overlays.
+`KNOWN_METADATA_ERRORS` additionally fixes each of the five serials, its permitted
+changed field and safe reason code. Unknown serials, additional changed fields,
+missing dictionary entries, changed input and changed original bodies raise
+explicit exceptions and continue to block publication. Calendar formatting alone
+is not treated as a second metadata change. No catch-and-continue bypass is added.
 
 ## Local verification boundary
 
@@ -119,6 +142,14 @@ post-migration reference differences remained, and the physical quarantine count
 remained 49,662. The migration itself left the full raw inventory digest unchanged;
 a repeat migration wrote nothing. These results do not establish production
 recovery or the completeness of a normal daily run.
+
+After the five-entry approval, all eleven reviewed months were also replayed
+against that older local copy: 4,250 API rows, 161,195 exported keys,
+`exportError=null`, `referenceDifferenceCount=0`, 49,662 physical quarantine rows.
+The migration left the complete raw digest unchanged and repeat application wrote
+nothing. Live read-only preflight independently verified the current official
+lists, exact detail metadata and complete body hashes for all five corrections.
+These are local validation results, not production publication evidence.
 
 The read-only state diagnostic also supports the authenticated input artifact,
 allowing the healthy pre-crawl state and failed post-crawl state to be distinguished

@@ -109,6 +109,8 @@ BACKLOG_FAILURE_REASONS = {
     "known_error_invalid_registry",
     "known_error_invalid_record",
     "known_error_receipt_mismatch",
+    "known_error_unreviewed_metadata",
+    "metadata_migration_inventory_mismatch",
     "quarantined_raw_changed_requires_review",
     "merged_case_members_removed",
     "reference_metadata_migration_required",
@@ -1525,6 +1527,9 @@ def execute_local_crawl(
 
 REVIEWED_FAILURE_RANGES = (
     ("20130701", "20130731"), ("20240901", "20240930"), ("20241001", "20241031"),
+    ("20220501", "20220531"), ("20230801", "20230831"), ("20241101", "20241130"),
+    ("20080801", "20080831"), ("20120501", "20120531"), ("20141101", "20141130"),
+    ("20041001", "20041031"), ("20170401", "20170430"),
 )
 
 

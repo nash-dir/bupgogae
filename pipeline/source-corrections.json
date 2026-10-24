@@ -450,6 +450,138 @@
         "reviewedAt": "2026-10-24",
         "rule": "Owner-approved explicit metadata correction. Official list and exact detail metadata plus complete judgment body are pinned. Preserve archived raw and old reference payload in the migration audit; replace only this reference record atomically. No global alias or guessed date."
       }
+    },
+    "대법원:64808": {
+      "profile": "law_detail_metadata_correction_v1",
+      "expectedList": {
+        "판례일련번호": "64808",
+        "데이터출처명": "대법원",
+        "사건명": "업무상과실치사",
+        "사건번호": "2008도3090",
+        "선고일자": "2008.08.21",
+        "법원명": "대법원",
+        "사건종류코드": "400102"
+      },
+      "expectedDetail": {
+        "사건명": "업무상과실치사",
+        "사건번호": "2008도3090",
+        "선고일자": "20080821",
+        "법원명": "대법원"
+      },
+      "expectedPreviousRaw": {
+        "serial": "64808",
+        "case_name": "업무상과실치사",
+        "case_number": "2008도3090",
+        "date": "20080811",
+        "court": "대법원"
+      },
+      "expectedReferenceKey": "08Do3090",
+      "expectedReferenceRecord": [
+        64808,
+        1,
+        80811,
+        "업무상과실치사"
+      ],
+      "judgmentSha256": "6021e2ac035ba6e67067aebd0b3bbc4b725c08a2f17918530fbe54e21d3455e9",
+      "record": {
+        "serial": "64808",
+        "case_name": "업무상과실치사",
+        "case_number": "2008도3090",
+        "date": "20080821",
+        "court": "대법원"
+      },
+      "evidence": {
+        "reviewedAt": "2026-10-24",
+        "rule": "Owner-approved explicit metadata correction. Official list and exact detail metadata plus complete judgment body are pinned. Preserve archived raw and old reference payload in the migration audit; replace only this reference record atomically. No global alias or guessed date."
+      }
+    },
+    "대법원:164098": {
+      "profile": "law_detail_metadata_correction_v1",
+      "expectedList": {
+        "판례일련번호": "164098",
+        "데이터출처명": "대법원",
+        "사건명": "손해배상",
+        "사건번호": "2011나506",
+        "선고일자": "2012.05.02",
+        "법원명": "광주고등법원제주재판부",
+        "사건종류코드": "400101"
+      },
+      "expectedDetail": {
+        "사건명": "손해배상",
+        "사건번호": "2011나506",
+        "선고일자": "20120502",
+        "법원명": "광주고법(제주)"
+      },
+      "expectedPreviousRaw": {
+        "serial": "164098",
+        "case_name": "손해배상",
+        "case_number": "2011나506",
+        "date": "20120502",
+        "court": "광주고등법원"
+      },
+      "expectedReferenceKey": "11Na506",
+      "expectedReferenceRecord": [
+        164098,
+        13,
+        120502,
+        "손해배상"
+      ],
+      "judgmentSha256": "703048bc9bdba395194ea956ef01a18682c8b503ecbc7bec196fc762cc7d379f",
+      "record": {
+        "serial": "164098",
+        "case_name": "손해배상",
+        "case_number": "2011나506",
+        "date": "20120502",
+        "court": "광주고등법원제주재판부"
+      },
+      "evidence": {
+        "reviewedAt": "2026-10-24",
+        "rule": "Owner-approved explicit metadata correction. Official list and exact detail metadata plus complete judgment body are pinned. Preserve archived raw and old reference payload in the migration audit; replace only this reference record atomically. No global alias or guessed date."
+      }
+    },
+    "대법원:176537": {
+      "profile": "law_detail_metadata_correction_v1",
+      "expectedList": {
+        "판례일련번호": "176537",
+        "데이터출처명": "대법원",
+        "사건명": "공직선거법위반·특정범죄가중처벌등에관한법률위반(보복협박등)·정보통신망이용촉진및정보보호등에관한법률위반",
+        "사건번호": "2014노268",
+        "선고일자": "2014.11.05",
+        "법원명": "부산고등법원창원재판부",
+        "사건종류코드": "400102"
+      },
+      "expectedDetail": {
+        "사건명": "공직선거법위반·특정범죄가중처벌등에관한법률위반(보복협박등)·정보통신망이용촉진및정보보호등에관한법률위반",
+        "사건번호": "2014노268",
+        "선고일자": "20141105",
+        "법원명": "부산고법(창원)"
+      },
+      "expectedPreviousRaw": {
+        "serial": "176537",
+        "case_name": "공직선거법위반·특정범죄가중처벌등에관한법률위반(보복협박등)·정보통신망이용촉진및정보보호등에관한법률위반",
+        "case_number": "2014노268",
+        "date": "2014.11.05",
+        "court": "부산고등법원"
+      },
+      "expectedReferenceKey": "14No268",
+      "expectedReferenceRecord": [
+        176537,
+        11,
+        141105,
+        "공직선거법위반·특정범죄가중처벌등에관한법률위반(보복협박등)·정보통신망이용촉진및정보보호등에관한법률위반"
+      ],
+      "judgmentSha256": "8485a1acd61b8883c94666da4e7c92a0ec1e5118d3e609f3680a185b1f96e4c6",
+      "record": {
+        "serial": "176537",
+        "case_name": "공직선거법위반·특정범죄가중처벌등에관한법률위반(보복협박등)·정보통신망이용촉진및정보보호등에관한법률위반",
+        "case_number": "2014노268",
+        "date": "20141105",
+        "court": "부산고등법원창원재판부"
+      },
+      "evidence": {
+        "reviewedAt": "2026-10-24",
+        "rule": "Owner-approved explicit metadata correction. Official list and exact detail metadata plus complete judgment body are pinned. Preserve archived raw and old reference payload in the migration audit; replace only this reference record atomically. No global alias or guessed date."
+      }
     }
   }
 }

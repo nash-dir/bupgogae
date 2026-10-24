@@ -592,6 +592,7 @@ def _generation_id() -> str:
 # These explicit enums are safe to expose; arbitrary exception text can contain
 # state endpoints, credentials, or response content.
 STATE_INTEGRITY_REASONS = frozenset({
+    "known_error_unreviewed_metadata", "metadata_migration_inventory_mismatch",
     "reference_record_removed_or_changed", "reference_court_codes_changed",
     "quarantined_raw_changed_requires_review", "quarantine_inventory_changed",
     "known_error_receipt_mismatch", "reference_title_receipt_mismatch",

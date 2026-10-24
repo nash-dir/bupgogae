@@ -512,6 +512,7 @@ class DetcBacklogTests(unittest.TestCase):
 class PublicationGateTests(unittest.TestCase):
     def test_integrity_reasons_remain_classified_without_exposing_unknown_text(self):
         for reason in ("quarantined_raw_changed_requires_review", "merged_case_members_removed",
+                       "known_error_unreviewed_metadata", "metadata_migration_inventory_mismatch",
                        "unsupported_publication_serial", "unreviewed_unexportable_case"):
             self.assertEqual(crawler_runner._safe_failure_reason(ValueError(reason)), reason)
         self.assertEqual(crawler_runner._safe_failure_reason(ValueError("OC=private-token")), "internal_error")
@@ -691,7 +692,7 @@ class ReviewedIncidentScheduleTests(unittest.TestCase):
             return one_case(str(len(calls)))
         result = crawler_runner.crawl_scan_ranges(FakeDB(), ranges, fetcher=fetch, sleep_fn=lambda: None)
         self.assertIn("20261024", calls)
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(len(calls), len(crawler_runner.REVIEWED_FAILURE_RANGES) + 1)
         self.assertEqual(result["errors"], 1)
         self.assertFalse(crawler_runner.publication_allowed(result["failed"]))
 

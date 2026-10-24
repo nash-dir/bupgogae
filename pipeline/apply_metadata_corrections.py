@@ -30,10 +30,7 @@ def raw_digest(conn):
 
 
 def migrate(path, *, apply=False, fetch=current_item, fetch_judgment=None):
-    entries = {key: entry for key, entry in sources.entries().items()
-               if entry["profile"] == sources.METADATA_PROFILE}
-    if {entry["record"]["serial"] for entry in entries.values()} != {"69909", "185122"}:
-        raise ValueError("metadata_migration_inventory_mismatch")
+    entries = sources.metadata_entries()
     pins = sources.digest(entries)
     # Network verification finishes before opening a writable connection.
     receipts = {}
@@ -95,7 +92,8 @@ def migrate(path, *, apply=False, fetch=current_item, fetch_judgment=None):
                 raise ValueError("metadata_migration_no_change")
             index = updated["cases"][key].index(expected)
             updated["cases"][key][index] = replacement
-            changes.append({"key": key, "before": expected, "after": replacement})
+            changes.append({"key": key, "reason": sources.KNOWN_METADATA_ERRORS[sid]["reason"],
+                            "before": expected, "after": replacement})
         updated["court_code_map"] = dict(resolver.code_map)
         after_payload = json.dumps(updated, ensure_ascii=False, separators=(",", ":")).encode()
         after_sha = hashlib.sha256(after_payload).hexdigest()

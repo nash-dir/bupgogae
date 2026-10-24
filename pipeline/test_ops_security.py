@@ -504,6 +504,8 @@ class AtomicStateSyncTests(unittest.TestCase):
                 get_client.assert_not_called()
 
     def test_state_failure_logs_only_allowlisted_integrity_reasons(self):
+        for reason in ("known_error_unreviewed_metadata", "metadata_migration_inventory_mismatch"):
+            self.assertEqual(sync_state.safe_state_failure(ValueError(reason)), reason)
         self.assertEqual(sync_state.safe_state_failure(ValueError("reference_record_removed_or_changed")),
                          "reference_record_removed_or_changed")
         for message in ("https://private.invalid?token=SECRET", "SECRET", "unexpected_reason"):

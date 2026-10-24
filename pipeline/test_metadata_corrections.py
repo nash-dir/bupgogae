@@ -52,14 +52,32 @@ class MetadataCorrectionTests(unittest.TestCase):
     def run_migration(self, **kwargs):
         return migrate(self.path, fetch=self.item, fetch_judgment=self.body, **kwargs)
 
-    def test_two_approved_changes_preserve_all_raw_and_archive_exact_old_reference(self):
+    def test_known_error_dictionary_rejects_unregistered_cases_and_extra_field_changes(self):
+        for entry in self.entries.values():
+            previous, record = entry['expectedPreviousRaw'], entry['record']
+            sources.validate_metadata_exception(previous, record)
+            # Approval to correct one field cannot also replace the case title.
+            with self.subTest(serial=record['serial']), self.assertRaisesRegex(
+                    ValueError, 'known_error_unreviewed_metadata'):
+                sources.validate_metadata_exception(previous, dict(record, case_name='unreviewed title'))
+        entry = next(iter(self.entries.values()))
+        with self.assertRaisesRegex(ValueError, 'known_error_unreviewed_metadata'):
+            sources.validate_metadata_exception(dict(entry['expectedPreviousRaw'], serial='999999999'),
+                                                 dict(entry['record'], serial='999999999'))
+        incomplete = dict(self.entries)
+        incomplete.pop(next(iter(incomplete)))
+        with mock.patch.object(sources, 'entries', return_value=incomplete), self.assertRaisesRegex(
+                ValueError, 'metadata_migration_inventory_mismatch'):
+            self.run_migration(apply=True)
+
+    def test_five_reviewed_changes_preserve_all_raw_and_archive_exact_old_reference(self):
         before_bytes = self.path.read_bytes()
         proposed = self.run_migration()
         self.assertFalse(proposed['applied'])
         self.assertEqual(self.path.read_bytes(), before_bytes)
         result = self.run_migration(apply=True)
         self.assertTrue(result['applied'])
-        self.assertEqual(len(result['changes']), 2)
+        self.assertEqual(len(result['changes']), 5)
         self.assertEqual(proposed['afterSha256'], result['afterSha256'])
         db = MasterDB(str(self.path))
         try:
@@ -171,7 +189,7 @@ class MetadataCorrectionTests(unittest.TestCase):
                             date='20260101', court='대법원')])
         db.close()
         result = self.run_migration(apply=True)
-        self.assertEqual(result['protectedKeys'], 4)
+        self.assertEqual(result['protectedKeys'], 7)
         db = MasterDB(str(self.path))
         try:
             reference = json.loads(db.conn.execute('SELECT reference_payload FROM serving_policy').fetchone()[0])

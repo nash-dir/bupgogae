@@ -143,6 +143,14 @@ remained 49,662. The migration itself left the full raw inventory digest unchang
 a repeat migration wrote nothing. These results do not establish production
 recovery or the completeness of a normal daily run.
 
+After the five-entry approval, all eleven reviewed months were also replayed
+against that older local copy: 4,250 API rows, 161,195 exported keys,
+`exportError=null`, `referenceDifferenceCount=0`, 49,662 physical quarantine rows.
+The migration left the complete raw digest unchanged and repeat application wrote
+nothing. Live read-only preflight independently verified the current official
+lists, exact detail metadata and complete body hashes for all five corrections.
+These are local validation results, not production publication evidence.
+
 The read-only state diagnostic also supports the authenticated input artifact,
 allowing the healthy pre-crawl state and failed post-crawl state to be distinguished
 without adding R2/API credentials or rewriting either database.

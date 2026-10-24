@@ -512,6 +512,7 @@ class DetcBacklogTests(unittest.TestCase):
 class PublicationGateTests(unittest.TestCase):
     def test_integrity_reasons_remain_classified_without_exposing_unknown_text(self):
         for reason in ("quarantined_raw_changed_requires_review", "merged_case_members_removed",
+                       "known_error_unreviewed_metadata", "metadata_migration_inventory_mismatch",
                        "unsupported_publication_serial", "unreviewed_unexportable_case"):
             self.assertEqual(crawler_runner._safe_failure_reason(ValueError(reason)), reason)
         self.assertEqual(crawler_runner._safe_failure_reason(ValueError("OC=private-token")), "internal_error")

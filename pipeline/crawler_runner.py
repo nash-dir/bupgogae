@@ -109,6 +109,8 @@ BACKLOG_FAILURE_REASONS = {
     "known_error_invalid_registry",
     "known_error_invalid_record",
     "known_error_receipt_mismatch",
+    "known_error_unreviewed_metadata",
+    "metadata_migration_inventory_mismatch",
     "quarantined_raw_changed_requires_review",
     "merged_case_members_removed",
     "reference_metadata_migration_required",

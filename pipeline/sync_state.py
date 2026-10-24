@@ -677,7 +677,7 @@ def upload_state(data_dir: str, *, allow_partial_bootstrap: bool = False):
         # Commit point: generation과 previous 기록이 모두 성공한 뒤에만
         # current generation을 교체한다.
         _put_pointer(client, bucket, STATE_POINTER_KEY, pointer)
-        log.info(f"✅ 상태 generation 업로드 완료: {generation}")
+        log.info(f"✅ 상태 generation 업로드 완료: {generation} master_sha256={master_descriptor['sha256']}")
     except Exception as error:
         log.error(f"❌ R2 상태 업로드 실패: {type(error).__name__} (reason={safe_state_failure(error)})")
         sys.exit(1)

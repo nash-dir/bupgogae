@@ -110,3 +110,13 @@ Private execution evidence and source captures are ignored under
 `backfill/2026-10-24-integrity/`. Extension changes from the preceding adapter task
 are outside this repair and must not be included in its commit. R2 adapters.json
 for older extension clients remains untouched.
+
+
+Private readback retains the expected master SHA-256 requirement, SQLite integrity
+check, full export/provenance validation and exact cases/court-map comparison.
+The command-line verifier now obtains its comparison reference from the validated
+current v0.9.0 manifest and its SHA-bound immutable object, rather than an outdated
+packaged DB. Both public requests have fixed-host/path rules, redirect rejection
+and bounded responses. The successful trusted upload logs its validated master
+SHA-256 so a subsequent `verify_state_only` run can check the exact uploaded state
+without crawling or publishing anything.

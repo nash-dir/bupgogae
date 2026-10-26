@@ -621,10 +621,11 @@ def save_failed_dates(
         len(item.get("failed_pages", [])) for item in deduped
         if item.get("kind") != "detc"
     )
-    log.warning(
-        f"  💾 실패 날짜 {precedent_count}건/페이지 {failed_pages}건, "
-        f"헌재 {detc_count}페이지 저장"
-        " → 다음 실행 시 재시도"
+    attempted_failures = sum(not item["last_error"].endswith("not_attempted") for item in deduped)
+    log.debug(
+        f"  💾 재개 작업 저장: 판례 {precedent_count}범위/실패 페이지 {failed_pages}건, "
+        f"헌재 {detc_count}페이지 (실패·기존 보류 {attempted_failures}건, "
+        f"미처리 {len(deduped) - attempted_failures}건)"
     )
 
 
@@ -821,8 +822,14 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
         "court": get_text(item, "법원명"),
     }
     if replay is not None:
-        held = replay(source_raw, get_text(item, "데이터출처명"),
-                      {k: get_text(item, k) for k in LIST_FIELDS})
+        try:
+            held = replay(source_raw, get_text(item, "데이터출처명"),
+                          {k: get_text(item, k) for k in LIST_FIELDS})
+        except CorrectionError as exc:
+            # Only validated public IDs and safe enums; never exception URLs.
+            log.error("  판례 검증 실패 serial=%s range=%s page=%s reason=%s",
+                      serial, date_range, page, _safe_failure_reason(exc))
+            raise RangeFetchError(date_range, page, str(exc)) from exc
         if held is not None:
             if held.get("_excluded_serial") is True:
                 return held

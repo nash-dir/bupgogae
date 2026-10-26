@@ -20,3 +20,9 @@ The first two lists spell the branch as 재판부; 618471 omits the merged
 2024고단1582; 623981 omits the (울산) prefix present in official detail.
 Their four public metadata fields and complete bodies are pinned in the same
 format. Existing raw, reviewed serving records, dates and courts are preserved.
+
+The `*-existing.json.gz` regression fixtures were captured from the official
+list and detail APIs on 2026-10-26 for 624097, 619401 and 622275. They contain
+public list fields, the already reviewed record, and full detail metadata/body.
+They exercise the general existing-identity verification path, not new entries
+in the replay exception dictionary. No API keys or response URLs are stored.

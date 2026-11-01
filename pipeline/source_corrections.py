@@ -101,7 +101,7 @@ def entries():
                 return set(expand_merged_case_numbers(number) if is_merged_case_number(number) else (number,))
             if (fields["데이터출처명"] != "대법원"
                     or set(detail) != {"사건명", "사건번호", "선고일자", "법원명"}
-                    or tuple(expand_merged_case_numbers(record["case_number"])) != tuple(
+                    or tuple(explicit_detail_members(record["case_number"])) != tuple(
                         explicit_detail_members(detail["사건번호"]))
                     or (any(role in detail["사건번호"] for role in ("본소", "반소"))
                         and record["case_number"] != detail["사건번호"])
@@ -112,7 +112,10 @@ def entries():
                     or record["date"] != normalize_decision_date(fields["선고일자"])
                     or record["court"] != previous["court"]
                     or any(record[k] != previous[k] for k in ("serial", "case_name", "date"))
-                    or not re.fullmatch(re.escape(record["court"]) + r"\([가-힣]+\)", detail["법원명"])):
+                    or not re.fullmatch(
+                        "(?:" + re.escape(record["court"]) + "|"
+                        + re.escape(record["court"].replace("고등법원", "고법"))
+                        + r")\([가-힣]+\)", detail["법원명"])):
                 raise CorrectionError("known_error_invalid_registry")
             continue
         if entry["profile"] != PROFILE or fields["데이터출처명"] != "국세법령정보시스템":

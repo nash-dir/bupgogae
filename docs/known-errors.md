@@ -39,6 +39,33 @@ any failed range still blocks public publication.
 Unknown exception text is reduced to a generic safe classification. Known safe
 metadata errors retain their exact enum in crawler and trusted-upload logs.
 
+## Existing reviewed identities and lossy lists
+
+The rotating monthly schedule exposed a structural mismatch: list responses are
+summaries, while `reviewed_recovery_provenance` protects full identities. Requiring
+a new serial-specific replay exception for each omitted counterclaim or branch
+label made previously successful runs fail as the schedule reached another month.
+
+For an existing row with validated persisted review provenance, an unregistered
+Supreme Court list may now be checked against the live official detail. Only a
+leading complete member of a reviewed merged number, or the parent/reformatted
+branch label of the existing court, is a supported list projection. Title and
+date must still match. The complete detail identity must equal the reviewed
+record, including every merged member and branch. An explicit branch prefix in
+the detail number can confirm that same existing branch; it never changes a court.
+
+This path returns the archived row without updating raw, provenance or serving
+identity. It cannot admit a new row, release quarantine, or approve a metadata
+correction. Existing dictionary entries keep their pinned list/body checks with
+no fallback on drift. The new path uses live metadata equality to confirm an
+already approved identity; it does not claim historical body-byte equality.
+The full nonempty detail body is hashed into the diagnostic log for audit.
+Unavailable details and substantive identity changes still block publication.
+
+Routine durable journal writes use DEBUG and distinguish unattempted work from
+failed/held work. Actual failures retain ERROR, public serial, range, and page,
+and continue to enter the durable backlog and block publication.
+
 ## Reviewing another entry
 
 1. Use the read-only state diagnostic to identify the exact protected difference.

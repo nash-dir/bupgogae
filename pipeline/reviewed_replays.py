@@ -1,6 +1,7 @@
 """Source-bound replays of existing reviewed identities, without changing raw."""
 import hashlib
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -8,6 +9,10 @@ import xml.etree.ElementTree as ET
 import requests
 
 from known_errors import CorrectionError, LIST_FIELDS, _unique_object, validate_record
+from law_normalization import expand_merged_case_numbers, is_merged_case_number, normalize_decision_date
+from log_setup import get_logger
+
+log = get_logger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -53,7 +58,7 @@ def verify(fields, archived, corrected, *, fetch=fetch_detail):
     sid = fields.get("판례일련번호", "")
     entry = entries().get(sid)
     if entry is None:
-        return False
+        return verify_existing_identity(fields, archived, corrected, fetch=fetch)
     if (fields != entry["expectedList"] or archived != entry["expectedArchived"]
             or corrected != entry["record"]):
         raise CorrectionError("known_error_input_changed")
@@ -61,6 +66,47 @@ def verify(fields, archived, corrected, *, fetch=fetch_detail):
     if (detail["metadata"] != entry["expectedDetail"]
             or hashlib.sha256(detail["body"].encode()).hexdigest() != entry["bodySha256"]):
         raise CorrectionError("known_error_source_changed")
+    return True
+
+
+def verify_existing_identity(fields, archived, corrected, *, fetch=fetch_detail):
+    """Confirm a lossy list against an ALREADY reviewed identity, without writes.
+
+    This is not a resolver for new rows or permission to change canonical data.
+    The caller must validate persisted provenance before calling. Pinned entries
+    above retain their stronger exact-input/body checks and never fall back here.
+    """
+    sid = fields.get("판례일련번호", "")
+    if (fields.get("데이터출처명") != "대법원" or not re.fullmatch(r"[0-9]{1,32}", sid)
+            or archived.get("serial") != sid or corrected.get("serial") != sid):
+        return False
+    validate_record(corrected)
+    number, court = corrected["case_number"], corrected["court"]
+    numbers = {number}
+    if is_merged_case_number(number):
+        # Only the leading complete member is a supported list projection.
+        numbers.add(expand_merged_case_numbers(number)[0])
+    courts = {court}
+    branch = re.fullmatch(r"(.+법원)\(([가-힣]+)\)", court)
+    if branch:
+        courts.update({branch[1], branch[1] + branch[2] + "재판부"})
+    if (fields.get("사건명") != corrected["case_name"]
+            or normalize_decision_date(fields.get("선고일자", "")) != corrected["date"]
+            or fields.get("사건번호") not in numbers or fields.get("법원명") not in courts):
+        return False
+    detail = fetch(sid)
+    expected = {"사건명": corrected["case_name"], "사건번호": number,
+                "선고일자": corrected["date"], "법원명": court}
+    # The detail may encode a branch explicitly in the case-number prefix.
+    # Bind both parts to the existing court; never guess a branch from a list.
+    alternatives = [expected]
+    if branch:
+        alternatives.append(dict(expected, 사건번호=f"({branch[2]}){number}", 법원명=branch[1]))
+    if (detail.get("metadata") not in alternatives
+            or not isinstance(detail.get("body"), str) or not detail["body"].strip()):
+        raise CorrectionError("known_error_source_changed")
+    log.info("  reviewed detail replay serial=%s body_sha256=%s", sid,
+             hashlib.sha256(detail["body"].encode()).hexdigest())
     return True
 
 

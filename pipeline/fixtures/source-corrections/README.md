@@ -48,3 +48,5 @@ and complete bodies use the same fixture format and source-bound hashes.
 `KNOWN_METADATA_ERRORS` fixes the five serials, the one permitted changed field
 for each, and a safe reason code. Extra fields, unknown serials or missing entries
 fail with explicit exceptions; this is not a general metadata replacement rule.
+
+2026-11-01: 145396 and 182768 pin complete official detail JSON, including all four metadata fields and judgment bodies. Exact list and detail evidence preserves the existing published parent court codes 13/14 despite branch labels in the lists; it does not change historical court identity.

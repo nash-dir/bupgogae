@@ -582,6 +582,80 @@
         "reviewedAt": "2026-10-24",
         "rule": "Owner-approved explicit metadata correction. Official list and exact detail metadata plus complete judgment body are pinned. Preserve archived raw and old reference payload in the migration audit; replace only this reference record atomically. No global alias or guessed date."
       }
+    },
+    "대법원:145396": {
+      "profile": "law_detail_preserve_reference_v1",
+      "expectedList": {
+        "판례일련번호": "145396",
+        "데이터출처명": "대법원",
+        "사건명": "종합주류도매업의판매장이전불허가처분취소",
+        "사건번호": "2010누25",
+        "선고일자": "2010.07.07",
+        "법원명": "광주고등법원제주재판부",
+        "사건종류코드": "400107"
+      },
+      "expectedDetail": {
+        "사건명": "종합주류도매업의판매장이전불허가처분취소",
+        "사건번호": "2010누25",
+        "선고일자": "20100707",
+        "법원명": "광주고법(제주)"
+      },
+      "expectedPreviousRaw": {
+        "serial": "145396",
+        "case_name": "종합주류도매업의판매장이전불허가처분취소",
+        "case_number": "2010누25",
+        "date": "20100707",
+        "court": "광주고등법원"
+      },
+      "record": {
+        "serial": "145396",
+        "case_name": "종합주류도매업의판매장이전불허가처분취소",
+        "case_number": "2010누25",
+        "date": "20100707",
+        "court": "광주고등법원"
+      },
+      "judgmentSha256": "d943ef8b4c358c37a7fd0f331d40dbda4d0f92474c883c844f0065d662efe944",
+      "evidence": {
+        "rule": "Exact official detail and complete judgment verified. Preserve the published parent court identity; branch spelling is source evidence only. No reference record or raw field is replaced by an inferred alias.",
+        "reviewedAt": "2026-11-01"
+      }
+    },
+    "대법원:182768": {
+      "profile": "law_detail_preserve_reference_v1",
+      "expectedList": {
+        "판례일련번호": "182768",
+        "데이터출처명": "대법원",
+        "사건명": "법인세부과처분취소",
+        "사건번호": "2014누5591",
+        "선고일자": "2015.07.22",
+        "법원명": "대전고등법원청주재판부",
+        "사건종류코드": "400108"
+      },
+      "expectedDetail": {
+        "사건명": "법인세부과처분취소",
+        "사건번호": "2014누5591",
+        "선고일자": "20150722",
+        "법원명": "대전고등법원(청주)"
+      },
+      "expectedPreviousRaw": {
+        "serial": "182768",
+        "case_name": "법인세부과처분취소",
+        "case_number": "2014누5591",
+        "date": "20150722",
+        "court": "대전고등법원"
+      },
+      "record": {
+        "serial": "182768",
+        "case_name": "법인세부과처분취소",
+        "case_number": "2014누5591",
+        "date": "20150722",
+        "court": "대전고등법원"
+      },
+      "judgmentSha256": "55216dbab9d18180954ca97378c0b3f1ae323ba9fe6a2e801147bc614d2aefc2",
+      "evidence": {
+        "rule": "Exact official detail and complete judgment verified. Preserve the published parent court identity; branch spelling is source evidence only. No reference record or raw field is replaced by an inferred alias.",
+        "reviewedAt": "2026-11-01"
+      }
     }
   }
 }

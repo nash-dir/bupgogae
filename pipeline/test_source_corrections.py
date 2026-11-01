@@ -21,6 +21,32 @@ FIXTURES = Path(__file__).parent / "fixtures" / "source-corrections"
 
 
 class SourceCorrectionTests(unittest.TestCase):
+    def test_single_member_branch_details_preserve_reference_parent_court(self):
+        for sid in ('145396', '182768'):
+            entry = corrections.entries()['대법원:' + sid]
+            detail = json.loads(gzip.decompress((FIXTURES / (sid + '-law-detail.json.gz')).read_bytes()))
+            with self.subTest(serial=sid), tempfile.TemporaryDirectory() as folder:
+                with mock.patch('reviewed_replays.fetch_detail', return_value=detail):
+                    receipt = corrections.resolve(entry['expectedList'])
+                self.assertEqual(receipt['record'], entry['expectedPreviousRaw'])
+                with self.assertRaisesRegex(CorrectionError, 'source_changed'):
+                    corrections.resolve(entry['expectedList'], fetch=lambda _: detail['body'].encode() + b' ')
+                db = MasterDB(str(Path(folder) / 'master.db'))
+                try:
+                    item = self.item(entry['expectedList'])
+                    with mock.patch.object(corrections, 'resolve', return_value=receipt):
+                        row = runner._precedent_case(item, entry['record']['date'], 1)
+                    db.upsert_raw([row])
+                    before = list(db.conn.iterdump())
+                    exported = db.export_core()
+                    self.assertEqual(db.upsert_raw([row]), (0, 0, 1))
+                    self.assertEqual(list(db.conn.iterdump()), before)
+                    self.assertEqual(db.export_core(), exported)
+                    self.assertEqual(db.court_resolver.code_map[entry['record']['court']],
+                                     13 if sid == '145396' else 14)
+                finally:
+                    db.close()
+
     def setUp(self):
         self.entry = copy.deepcopy(next(iter(corrections.entries().values())))
         self.fields = dict(self.entry["expectedList"])

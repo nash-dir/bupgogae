@@ -12,6 +12,8 @@ DB 동기화 견고성·Drift 안전망의 핵심 플로우를 검증한다.
 | `e2e/sync.spec.js` | 동기화 견고성 + drift 안전망 11개 시나리오 |
 | `e2e/render.spec.js` | Gemini 형태 DOM의 다중 렌더링과 DB-canonical 4글자·긴 숫자열 경계 3개 시나리오 |
 | `e2e/migration.spec.js` | 동일 확장 경로·브라우저 프로필에서 실제 v1 legacy IndexedDB를 v2로 올리고, 비파괴 fallback 조회와 재시작 보존을 검증 |
+| `e2e/popup-qa.spec.js` | 팝업의 DB 표시, 글자 대비, 스크롤 접근, 전체 OFF 보존 |
+| `e2e/sidebar-journey.spec.js` | 원문 뷰어와 오류 복구, 키보드, 필터 재스캔, 좁은 화면 tooltip |
 
 > Intelligent Document Reader(viewer)는 이번 0.9.0 무결성 릴리스 범위에
 > 포함하지 않으며 별도 기능 릴리스로 보류한다.

@@ -17,7 +17,7 @@
  */
 
 // 순수 검증·정제 유틸 로드 (테스트 가능한 무부수효과 로직).
-// isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity /
+// validateDbIntegrity /
 // deriveShortCaseKeys를 전역에 제공.
 importScripts('sync-utils.js');
 
@@ -29,7 +29,6 @@ const API_BASE_URL = 'https://api.bup.live/bupgogae/';
 const DB_CONTRACT = 'v0.9.0';
 const DB_URL = `${API_BASE_URL}db-${DB_CONTRACT}.json.gz`;
 
-const ADAPTERS_URL = 'https://api.bup.live/bupgogae/adapters.json'; // 원격 어댑터 셀렉터 설정
 const MANIFEST_URL = `${API_BASE_URL}manifest-${DB_CONTRACT}.json`; // 계약별 commit marker
 const BUNDLED_DB_URL = 'data/db.json'; // 로컬 디버깅용 폴백
 const DB_NAME = 'bupgogae';
@@ -47,15 +46,8 @@ const SYNC_INTERVAL_MINUTES = 60 * 6; // 6시간마다 동기화 시도
 
 // [보안 상수]
 const MAX_DB_SIZE_BYTES = 50 * 1024 * 1024; // 50MB 제한
-const MAX_ADAPTER_CONFIG_BYTES = 256 * 1024; // remote selector JSON 256KiB 제한
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_LAW_HTML_BYTES = 5 * 1024 * 1024;
-const MAX_ADAPTER_SITES = 50;
-const REQUIRED_ADAPTER_SITE_IDS = [
-  'gemini', 'chatgpt', 'claude', 'copilot', 'perplexity', 'grok',
-];
-const MAX_SELECTORS_PER_SITE = 10;   // 사이트당 최대 선택자 개수
-const MAX_SELECTOR_LENGTH = 150;     // 선택자 하나당 최대 길이 (문자 수)
 
 // [무결성 검증 상수]
 const MIN_KEYS_CORE = 100_000;       // Core DB 최소 키 수 (미달 시 파이프라인 장애 판정)
@@ -67,8 +59,6 @@ const FETCH_TIMEOUT_MS = 60_000;        // DB fetch 행(hang) 방지 타임아�
 const LAW_FETCH_TIMEOUT_MS = 20_000;
 const SYNC_LEDGER_KEY = 'bupgogae_sync_ledger'; // 동기화 시도 원장 (storage.local)
 const SYNC_LEDGER_MAX = 20;             // 원장 보존 개수 (최신순)
-const ADAPTER_SYNC_STATE_KEY = 'bupgogae_adapter_sync_state';
-const ADAPTER_ATTEMPT_COOLDOWN_MS = 15 * 60 * 1000;
 
 // [Drift 안전망 상수] — manifest 정답지 대조 → 캐시버스터 치유
 const DRIFT = {
@@ -86,12 +76,10 @@ let _syncActive = false;
 let _syncInFlight = null;
 // 여러 탭의 진입 신호를 하나의 manifest 대조로 합쳐 outage herd를 막는다.
 let _driftCheckInFlight = null;
-// 여러 탭 initAdapters의 같은 remote-config 요청을 한 번으로 합친다.
-let _adapterFetchInFlight = null;
 // sync와 drift가 동시에 요구하는 commit manifest 요청도 합친다.
 let _manifestFetchInFlight = null;
 
-// isValidCssSelector / sanitizeAdaptersConfig / validateDbIntegrity /
+// validateDbIntegrity /
 // deriveShortCaseKeys는
 // sync-utils.js(importScripts)에서 전역으로 제공됨.
 
@@ -661,9 +649,6 @@ async function runSyncDatabase(opts = {}) {
     try { await maybeLoadBundledDB(); } catch {}
   }
 
-  // ── 어댑터 원격 설정 동기화 (DB 동기화와 독립적으로 실행) ──
-  try { await fetchAdaptersConfig(); } catch {}
-
   return result;
 }
 
@@ -883,34 +868,6 @@ function resolveCoreDbUrl(core) {
   return resolved.href;
 }
 
-// ============================================================
-// 3-1. 어댑터 원격 설정 Fetch (Remote Config)
-// ============================================================
-
-/**
- * 원격 서버에서 어댑터 셀렉터 JSON을 fetch하여 chrome.storage.local에 저장.
- * 순수 JSON만 파싱 — eval/innerHTML/new Function 일체 금지 (MV3 CSP 준수).
- *
- * 스키마 예시:
- *   {
- *     "version": "2026-03-22",
- *     "adapters": {
- *       "chatgpt": {
- *         "responseSelectors": ["div[data-message-author-role=\"assistant\"] .markdown"],
- *         "streamingIndicator": ".result-streaming"
- *       }
- *     }
- *   }
- *
- * 실패 시 기존 저장값을 유지 (silent fail) — 오프라인 생존력 보장.
- */
-function fetchAdaptersConfig() {
-  if (_adapterFetchInFlight) return _adapterFetchInFlight;
-  _adapterFetchInFlight = runFetchAdaptersConfig()
-    .finally(() => { _adapterFetchInFlight = null; });
-  return _adapterFetchInFlight;
-}
-
 async function readResponseTextWithLimit(res, maxBytes) {
   const declared = Number(res.headers?.get?.('Content-Length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
@@ -1020,171 +977,6 @@ async function runFetchValidatedManifest() {
   return manifest;
 }
 
-async function runFetchAdaptersConfig() {
-  console.log('[bupgogae] 어댑터 원격 설정 fetch 시도...');
-
-  const now = Date.now();
-  let adapterState = {};
-  let existingConfig = null;
-  try {
-    const stored = await chrome.storage.local.get([
-      ADAPTER_SYNC_STATE_KEY,
-      'bupgogae_remote_adapters',
-    ]);
-    adapterState = stored[ADAPTER_SYNC_STATE_KEY];
-    if (!adapterState || typeof adapterState !== 'object' || Array.isArray(adapterState)) {
-      adapterState = {};
-    }
-    existingConfig = stored.bupgogae_remote_adapters || null;
-
-    // selector miss를 포함한 모든 자동 호출은 같은 영속 cooldown을 존중한다.
-    // 실패 outage도 탭/Service Worker 재시작을 넘어 throttle한다.
-    if (Number.isFinite(adapterState.lastAttemptAt) &&
-        now - adapterState.lastAttemptAt < ADAPTER_ATTEMPT_COOLDOWN_MS) {
-      return {
-        success: true,
-        outcome: 'throttled',
-        ...(existingConfig?.version ? { version: existingConfig.version } : {}),
-      };
-    }
-    await chrome.storage.local.set({
-      [ADAPTER_SYNC_STATE_KEY]: { ...adapterState, lastAttemptAt: now },
-    });
-
-    const headers = { 'Accept': 'application/json' };
-    const conditionalETag = typeof adapterState.etag === 'string' && adapterState.etag.trim()
-      ? adapterState.etag
-      : null;
-    if (conditionalETag) headers['If-None-Match'] = conditionalETag;
-
-    const res = await fetch(ADAPTERS_URL, {
-      headers,
-      // 행 방지: 응답 없는 원격 설정이 동기화 응답 전체를 막지 않도록
-      signal: AbortSignal.timeout(DRIFT.MANIFEST_TIMEOUT_MS),
-    });
-
-    if (res.status === 304) {
-      const existingAdapters = existingConfig?.adapters;
-      if (!conditionalETag || !existingAdapters || typeof existingAdapters !== 'object' ||
-          Array.isArray(existingAdapters) || Object.keys(existingAdapters).length === 0 ||
-          REQUIRED_ADAPTER_SITE_IDS.some((siteId) => !existingAdapters[siteId])) {
-        await chrome.storage.local.set({
-          [ADAPTER_SYNC_STATE_KEY]: {
-            ...adapterState, lastAttemptAt: now, etag: null,
-          },
-        }).catch(() => {});
-        return {
-          success: false,
-          outcome: 'invalid_payload',
-          error: '유효한 ETag/LKG 없는 304',
-        };
-      }
-      await chrome.storage.local.set({
-        [ADAPTER_SYNC_STATE_KEY]: {
-          ...adapterState,
-          lastAttemptAt: now,
-          lastSuccessAt: now,
-          etag: conditionalETag,
-          version: existingConfig.version,
-        },
-      });
-      return { success: true, outcome: 'not_modified', version: existingConfig.version };
-    }
-
-    if (!res.ok) {
-      console.warn(`[bupgogae] 어댑터 설정 fetch 실패: HTTP ${res.status}`);
-      return { success: false, outcome: 'fetch_failed', error: `HTTP ${res.status}` };
-    }
-
-    const config = await readJsonResponseWithLimit(res, MAX_ADAPTER_CONFIG_BYTES);
-
-    const versionText = typeof config?.version === 'string' ? config.version : '';
-    const versionMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(versionText);
-    const versionValidation = versionMatch
-      ? validateVersionDate(`${versionMatch[1]}${versionMatch[2]}${versionMatch[3]}`)
-      : { ok: false };
-    if (!versionValidation.ok) {
-      return { success: false, outcome: 'invalid_payload', error: 'version 형식 오류' };
-    }
-
-    // 기본 무결성 검증: 비어 있지 않은 adapters 객체 존재 여부
-    if (!config || !config.adapters || typeof config.adapters !== 'object' ||
-        Array.isArray(config.adapters)) {
-      console.warn('[bupgogae] 어댑터 설정 형식 오류 — adapters 객체 없음');
-      return { success: false, outcome: 'invalid_payload', error: 'adapters 객체 없음' };
-    }
-    if (Object.keys(config.adapters).length === 0) {
-      return { success: false, outcome: 'invalid_payload', error: '빈 adapters 거부' };
-    }
-    if (Object.keys(config.adapters).length > MAX_ADAPTER_SITES) {
-      console.warn('[bupgogae] 어댑터 설정 형식 오류 — 사이트 수 상한 초과');
-      return {
-        success: false,
-        outcome: 'invalid_payload',
-        error: `사이트 수 ${MAX_ADAPTER_SITES}개 상한 초과`,
-      };
-    }
-    if (Object.values(config.adapters).some((siteConfig) =>
-      !siteConfig || typeof siteConfig !== 'object' || Array.isArray(siteConfig))) {
-      console.warn('[bupgogae] 어댑터 설정 형식 오류 — 사이트 설정 객체 불량');
-      return {
-        success: false,
-        outcome: 'invalid_payload',
-        error: '사이트 설정 객체 불량',
-      };
-    }
-    const missingSites = REQUIRED_ADAPTER_SITE_IDS.filter(
-      (siteId) => !Object.hasOwn(config.adapters, siteId),
-    );
-    if (missingSites.length > 0) {
-      return {
-        success: false,
-        outcome: 'invalid_payload',
-        error: `필수 adapter 누락: ${missingSites.join(', ')}`,
-      };
-    }
-
-    const existingVersion = existingConfig?.version;
-    if (typeof existingVersion === 'string' &&
-        /^\d{4}-\d{2}-\d{2}$/.test(existingVersion) && versionText < existingVersion) {
-      console.warn(`[bupgogae] 어댑터 설정 downgrade 차단: remote=${versionText}, local=${existingVersion}`);
-      return { success: true, outcome: 'downgrade_blocked', version: existingVersion };
-    }
-
-    // 🚨 보안 검증 (Sanitization) — 화이트리스트 기반 (sync-utils)
-    sanitizeAdaptersConfig(config, {
-      maxPerSite: MAX_SELECTORS_PER_SITE,
-      maxLen: MAX_SELECTOR_LENGTH,
-      maxSites: MAX_ADAPTER_SITES,
-    });
-
-    const etag = res.headers?.get?.('ETag') || null;
-    await chrome.storage.local.set({
-      bupgogae_remote_adapters: config,
-      [ADAPTER_SYNC_STATE_KEY]: {
-        lastAttemptAt: now,
-        lastSuccessAt: now,
-        etag,
-        version: versionText,
-      },
-    });
-    console.log(`[bupgogae] ✅ 어댑터 원격 설정 저장 완료 (ver=${config.version || '?'})`);
-    return {
-      success: true,
-      outcome: 'updated',
-      ...(config.version ? { version: config.version } : {}),
-    };
-
-  } catch (err) {
-    // 네트워크 오류, 파싱 오류 등 — 기존 저장값 유지 (silent fail)
-    console.warn('[bupgogae] 어댑터 원격 설정 fetch 실패 (기존값 유지):', err.message);
-    return {
-      success: false,
-      outcome: err?.outcome || 'fetch_failed',
-      error: err?.message || String(err),
-    };
-  }
-}
 
 /**
  * 번들 DB 폴백 — R2 동기화 실패 시 shouldLoadBundled 게이트 통과 시에만 로드.
@@ -1595,11 +1387,25 @@ async function fetchLawHtml(rawUrl) {
 // 6. Chrome Extension 이벤트 바인딩
 // ============================================================
 
+/** 구버전의 원격 DOM 설정 캐시만 제거한다. DB/환경설정은 유지한다. */
+async function clearLegacyAdapterCache() {
+  try {
+    await chrome.storage.local.remove([
+      'bupgogae_remote_adapters',
+      'bupgogae_adapter_sync_state',
+    ]);
+  } catch (err) {
+    console.warn('[bupgogae] 이전 어댑터 캐시 정리 실패:', err.message);
+  }
+}
+
 /**
  * 확장프로그램 설치 시 — R2에서 풀 DB 동기화 + 알람 등록.
  */
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log(`[bupgogae] 설치/업데이트: ${details.reason}`);
+
+  await clearLegacyAdapterCache();
 
   // 주기적 동기화 알람 등록
   await chrome.alarms.create(ALARM_NAME, {
@@ -1607,11 +1413,10 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     periodInMinutes: SYNC_INTERVAL_MINUTES,
   });
 
-  // 설치/업데이트 시 Circuit Breaker 카운터 초기화 (이전 버전 누적 스트라이크 제거)
+  // 설치/업데이트 시 Circuit Breaker 카운터만 초기화한다. 사용자 OFF 설정은 보존한다.
   await chrome.storage.local.remove([
     'bupgogae_circuit_strikes',
     'bupgogae_circuit_fast_streak',
-    'bupgogae_disabled_global',
   ]);
 
   // 설치/업데이트 시 R2에서 동기화 시도
@@ -1633,6 +1438,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
  */
 chrome.runtime.onStartup.addListener(async () => {
   console.log('[bupgogae] 브라우저 시작');
+  await clearLegacyAdapterCache();
 
   const alarm = await chrome.alarms.get(ALARM_NAME);
   if (!alarm) {
@@ -1693,7 +1499,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'FORCE_SYNC') {
-    // 수동 동기화: DB + 어댑터 설정 모두 동기화 (syncDatabase 내부에서 fetchAdaptersConfig 호출)
+    // 수동 판례 DB 동기화
     // 정직한 결과 보고: 실패를 success:true로 가장하지 않는다 (0.8.0 사고의 직접 원인)
     syncDatabase({ trigger: 'force' })
       .then(result => sendResponse({
@@ -1713,14 +1519,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         checked: false, skipped: 'error', drift: false,
         action: 'none', reasons: [], error: err.message,
       }));
-    return true;
-  }
-
-  // ── 어댑터 원격 설정만 단독 fetch (Content Script Auto-Fetch 트리거) ──
-  if (message.type === 'FETCH_ADAPTERS') {
-    fetchAdaptersConfig()
-      .then(result => sendResponse(result))
-      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
@@ -2063,7 +1861,6 @@ if (typeof module !== 'undefined' && module.exports) {
     syncDatabase,
     fetchDB,
     fetchValidatedManifest,
-    fetchAdaptersConfig,
     fetchLawHtml,
     verifyDbFreshness,
     lookupCase,
@@ -2076,7 +1873,6 @@ if (typeof module !== 'undefined' && module.exports) {
       _cachedDB = null;
       _syncInFlight = null;
       _driftCheckInFlight = null;
-      _adapterFetchInFlight = null;
       _manifestFetchInFlight = null;
       _metadataInFlight = null;
     },

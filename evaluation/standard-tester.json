@@ -1,0 +1,186 @@
+{
+  "schema": 1,
+  "description": "사용자가 제공한 10행 QA 표와 현재 제품 동작을 분리해 기록한다. 사용자 구분·기대 결과는 원문 보존 자료이며 법적 존재·사건 내용의 정답으로 간주하지 않는다. DB 미확인은 사건의 부존재를 뜻하지 않는다.",
+  "originalPrompt": "prompts/user-case-table.md",
+  "observedAt": "2026-11-02",
+  "recordedBundle": {
+    "version": "20261018",
+    "keys": 161080,
+    "sha256": "40bc539ccd6796ee0639e67ade19290a81720a7e2f7f54ad878149a7cad01b17"
+  },
+  "notes": [
+    "현재 제품은 대법원에 한정하지 않으며 가합 등 하급심 사건부호도 추출한다.",
+    "현재 제품은 두 자리 연도를 지원하므로 24다12345는 2024년 사건번호 후보로 처리한다.",
+    "2019다0은 추출된 뒤 검증 단계에서 일련번호 0으로 거부되어 빨간 배지가 된다.",
+    "2013다61381의 번들 레코드는 표에 적힌 통상임금 사건 설명과 다르다. 번들 제목은 일제 강제동원 손해배상청구, 날짜는 2018-10-30이다. 번호 조회 성공은 사용자가 붙인 사건 설명의 정확성을 보장하지 않는다.",
+    "기록한 bundle hash는 재현용 메타데이터이며 모든 향후 bundle 업데이트를 금지하는 pin은 아니다. 대상 10건의 실제 lookup 결과가 바뀌면 fixture의 expected 필드를 다시 검토한다."
+  ],
+  "cases": [
+    {
+      "row": 1,
+      "raw": "2016도10912",
+      "requested": {
+        "classification": "실제 (양심적 병역거부, 전원합의체 2018.11.1.)",
+        "expectation": "regex ✅ / DB ✅"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "16Do10912",
+        "badge": "green",
+        "records": [
+          [
+            206264,
+            1,
+            181101,
+            "병역법위반"
+          ]
+        ]
+      }
+    },
+    {
+      "row": 2,
+      "raw": "2013다61381",
+      "requested": {
+        "classification": "실제 (통상임금, 전원합의체 2013.12.18.)",
+        "expectation": "regex ✅ / DB ✅"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "13Da61381",
+        "badge": "green",
+        "records": [
+          [
+            204201,
+            1,
+            181030,
+            "손해배상(기)(일제 강제동원 피해자의 일본기업을 상대로 한 손해배상청구 사건)"
+          ]
+        ]
+      }
+    },
+    {
+      "row": 3,
+      "raw": "2023다298765",
+      "requested": {
+        "classification": "가짜 (형식만 유효)",
+        "expectation": "regex ✅ / DB ❌"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "23Da298765",
+        "badge": "orange",
+        "records": []
+      }
+    },
+    {
+      "row": 4,
+      "raw": "2021도14502",
+      "requested": {
+        "classification": "가짜 (형식만 유효)",
+        "expectation": "regex ✅ / DB ❌"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "21Do14502",
+        "badge": "orange",
+        "records": []
+      }
+    },
+    {
+      "row": 5,
+      "raw": "2022두38871",
+      "requested": {
+        "classification": "가짜 (형식만 유효)",
+        "expectation": "regex ✅ / DB ❌"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "22Du38871",
+        "badge": "orange",
+        "records": []
+      }
+    },
+    {
+      "row": 6,
+      "raw": "2020후11234",
+      "requested": {
+        "classification": "가짜 (형식만 유효)",
+        "expectation": "regex ✅ / DB ❌"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "20Hu11234",
+        "badge": "orange",
+        "records": []
+      }
+    },
+    {
+      "row": 7,
+      "raw": "2018므15321",
+      "requested": {
+        "classification": "가짜 (형식만 유효)",
+        "expectation": "regex ✅ / DB ❌"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "18Meu15321",
+        "badge": "orange",
+        "records": []
+      }
+    },
+    {
+      "row": 8,
+      "raw": "2024가합5678",
+      "requested": {
+        "classification": "형식은 정상이나 1심(지방법원) 사건",
+        "expectation": "대법원 한정이면 regex ❌"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "24Gah5678",
+        "badge": "orange",
+        "records": []
+      }
+    },
+    {
+      "row": 9,
+      "raw": "24다12345",
+      "requested": {
+        "classification": "연도 2자리 (형식 오류)",
+        "expectation": "regex ❌"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": true,
+        "key": "24Da12345",
+        "badge": "orange",
+        "records": []
+      }
+    },
+    {
+      "row": 10,
+      "raw": "2019다0",
+      "requested": {
+        "classification": "일련번호 0 (비정상)",
+        "expectation": "regex ❌ (일련번호 `[1-9]\\d{0,5}`일 때)"
+      },
+      "expected": {
+        "extracted": true,
+        "valid": false,
+        "key": "19Da0",
+        "badge": "red",
+        "records": []
+      }
+    }
+  ],
+  "standardPrompt": "prompts/standard-tester.md",
+  "validationAsOf": "2026-11-02T12:00:00Z"
+}

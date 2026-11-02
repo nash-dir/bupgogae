@@ -65,6 +65,8 @@ jobs:
 
       - run: npm run eval:extraction
 
+      - run: npm run eval:standard
+
   pipeline:
     name: 파이프라인 단위 테스트 (Python)
     runs-on: ubuntu-latest

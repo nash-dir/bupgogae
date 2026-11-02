@@ -22,7 +22,6 @@ test('병합 원문 하나의 5개 키를 같은 검증 snapshot에서 모두 �
     const url = route.request().url();
     if (url.includes('/manifest-v0.9.0.json')) return route.fulfill({ contentType: 'application/json', body: manifest });
     if (url.includes('/db-v0.9.0.json.gz')) return route.fulfill({ contentType: 'application/json', body });
-    if (url.includes('/adapters.json')) return route.fulfill({ contentType: 'application/json', body: '{"adapters":{}}' });
     return route.fulfill({ status: 404, body: 'not found' });
   });
   const sync = await extensionPage.evaluate(() => new Promise(resolve => {

@@ -17,7 +17,9 @@ body {
   color: #e0e0e0;
   font-size: 13px;
   line-height: 1.5;
-  overflow: hidden;
+  max-height: 600px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* --- Header --- */
@@ -65,7 +67,7 @@ body {
 
 .popup-site-label {
   font-size: 11px;
-  color: #7777aa;
+  color: #8888aa;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -114,7 +116,7 @@ body {
 
 .popup-toggle-desc {
   font-size: 11px;
-  color: #7777aa;
+  color: #8888aa;
 }
 
 .popup-divider {
@@ -212,7 +214,7 @@ body {
 .popup-db-date {
   font-size: 10px;
   font-weight: 400;
-  color: #666688;
+  color: #9292b7;
   letter-spacing: 0.2px;
 }
 
@@ -250,7 +252,7 @@ body {
   margin-top: 2px;
   font-size: 10px;
   font-weight: 400;
-  color: #666688;
+  color: #9292b7;
   letter-spacing: 0.2px;
 }
 
@@ -260,11 +262,11 @@ body {
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 10px;
-  color: #555577;
+  color: #9292b7;
 }
 
 .popup-contact a {
-  color: #7777bb;
+  color: #9999dd;
   text-decoration: none;
 }
 
@@ -318,7 +320,7 @@ body {
 .popup-section-arrow {
   font-size: 11px;
   transition: transform 0.2s ease;
-  color: #666688;
+  color: #9292b7;
 }
 
 .popup-section-arrow.open {
@@ -370,13 +372,13 @@ body {
 }
 
 .popup-ledger-time {
-  color: #666688;
+  color: #9292b7;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .popup-ledger-trigger {
-  color: #7777aa;
+  color: #8888aa;
   flex-shrink: 0;
 }
 
@@ -394,12 +396,12 @@ body {
 
 .popup-ledger-duration {
   margin-left: auto;
-  color: #666688;
+  color: #9292b7;
   font-variant-numeric: tabular-nums;
 }
 
 .popup-ledger-empty {
-  color: #666688;
+  color: #9292b7;
   font-style: italic;
   border-bottom: none !important;
 }

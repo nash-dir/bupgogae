@@ -29,7 +29,6 @@ module.exports = [
         __dirname: 'readonly', exports: 'writable', global: 'writable',
         isFinite: 'readonly', parseFloat: 'readonly', parseInt: 'readonly',
         bupgogaePrecedentBadge: 'readonly',
-        isValidCssSelector: 'readonly', sanitizeAdaptersConfig: 'readonly',
         validateVersionDate: 'readonly', validateDbIntegrity: 'readonly', buildFetchPlan: 'readonly',
         shouldLoadBundled: 'readonly', validateManifest: 'readonly',
         evaluateDrift: 'readonly', appendLedger: 'readonly',

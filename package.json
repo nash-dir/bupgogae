@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "eval:standard": "node scripts/evaluate-standard-tester.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

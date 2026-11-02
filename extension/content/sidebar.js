@@ -22,7 +22,7 @@ const SIDEBAR_CSS = `
     transform: translateX(100%);
     width: var(--bgae-sidebar-width, 420px);
     max-width: 90vw;
-    min-width: 300px;
+    min-width: min(300px, 90vw);
     height: 100vh;
     background: rgba(15, 23, 42, 0.95); /* slate-900 */
     backdrop-filter: blur(12px);
@@ -237,6 +237,7 @@ class BupgogaeSidebar {
     this.contentArea = null;
     this.headerTitle = null;
     this.isOpen = false;
+    this.requestGeneration = 0;
   }
 
   init() {
@@ -258,6 +259,11 @@ class BupgogaeSidebar {
     // 4. UI 뼈대 생성
     this.container = document.createElement('div');
     this.container.className = 'bgae-sidebar-container';
+    this.container.setAttribute('role', 'dialog');
+    this.container.setAttribute('aria-label', '판례 원문 조회');
+    this.container.setAttribute('aria-hidden', 'true');
+    this.container.setAttribute('inert', '');
+    this.container.tabIndex = -1;
 
     // Header
     const header = document.createElement('div');
@@ -268,6 +274,8 @@ class BupgogaeSidebar {
     const closeBtn = document.createElement('button');
     closeBtn.className = 'bgae-sidebar-close';
     closeBtn.textContent = '\u00D7'; // × (곱셈 기호)
+    closeBtn.setAttribute('aria-label', '원문 뷰어 닫기');
+    this.closeButton = closeBtn;
     closeBtn.addEventListener('click', () => this.close());
     header.appendChild(this.headerTitle);
     header.appendChild(closeBtn);
@@ -285,6 +293,13 @@ class BupgogaeSidebar {
     this.container.appendChild(this.contentArea);
 
     this.shadow.appendChild(this.container);
+    this.hostElement.addEventListener('keydown', (event) => {
+      if (this.isOpen && event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.close();
+      }
+    });
 
     // 이벤트 리스너: 사이즈 조절
     this.initResizer();
@@ -305,21 +320,40 @@ class BupgogaeSidebar {
 
   open(url) {
     this.init();
+    if (!this.isOpen) {
+      this.opener = document.activeElement;
+      const badge = this.opener?.closest('.bgae-global-tooltip')
+        ? document.querySelector('.bgae-badge[aria-expanded="true"]') : null;
+      this.openerFallback = badge?.closest('a[href], button, [role="button"], [role="link"]') || badge;
+    }
     this.isOpen = true;
+    this.container.removeAttribute('inert');
+    this.container.setAttribute('aria-hidden', 'false');
     
     // 강제 리플로(Reflow) 발생으로 트랜지션 트리거 확인
     void this.container.offsetWidth; 
     
     this.container.classList.add('open');
+    this.closeButton.focus({ preventScroll: true });
     
     this.showLoading();
     this.fetchAndParse(url);
   }
 
   close() {
+    // A response arriving after close must not update a later view.
+    this.requestGeneration += 1;
     if (!this.isOpen) return;
     this.isOpen = false;
     this.container.classList.remove('open');
+    const opener = this.opener?.isConnected && !this.opener.closest('[inert], [aria-hidden="true"]')
+      ? this.opener : this.openerFallback;
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    else this.shadow?.activeElement?.blur();
+    this.container.setAttribute('aria-hidden', 'true');
+    this.container.setAttribute('inert', '');
+    this.opener = null;
+    this.openerFallback = null;
   }
 
   showLoading() {
@@ -435,6 +469,7 @@ class BupgogaeSidebar {
    * Background에 FETCH 요청 후 DOMParser로 파싱
    */
   async fetchAndParse(url) {
+    const generation = ++this.requestGeneration;
     try {
       const response = await new Promise((resolve, reject) => {
         try {
@@ -450,6 +485,8 @@ class BupgogaeSidebar {
         }
       });
 
+      if (generation !== this.requestGeneration) return;
+
       if (response && response.error) {
         throw new Error(response.error);
       }
@@ -461,18 +498,16 @@ class BupgogaeSidebar {
       const parser = new DOMParser();
       const doc = parser.parseFromString(response.html, 'text/html');
 
-      // 2. 셀렉터 가져오기 (R2 원격 설정 우선, 실패 시 기본값)
-      let remoteConfig = {};
-      try {
-        const data = await chrome.storage.local.get('bupgogae_remote_adapters');
-        remoteConfig = data.bupgogae_remote_adapters?.scraping_adapters?.law_go_kr || {};
-      } catch { /* Extension context invalidated — 기본 셀렉터 사용 */ }
-      
+      // 2. 챗봇과 동일한 번들 adapters.json에서 원문 셀렉터 로드.
+      const config = await window.bupgogaeAdapters.loadBundledConfig();
+      if (generation !== this.requestGeneration) return;
+      const law = config?.scraping_adapters?.law_go_kr;
+      if (!law) throw new Error('번들 법령정보센터 셀렉터를 불러올 수 없습니다.');
       const selectors = {
-        title: remoteConfig.title_selector || '#contentBody > h2', 
-        container: remoteConfig.body_container || '#conScroll',
-        section_title: remoteConfig.section_title || 'h4',
-        section_body: remoteConfig.section_body || 'p.pty4, p.pty4_dep1, h5, div.subtit1'
+        title: law.title_selector,
+        container: law.body_container,
+        section_title: law.section_title,
+        section_body: law.section_body,
       };
 
       // 3. 제목 추출 (서브타이틀이 있다면 괄호 형태로 추가)
@@ -543,6 +578,7 @@ class BupgogaeSidebar {
         <a href="${safeFooterUrl}" target="_blank" class="bgae-footer-link">브라우저 새 창에서 더 넓게 보기 ↗</a>`;
 
     } catch (err) {
+      if (generation !== this.requestGeneration) return;
       console.error('[bupgogae sidebar] Fetch error:', err);
       this.showError(err.message, url);
     }

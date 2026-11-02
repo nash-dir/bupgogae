@@ -6,29 +6,16 @@
  *
  * 사이트별 구현체는 이 클래스를 상속하여 siteId/displayName만 정의.
  * 셀렉터는 adapters.json(Single Source of Truth)에서 로드.
- * 공통 로직(findResponseContainers, isStreaming 등)은 여기서 제공.
+ * 공통 컨테이너 탐색과 DOM 관찰 옵션은 여기서 제공.
  */
 
 class SiteAdapter {
-  /**
-   * 원격 설정 (Remote Config) 저장 필드.
-   * registry.js에서 초기화 시 주입됨.
-   * @type {Object|null}
-   */
-  _remoteConfig = null;
-
   /**
    * 번들 JSON에서 로드된 셀렉터.
    * initAdapters() 시 extension/data/adapters.json에서 주입됨.
    * @type {string[]|null}
    */
   _bundledSelectors = null;
-
-  /**
-   * 번들 JSON에서 로드된 streamingIndicator.
-   * @type {string|null}
-   */
-  _bundledStreamingIndicator = null;
 
   /**
    * 사이트 식별자 (예: 'gemini', 'chatgpt', 'claude', 'copilot').
@@ -47,70 +34,18 @@ class SiteAdapter {
   }
 
   /**
-   * 원격 설정을 어댑터에 주입.
-   * 전체 config 객체를 받아 siteId에 맞는 설정만 내부에 저장.
-   * @param {Object|null} fullConfig - { version, adapters: { [siteId]: { responseSelectors, ... } } }
-   */
-  setRemoteConfig(fullConfig) {
-    if (fullConfig && fullConfig.adapters && fullConfig.adapters[this.siteId]) {
-      this._remoteConfig = fullConfig.adapters[this.siteId];
-      console.log(`[bupgogae:${this.siteId}] Remote Config 적용 (ver=${fullConfig.version || '?'})`);
-    } else {
-      this._remoteConfig = null;
-    }
-  }
-
-  /**
    * 번들 JSON의 셀렉터를 어댑터에 주입.
-   * @param {Object} siteConfig - { responseSelectors: [...], streamingIndicator?: "..." }
+   * @param {Object} siteConfig - { responseSelectors: [...] }
    */
   setBundledConfig(siteConfig) {
     if (siteConfig && Array.isArray(siteConfig.responseSelectors)) {
       this._bundledSelectors = siteConfig.responseSelectors;
     }
-    if (siteConfig && siteConfig.streamingIndicator) {
-      this._bundledStreamingIndicator = siteConfig.streamingIndicator;
-    }
   }
 
-  /**
-   * 해당 사이트의 AI 응답 컨테이너 CSS 셀렉터 목록 (하드코딩 폴백).
-   * adapters.json 통합 후, 자식 클래스에서 오버라이드할 필요 없음.
-   * 번들 JSON이 로드되지 못한 극단적 폴백 상황에서만 사용됨.
-   * @returns {string[]}
-   */
-  getResponseSelectors() {
-    return [];
-  }
-
-  /**
-   * 셀렉터 해석 래퍼 — 3단 우선순위 체인.
-   *
-   * 우선순위:
-   *   1. Remote Config (chrome.storage.local, 원격 갱신)
-   *   2. 번들 JSON   (extension/data/adapters.json, 설치 시 포함)
-   *   3. 하드코딩     (자식 getResponseSelectors(), 극단적 폴백)
-   *
-   * adapters.json이 Single Source of Truth.
-   * Remote Config는 긴급 핫픽스용, 하드코딩은 최후 방어선.
-   *
-   * @returns {string[]}
-   */
+  /** 번들 adapters.json의 응답 셀렉터만 사용한다. */
   resolveResponseSelectors() {
-    // 1순위: Remote Config
-    if (this._remoteConfig &&
-        Array.isArray(this._remoteConfig.responseSelectors) &&
-        this._remoteConfig.responseSelectors.length > 0) {
-      return this._remoteConfig.responseSelectors;
-    }
-
-    // 2순위: 번들 JSON (adapters.json)
-    if (this._bundledSelectors && this._bundledSelectors.length > 0) {
-      return this._bundledSelectors;
-    }
-
-    // 3순위: 하드코딩 셀렉터 (극단적 폴백)
-    return this.getResponseSelectors();
+    return this._bundledSelectors || [];
   }
 
   /**
@@ -119,13 +54,7 @@ class SiteAdapter {
    * @returns {Element[]}
    */
   findResponseContainers() {
-    // A syntactically valid remote config can still be stale after a UI change.
-    // Fall back to the shipped selectors when that tier finds no usable replies.
-    const selectors = [...new Set([
-      ...this.resolveResponseSelectors(),
-      ...(this._bundledSelectors || []),
-      ...this.getResponseSelectors(),
-    ])];
+    const selectors = [...new Set(this.resolveResponseSelectors())];
     for (const selector of selectors) {
       try {
         const elements = [...document.querySelectorAll(selector)].filter(element =>
@@ -135,49 +64,11 @@ class SiteAdapter {
           return elements;
         }
       } catch (e) {
-        // 잘못된 셀렉터 무시 (예: 원격 업데이트된 잘못된 셀렉터)
+        // 잘못된 셀렉터는 건너뛰고 다음 번들 셀렉터 시도
         console.warn(`[bupgogae:${this.siteId}] 셀렉터 오류: ${selector}`, e);
       }
     }
     return [];
-  }
-
-  /**
-   * 컨테이너가 현재 스트리밍(응답 생성 중) 상태인지 판별.
-   * 스트리밍 중에는 partial text → 완료 후 재스캔이 효율적일 수 있음.
-   *
-   * 기본: adapters.json의 streamingIndicator 셀렉터를 사용.
-   * 자식 클래스에서 복잡한 로직이 필요하면 오버라이드 가능.
-   *
-   * @param {Element} container
-   * @returns {boolean}
-   */
-  isStreaming(container) {
-    // Remote Config 우선. 문법 오류라면 번들 indicator로 안전하게 후퇴한다.
-    const remoteIndicator = this._remoteConfig && this._remoteConfig.streamingIndicator;
-    if (remoteIndicator) {
-      try {
-        return !!container.closest(remoteIndicator);
-      } catch (err) {
-        console.warn(
-          `[bupgogae:${this.siteId}] streamingIndicator 셀렉터 오류: ${remoteIndicator}`,
-          err,
-        );
-      }
-    }
-
-    if (this._bundledStreamingIndicator &&
-        this._bundledStreamingIndicator !== remoteIndicator) {
-      try {
-        return !!container.closest(this._bundledStreamingIndicator);
-      } catch (err) {
-        console.warn(
-          `[bupgogae:${this.siteId}] 번들 streamingIndicator 셀렉터 오류`,
-          err,
-        );
-      }
-    }
-    return false;
   }
 
   /**

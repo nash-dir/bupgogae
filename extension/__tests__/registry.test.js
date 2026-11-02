@@ -64,27 +64,6 @@ describe('registry SITE_DEFS 파생', () => {
     }
   });
 
-  test('원격 streamingIndicator 문법 오류는 전체 스캔을 깨지 않고 번들로 후퇴', () => {
-    const inst = new adapters.GeminiAdapter();
-    inst.setBundledConfig({
-      responseSelectors: [],
-      streamingIndicator: '.bundled-streaming',
-    });
-    inst.setRemoteConfig({
-      version: 'test',
-      adapters: { gemini: { streamingIndicator: 'div[' } },
-    });
-    const parent = document.createElement('div');
-    parent.className = 'bundled-streaming';
-    const container = document.createElement('div');
-    parent.appendChild(container);
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    expect(() => inst.isStreaming(container)).not.toThrow();
-    expect(inst.isStreaming(container)).toBe(true);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
-  });
 });
 
 
@@ -99,17 +78,15 @@ describe('six-site response DOM contracts', () => {
     ['GrokAdapter', '<div class="markdown" id="answer">89두1</div>'],
   ];
   afterEach(() => { document.body.innerHTML = ''; });
-  test.each(fixtures)('%s finds a reply despite stale remote selectors and excludes the prompt', (name, html) => {
+  test.each(fixtures)('%s finds a bundled reply and excludes the prompt', (name, html) => {
     document.body.innerHTML = '<main><div data-message-role="user"><div class="prose markdown" data-testid="chat-message-content">2016도10912</div></div>' + html + '<textarea>2026헌가1</textarea></main>';
     const instance = new window.bupgogaeAdapters[name]();
     instance.setBundledConfig(config.adapters[instance.siteId]);
-    instance.setRemoteConfig({ adapters: { [instance.siteId]: { responseSelectors: ['.stale-selector', 'main'] } } });
     expect(instance.findResponseContainers().map(e => e.id)).toEqual(['answer']);
   });
   test('work Copilot selects the assistant article and rejects a user prose match', () => {
     const instance = new window.bupgogaeAdapters.CopilotAdapter();
     instance.setBundledConfig(config.adapters.copilot);
-    instance.setRemoteConfig({ adapters: { copilot: { responseSelectors: ['.prose'] } } });
     document.body.innerHTML = '<div role="article" aria-labelledby="user-message-a-title user-message-a"><div class="prose">89두1</div></div><div id="answer" role="article" aria-labelledby="copilot-message-b-title copilot-message-b">2016도10912</div>';
     expect(instance.findResponseContainers().map(e => e.id)).toEqual(['answer']);
   });
@@ -118,23 +95,65 @@ describe('six-site response DOM contracts', () => {
     instance.setBundledConfig(config.adapters.chatgpt);
     document.body.innerHTML = '<li data-message-role="assistant">89두</li>';
     const reply = instance.findResponseContainers()[0];
-    expect(instance.isStreaming(reply)).toBe(true);
     reply.firstChild.data += '1';
     reply.setAttribute('data-message-complete', '');
     expect(instance.findResponseContainers()).toEqual([reply]);
-    expect(instance.isStreaming(reply)).toBe(false);
     expect(instance.getObserverOptions().attributeFilter).toContain('data-message-complete');
     reply.replaceWith(reply.cloneNode(true));
     expect(instance.findResponseContainers()[0]).not.toBe(reply);
   });
-  test('logged-in ChatGPT search-unit markers select only the assistant despite stale remote prose', () => {
+  test('logged-in ChatGPT search-unit markers select only the assistant using bundled selectors', () => {
     const instance = new window.bupgogaeAdapters.ChatGPTAdapter();
     instance.setBundledConfig(config.adapters.chatgpt);
-    instance.setRemoteConfig({ adapters: { chatgpt: { responseSelectors: ['.markdown.prose'] } } });
     document.body.innerHTML = '<main><div data-talvt-turn-state="complete"><div data-chatgpt-search-unit-key="fallback-turn-0:0:user"><div class="markdown prose">89두1</div></div><div id="answer" data-chatgpt-search-unit-key="fallback-turn-0:1:assistant"><h4 data-conversation-role="assistant">ChatGPT 답변:</h4><table><tbody><tr><td>2016도10912</td></tr></tbody></table></div></div></main>';
     expect(instance.findResponseContainers().map(e => e.id)).toEqual(['answer']);
     expect(instance.getObserverOptions().attributeFilter).toContain('data-chatgpt-search-unit-key');
     document.querySelector('#answer').setAttribute('data-chatgpt-search-unit-key', 'fallback-turn-0:1:user');
     expect(instance.findResponseContainers()).toEqual([]);
+  });
+});
+
+
+describe('bundled configuration boundary', () => {
+  afterEach(() => { delete global.fetch; });
+
+  test('initialization fetches only the packaged JSON and ignores legacy storage', async () => {
+    const config = require('../data/adapters.json');
+    chrome.runtime.getURL = path => `chrome-extension://test/${path}`;
+    chrome.storage.local.get.mockResolvedValue({ bupgogae_remote_adapters: {
+      adapters: { chatgpt: { responseSelectors: ['body'] } },
+    } });
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => config }));
+    await window.bupgogaeAdapters.initAdapters();
+    expect(global.fetch.mock.calls.map(([url]) => url)).toEqual([
+      'chrome-extension://test/data/adapters.json',
+    ]);
+    expect(await window.bupgogaeAdapters.loadBundledConfig()).toEqual(config);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(chrome.storage.local.get).not.toHaveBeenCalled();
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    expect(window.bupgogaeAdapters.reloadRemoteConfig).toBeUndefined();
+    expect(new window.bupgogaeAdapters.ChatGPTAdapter().setRemoteConfig).toBeUndefined();
+  });
+
+  test('an unavailable packaged configuration never falls back to remote settings', async () => {
+    // Reload the registry to clear its session cache.
+    loadScript('content/adapters/registry.js');
+    chrome.runtime.getURL = path => `chrome-extension://test/${path}`;
+    global.fetch = jest.fn(async () => ({ ok: false, status: 404 }));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await window.bupgogaeAdapters.initAdapters();
+    expect(global.fetch.mock.calls.map(([url]) => url)).toEqual([
+      'chrome-extension://test/data/adapters.json',
+    ]);
+    expect(chrome.storage.local.get).not.toHaveBeenCalled();
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  test('an unconfigured adapter does not scan the whole page', () => {
+    document.body.innerHTML = '<main><div class="prose">89두1</div></main>';
+    expect(new window.bupgogaeAdapters.ChatGPTAdapter().findResponseContainers()).toEqual([]);
+    document.body.innerHTML = '';
   });
 });

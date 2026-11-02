@@ -95,13 +95,6 @@ function jsonResponse(value) {
   return { ok: true, status: 200, json: async () => value };
 }
 
-function requiredAdapters() {
-  return Object.fromEntries(
-    ['gemini', 'chatgpt', 'claude', 'copilot', 'perplexity', 'grok']
-      .map((siteId) => [siteId, {}]),
-  );
-}
-
 describe('versioned DB contract isolation', () => {
   let sync;
   afterEach(() => {
@@ -121,7 +114,7 @@ describe('versioned DB contract isolation', () => {
       success: false, outcome: 'integrity_failed',
     });
     const urls = global.fetch.mock.calls.map(([url]) => String(url));
-    expect(urls.filter(url => url.startsWith('https://api.bup.live/bupgogae/') && !url.endsWith('/adapters.json')))
+    expect(urls.filter(url => url.startsWith('https://api.bup.live/bupgogae/')))
       .toEqual(['https://api.bup.live/bupgogae/manifest-v0.9.0.json']);
     expect(sync.constants.DB_URL).toBe('https://api.bup.live/bupgogae/db-v0.9.0.json.gz');
   });
@@ -152,7 +145,6 @@ describe('older mixed-format server and strict court-only client', () => {
       if (String(url).endsWith('/data/db.json')) {
         return jsonResponse(badBundle ? { ...bundle, cases: { ...cases, '26Da1': [[-1, 1, 260101, '불량']] } } : bundle);
       }
-      if (String(url).includes('/adapters.json')) return jsonResponse({ adapters: requiredAdapters() });
       if (String(url).startsWith(sync.constants.DB_URL)) {
         const bytes = new TextEncoder().encode(body);
         let delivered = false;
@@ -289,7 +281,6 @@ describe('법원·헌재 snapshot의 전수 건수와 건강성', () => {
         return { ok: false, status: 304, headers: { get: () => '"same"' } };
       }
       if (String(url).includes('bupgogae_meta.json')) return jsonResponse({ version: '2026.09.22' });
-      if (String(url).includes('/adapters.json')) return jsonResponse({ adapters: requiredAdapters() });
       throw new Error(`Unexpected fetch ${url}`);
     });
     expect(await sync.readLocalSyncState()).toMatchObject({ coreCount: 100005, physicalTotalCount: 100005 });
@@ -685,7 +676,6 @@ describe('syncDatabase single-flight', () => {
     global.fetch = jest.fn(async (url) => {
       if (String(url).includes('/manifest-v0.9.0.json')) return { ok: false, status: 503 };
       if (String(url).startsWith('chrome-extension://test/')) return { ok: false };
-      if (String(url).includes('/adapters.json')) return jsonResponse({ adapters: {} });
       throw new Error(`DB must not be fetched without a manifest: ${url}`);
     });
 
@@ -814,167 +804,45 @@ describe('remote helper observability and outage coalescing', () => {
     delete global.validateDbIntegrity;
   });
 
-  test('어댑터 HTTP 실패를 success:false로 정직하게 반환한다', async () => {
-    global.fetch = jest.fn(async () => ({ ok: false, status: 503 }));
-
-    await expect(sync.fetchAdaptersConfig()).resolves.toEqual({
-      success: false,
-      outcome: 'fetch_failed',
-      error: 'HTTP 503',
-    });
-    expect(storage.state.bupgogae_remote_adapters).toBeUndefined();
-  });
-
-  test('과대/과다/불량 어댑터 설정은 기존 저장값을 보존한다', async () => {
-    const preserved = { version: '2026-07-19', adapters: { kept: {} } };
-    await storage.api.set({ bupgogae_remote_adapters: preserved });
-
-    global.fetch = jest.fn(async () => ({
-      ok: true,
-      headers: { get: () => String(300 * 1024) },
-    }));
-    await expect(sync.fetchAdaptersConfig()).resolves.toMatchObject({
-      success: false,
-      outcome: 'invalid_payload',
-    });
-    await storage.api.remove('bupgogae_adapter_sync_state');
-
-    const tooManySites = Object.fromEntries(
-      Array.from({ length: 51 }, (_, index) => [`site${index}`, {}]),
-    );
-    global.fetch = jest.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2026-07-20', adapters: tooManySites }),
-    }));
-    await expect(sync.fetchAdaptersConfig()).resolves.toMatchObject({
-      success: false,
-      outcome: 'invalid_payload',
-      error: expect.stringMatching(/사이트 수/),
-    });
-    await storage.api.remove('bupgogae_adapter_sync_state');
-
-    global.fetch = jest.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2026-07-20', adapters: { broken: null } }),
-    }));
-    await expect(sync.fetchAdaptersConfig()).resolves.toMatchObject({
-      success: false,
-      outcome: 'invalid_payload',
-      error: expect.stringMatching(/설정 객체/),
-    });
-    expect(storage.state.bupgogae_remote_adapters).toBe(preserved);
-  });
-
-  test('동시 어댑터 요청은 같은 fetch와 결과를 공유한다', async () => {
-    let releaseFetch;
-    const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
-    global.fetch = jest.fn(async () => {
-      await fetchGate;
-      return {
-        ok: true,
-        headers: { get: () => '"adapter-v1"' },
-        json: async () => ({ version: '2026-07-20', adapters: requiredAdapters() }),
-      };
-    });
-
-    const first = sync.fetchAdaptersConfig();
-    const second = sync.fetchAdaptersConfig();
-    expect(second).toBe(first);
-    releaseFetch();
-
-    const [firstResult, secondResult] = await Promise.all([first, second]);
-    expect(secondResult).toBe(firstResult);
-    expect(firstResult).toEqual({
-      success: true,
-      outcome: 'updated',
-      version: '2026-07-20',
-    });
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test('유효한 adapter LKG의 ETag는 조건부 요청과 안전한 304에 사용한다', async () => {
-    const config = { version: '2026-07-20', adapters: requiredAdapters() };
+  test.each(['onInstalled', 'onStartup'])('%s removes legacy selector caches while retaining DB sync and preferences', async event => {
+    const db = await seedLegacy(sync, { '89Du1': [[1, 1, 230101, 'kept']] });
     await storage.api.set({
-      bupgogae_remote_adapters: config,
-      bupgogae_adapter_sync_state: {
-        lastAttemptAt: 0,
-        lastSuccessAt: 1,
-        etag: '"adapter-etag"',
-        version: config.version,
-      },
+      bupgogae_remote_adapters: { adapters: { chatgpt: { responseSelectors: ['body'] } } },
+      bupgogae_adapter_sync_state: { etag: 'old-selector-etag' },
+      bupgogae_sidebar_width: 500,
+      bupgogae_disabled_global: true,
+      bupgogae_disabled_sites: ['chatgpt.com'],
     });
-    global.fetch = jest.fn(async () => ({ ok: false, status: 304 }));
-
-    await expect(sync.fetchAdaptersConfig()).resolves.toEqual({
-      success: true,
-      outcome: 'not_modified',
-      version: config.version,
-    });
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringMatching(/adapters\.json$/),
-      expect.objectContaining({
-        headers: expect.objectContaining({ 'If-None-Match': '"adapter-etag"' }),
-      }),
-    );
-    expect(storage.state.bupgogae_remote_adapters).toBe(config);
-  });
-
-  test('어댑터 outage 실패도 영속 cooldown으로 순차 탭 재시도를 막는다', async () => {
     global.fetch = jest.fn(async () => ({ ok: false, status: 503 }));
-
-    await expect(sync.fetchAdaptersConfig()).resolves.toMatchObject({
-      success: false,
-      outcome: 'fetch_failed',
+    const listener = chrome.runtime[event].addListener.mock.calls[0][0];
+    await listener({ reason: 'update' });
+    expect(storage.state.bupgogae_remote_adapters).toBeUndefined();
+    expect(storage.state.bupgogae_adapter_sync_state).toBeUndefined();
+    expect(storage.state.bupgogae_sidebar_width).toBe(500);
+    expect(storage.state.bupgogae_disabled_global).toBe(true);
+    expect(storage.state.bupgogae_disabled_sites).toEqual(['chatgpt.com']);
+    const messageListener = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const enabled = hostname => new Promise(resolve => {
+      expect(messageListener({ type: 'CHECK_ENABLED', hostname }, {}, resolve)).toBe(true);
     });
-    await expect(sync.fetchAdaptersConfig()).resolves.toMatchObject({
-      success: true,
-      outcome: 'throttled',
-    });
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(storage.state.bupgogae_adapter_sync_state.lastAttemptAt)
-      .toEqual(expect.any(Number));
+    expect(await enabled('gemini.google.com')).toEqual({ enabled: false, reason: 'global' });
+    await storage.api.set({ bupgogae_disabled_global: false });
+    expect(await enabled('chatgpt.com')).toEqual({ enabled: false, reason: 'site' });
+    expect(await enabled('gemini.google.com')).toEqual({ enabled: true });
+    expect(await sync.dbGet(db, sync.constants.STORE_CASES_LEGACY, '89Du1'))
+      .toEqual([[1, 1, 230101, 'kept']]);
+    const external = global.fetch.mock.calls.map(([url]) => String(url)).filter(url => url.startsWith('https:'));
+    expect(external).toEqual(['https://api.bup.live/bupgogae/manifest-v0.9.0.json']);
+    expect(chrome.alarms.create).toHaveBeenCalled();
   });
 
-  test('빈 설정과 낮은 version은 adapter LKG를 덮어쓰지 않는다', async () => {
-    const preserved = { version: '2026-07-20', adapters: { kept: {} } };
-    await storage.api.set({ bupgogae_remote_adapters: preserved });
-
-    global.fetch = jest.fn(async () => jsonResponse({
-      version: '2026-07-19', adapters: requiredAdapters(),
-    }));
-    await expect(sync.fetchAdaptersConfig()).resolves.toEqual({
-      success: true,
-      outcome: 'downgrade_blocked',
-      version: '2026-07-20',
-    });
-    expect(storage.state.bupgogae_remote_adapters).toBe(preserved);
-
-    await storage.api.remove('bupgogae_adapter_sync_state');
-    global.fetch = jest.fn(async () => jsonResponse({
-      version: '2026-07-20', adapters: {},
-    }));
-    await expect(sync.fetchAdaptersConfig()).resolves.toMatchObject({
-      success: false,
-      outcome: 'invalid_payload',
-      error: expect.stringMatching(/빈 adapters/),
-    });
-    expect(storage.state.bupgogae_remote_adapters).toBe(preserved);
-  });
-
-  test('필수 known-site가 빠진 adapter config는 LKG를 덮어쓰지 않는다', async () => {
-    const preserved = { version: '2026-07-19', adapters: requiredAdapters() };
-    await storage.api.set({ bupgogae_remote_adapters: preserved });
-    global.fetch = jest.fn(async () => jsonResponse({
-      version: '2026-07-20',
-      adapters: { chatgpt: {} },
-    }));
-
-    await expect(sync.fetchAdaptersConfig()).resolves.toMatchObject({
-      success: false,
-      outcome: 'invalid_payload',
-      error: expect.stringMatching(/필수 adapter 누락/),
-    });
-    expect(storage.state.bupgogae_remote_adapters).toBe(preserved);
+  test('legacy FETCH_ADAPTERS messages cannot request or restore remote settings', () => {
+    global.fetch = jest.fn();
+    const listener = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const respond = jest.fn();
+    expect(listener({ type: 'FETCH_ADAPTERS' }, {}, respond)).not.toBe(true);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(respond).not.toHaveBeenCalled();
   });
 
   test('manifest outage 검사들은 single-flight를 공유하고 실패 시각도 throttle한다', async () => {

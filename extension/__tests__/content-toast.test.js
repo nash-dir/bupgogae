@@ -43,6 +43,31 @@ describe('collectOrangeCases', () => {
 });
 
 describe('copyOrangeCases', () => {
+  afterEach(() => { delete document.execCommand; });
+
+  test.each([false, 'throw'])('reports failed fallback copying (%s) and removes temporary input', async (result) => {
+    seedOrangeBadges(['2015다6302']);
+    navigator.clipboard.writeText.mockRejectedValue(new Error('clipboard unavailable'));
+    document.execCommand = jest.fn(() => {
+      if (result === 'throw') throw new Error('copy rejected');
+      return result;
+    });
+    const response = await content.copyOrangeCases();
+    expect(response).toMatchObject({ count: 1, copyFailed: true });
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(document.querySelector('textarea')).toBeNull();
+  });
+
+  test('successful fallback copying is reported as success and removes temporary input', async () => {
+    seedOrangeBadges(['2015다6302']);
+    navigator.clipboard.writeText.mockRejectedValue(new Error('clipboard unavailable'));
+    document.execCommand = jest.fn(() => true);
+    const response = await content.copyOrangeCases();
+    expect(response.count).toBe(1);
+    expect(response.copyFailed).toBeUndefined();
+    expect(document.querySelector('textarea')).toBeNull();
+  });
+
   test('수집된 사건번호를 클립보드 문구로 복사', async () => {
     seedOrangeBadges(['2015다6302', '2020두1234']);
     const res = await content.copyOrangeCases();

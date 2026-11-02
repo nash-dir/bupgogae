@@ -4,10 +4,10 @@
  * 현재 호스트명에 맞는 어댑터를 자동 선택하는 팩토리.
  *
  * [사용법]
- *   // 비동기 초기화 — Remote Config 자동 로드 (★ 권장)
+ *   // 비동기 초기화 — 번들 adapters.json 로드 (★ 권장)
  *   const adapter = await window.bupgogaeAdapters.initAdapters();
  *
- *   // 동기 호출 — Remote Config 없이 (하위 호환)
+ *   // 동기 호출 — 이미 로드된 번들 설정 사용
  *   const adapter = window.bupgogaeAdapters.getAdapter();
  *
  * [등록 방식]
@@ -53,12 +53,6 @@ for (const def of SITE_DEFS) {
 }
 
 /**
- * 캐시된 Remote Config (세션 중 재사용).
- * @type {Object|null}
- */
-let _cachedRemoteConfig = null;
-
-/**
  * 캐시된 번들 Config (세션 중 재사용).
  * @type {Object|null}
  */
@@ -94,41 +88,14 @@ async function loadBundledConfig() {
 }
 
 /**
- * chrome.storage.local에서 원격 어댑터 설정을 비동기 로드.
- * Service Worker(db-sync.js)가 저장한 bupgogae_remote_adapters 키를 읽음.
- *
- * @returns {Promise<Object|null>} Remote Config 객체 또는 null
- */
-async function loadRemoteConfig() {
-  try {
-    const data = await chrome.storage.local.get('bupgogae_remote_adapters');
-    const config = data.bupgogae_remote_adapters || null;
-
-    if (config && config.adapters) {
-      console.log(`[bupgogae] Remote Config 로드 완료 (ver=${config.version || '?'})`);
-      _cachedRemoteConfig = config;
-      return config;
-    }
-
-    console.log('[bupgogae] Remote Config 없음 — 번들/하드코딩 셀렉터 사용');
-    return null;
-  } catch (err) {
-    console.warn('[bupgogae] Remote Config 로드 실패:', err.message);
-    return null;
-  }
-}
-
-/**
  * 현재 호스트명에 맞는 어댑터 인스턴스를 반환.
- * remoteConfig와 bundledConfig를 어댑터에 주입.
+ * 번들 설정을 어댑터에 주입.
  *
- * @param {Object|null} [remoteConfig] - 원격 설정 객체 (없으면 캐시 사용)
  * @param {Object|null} [bundledConfig] - 번들 설정 객체 (없으면 캐시 사용)
  * @returns {SiteAdapter|null} 미지원 사이트이면 null
  */
-function getAdapter(remoteConfig, bundledConfig) {
+function getAdapter(bundledConfig) {
   const hostname = location.hostname;
-  const remote = remoteConfig || _cachedRemoteConfig;
   const bundled = bundledConfig || _cachedBundledConfig;
 
   /**
@@ -138,13 +105,9 @@ function getAdapter(remoteConfig, bundledConfig) {
    */
   function createAndConfigure(AdapterClass) {
     const instance = new AdapterClass();
-    // 번들 Config 주입 (2순위)
+    // 패키지에 포함된 번들 Config만 사용
     if (bundled && bundled.adapters && bundled.adapters[instance.siteId]) {
       instance.setBundledConfig(bundled.adapters[instance.siteId]);
-    }
-    // Remote Config 주입 (1순위, setBundledConfig 후 호출)
-    if (remote && typeof instance.setRemoteConfig === 'function') {
-      instance.setRemoteConfig(remote);
     }
     return instance;
   }
@@ -174,47 +137,9 @@ function getAdapter(remoteConfig, bundledConfig) {
   return null;
 }
 
-/**
- * 비동기 어댑터 초기화 — 번들 JSON + Remote Config 로드 후 어댑터 반환.
- * Content Script 초기화(init())에서 사용하는 권장 진입점.
- *
- * [Stale-While-Revalidate 전략]
- *   현재 세션은 캐시(chrome.storage.local)된 Remote Config로 즉시 시작.
- *   동시에 백그라운드에서 R2 최신본을 fire-and-forget으로 가져와 캐시 갱신.
- *   → 다음 페이지 로드 시 최신 설정이 자동 적용됨.
- *
- * @returns {Promise<SiteAdapter|null>}
- */
+/** 번들 설정 로드 후 현재 사이트 어댑터를 반환한다. */
 async function initAdapters() {
-  // 번들 JSON과 Remote Config를 병렬 로드
-  const [bundledConfig, remoteConfig] = await Promise.all([
-    loadBundledConfig(),
-    loadRemoteConfig(),
-  ]);
-
-  // Stale-While-Revalidate: 백그라운드에서 R2 최신본 fetch (fire-and-forget)
-  // 현재 세션에는 영향 없이, 다음 로드를 위해 캐시를 선제적으로 갱신
-  try {
-    chrome.runtime.sendMessage({ type: 'FETCH_ADAPTERS' }, () => {
-      if (chrome.runtime.lastError) { /* silent */ }
-    });
-  } catch { /* extension context invalidated — safe to ignore */ }
-
-  return getAdapter(remoteConfig, bundledConfig);
-}
-
-/**
- * Remote Config를 다시 로드하여 기존 어댑터에 재주입.
- * Auto-Fetch 트리거 후 갱신된 설정을 적용할 때 사용.
- *
- * @param {SiteAdapter} adapter - 재주입 대상 어댑터 인스턴스
- * @returns {Promise<void>}
- */
-async function reloadRemoteConfig(adapter) {
-  const config = await loadRemoteConfig();
-  if (adapter && typeof adapter.setRemoteConfig === 'function') {
-    adapter.setRemoteConfig(config);
-  }
+  return getAdapter(await loadBundledConfig());
 }
 
 /**
@@ -237,7 +162,7 @@ if (typeof window !== 'undefined') {
   window.bupgogaeAdapters = window.bupgogaeAdapters || {};
   window.bupgogaeAdapters.getAdapter = getAdapter;
   window.bupgogaeAdapters.initAdapters = initAdapters;
-  window.bupgogaeAdapters.reloadRemoteConfig = reloadRemoteConfig;
+  window.bupgogaeAdapters.loadBundledConfig = loadBundledConfig;
   window.bupgogaeAdapters.getSupportedSites = getSupportedSites;
   window.bupgogaeAdapters.ADAPTER_MAP = ADAPTER_MAP;
 }

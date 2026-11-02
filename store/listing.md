@@ -46,13 +46,13 @@ AI 답변에 표시된 한국 사건번호를 현재 로컬 공개 판례 DB와 
 ### alarms
 
 ```
-Schedules public database, integrity manifest, and validated selector-configuration synchronization every six hours without a persistent background page.
+Schedules public database and integrity manifest synchronization every six hours without a persistent background page.
 ```
 
 ### storage
 
 ```
-Stores user preferences, sync/drift metadata, ETag state, and validated remote selector configuration locally in chrome.storage.local.
+Stores user preferences, sync/drift metadata, and ETag state locally in chrome.storage.local. Site and original-document selectors are bundled with the extension and updated through Web Store releases.
 ```
 
 ### unlimitedStorage
@@ -64,7 +64,7 @@ Stores complete public case-law database snapshots in IndexedDB and prevents a s
 ### host_permissions
 
 ```
-Supported AI-site hosts allow the content script to read displayed response text and render badges locally. https://api.bup.live/* is used for the public database, manifest, and selector configuration. https://www.law.go.kr/* is used only when the user requests an original public document. Prompt and response text is not attached to these supporting requests.
+Supported AI-site hosts allow the content script to read displayed response text and render badges locally. https://api.bup.live/* is used for the public database and manifest. https://www.law.go.kr/* is used only when the user requests an original public document. Prompt and response text is not attached to these supporting requests.
 ```
 
 The manifest does not request the `tabs` permission.

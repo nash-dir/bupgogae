@@ -30,14 +30,12 @@
   * 초록색(DB에서 찾음) 배지를 클릭하면 사용자의 요청에 따라 `www.law.go.kr` 원문을 우측 뷰어에서 조회합니다. (Shadow DOM 캡슐화로 호스트 UI와 충돌 방지)
 * **📋 미확인 판례 일괄 복사**
   * 주황색(DB 미확인) 사건번호가 감지되면 안내 배너의 **'사건번호 복사' 버튼**으로 클립보드에 일괄 복사합니다. 단축키(`Alt+C`)도 지원하지만, 일부 서비스가 단축키를 가로채는 경우 버튼이 안정적으로 동작합니다. 팝업에서 안내 배너 표시 여부를 켜고 끌 수 있습니다.
-* **🔄 원격 설정 자동 업데이트 (Remote Config)**
-  * 각 플랫폼의 DOM 셀렉터가 변경되어 탐지에 실패할 경우, 서버(`adapters.json`)에서 최신 셀렉터를 자동으로 가져와 적용합니다.
-  * 서버에 접근할 수 없으면 동봉된 selector와 마지막으로 저장된 설정을 사용합니다.
-  * 순수 JSON 데이터만 수신하며 엄격한 CSS 화이트리스트 검증을 거칩니다 (MV3 CSP 준수).
+* **📦 번들 DOM 어댑터**
+  * 6개 플랫폼과 법령정보센터의 DOM 셀렉터는 확장프로그램에 포함된 `data/adapters.json`만 사용합니다. 셀렉터 변경은 웹스토어 업데이트로 배포합니다.
 * **⚡ 초고속 로컬 매칭**
   * 수십만 건의 판례 메타데이터를 압축된 JSON 형태로 로컬 IndexedDB에 동기화하여, 외부 API 통신 지연 없이 즉각적으로 조회합니다.
 * **🔒 로컬 텍스트 판별**
-  * 프롬프트·답변 텍스트의 패턴 탐색과 DB 대조는 브라우저에서 수행하며 그 텍스트를 외부로 전송하지 않습니다. DB·manifest·selector 갱신과 사용자가 요청한 원문 조회에는 보조 네트워크 통신이 있습니다. 자세한 내용은 [개인정보처리방침](PRIVACY.md)을 참고하세요.
+  * 프롬프트·답변 텍스트의 패턴 탐색과 DB 대조는 브라우저에서 수행하며 그 텍스트를 외부로 전송하지 않습니다. DB·manifest 갱신과 사용자가 요청한 원문 조회에는 보조 네트워크 통신이 있습니다. 자세한 내용은 [개인정보처리방침](PRIVACY.md)을 참고하세요.
 
 ## 🚀 설치 방법
 
@@ -106,14 +104,12 @@ Coverage is limited to courts and the Constitutional Court. Court judgments on t
   * Click a Green (Found in DB) badge to request the selected document from `www.law.go.kr` in a sliding sidebar. Uses Shadow DOM to prevent CSS conflicts.
 * **📋 Extract Cases Not Found in the Local DB**
   * When Orange (Not found in local DB) case numbers are detected, copy them all to your clipboard via the **"Copy case numbers" button** on the notification banner. The `Alt+C` shortcut also works, but the button stays reliable when a site overrides the shortcut. The banner can be toggled on/off from the popup.
-* **🔄 Remote Config — Dynamic Selector Updates**
-  * When a platform's DOM changes break detection, the extension automatically fetches updated CSS selectors from the server (`adapters.json`).
-  * Packaged selectors and the last saved configuration are used when the server is unreachable.
-  * Only pure JSON data is fetched and validated against a strict CSS whitelist (MV3 CSP compliant).
+* **📦 Bundled DOM Adapters**
+  * Selectors for the six chat platforms and law.go.kr come only from packaged `data/adapters.json`. Selector corrections ship through Web Store updates.
 * **⚡ Local Matching**
   * Case metadata is compressed and synchronized to local IndexedDB, avoiding a per-citation external analysis request.
 * **🔒 Local Text Analysis**
-  * Displayed-response pattern matching and database lookup happen in the browser, and that text is not transmitted externally. Supporting network calls update the database/manifest/selectors and fetch an original document when requested by the user; see the [Privacy Policy](PRIVACY.md).
+  * Displayed-response pattern matching and database lookup happen in the browser, and that text is not transmitted externally. Supporting network calls update the database/manifest and fetch an original document when requested by the user; see the [Privacy Policy](PRIVACY.md).
 
 ## 🚀 Installation
 
@@ -162,10 +158,10 @@ The extension implements a **Site Adapter Pattern** — a variant of the Strateg
 1. **Abstract Base Class (`SiteAdapter`)**: Defines the interface contract:
    - `siteId` — unique site identifier string
    - `displayName` — human-readable platform name
-   - `getResponseSelectors()` — returns an ordered array of CSS selectors targeting AI response containers
+   - `resolveResponseSelectors()` — returns the ordered CSS response selectors loaded from the bundle
    - `findResponseContainers()` — executes the selector resolution algorithm (inherited from base class)
 
-2. **Concrete Adapters**: Each platform has a dedicated adapter (e.g., `GeminiAdapter`, `ChatGPTAdapter`) that only overrides `getResponseSelectors()` with platform-specific CSS selectors. No adapter contains detection logic.
+2. **Concrete Adapters**: Each platform has a dedicated adapter (e.g., `GeminiAdapter`, `ChatGPTAdapter`) that defines its site ID and display name. Platform selectors are loaded from packaged `data/adapters.json`; detection logic is shared by the base adapter.
 
 3. **Hostname-Based Registry**: A static `ADAPTER_MAP` maps hostnames to adapter class names. On page load, `getAdapter()` performs an exact hostname match against the registry and instantiates the corresponding adapter.
 
@@ -186,21 +182,15 @@ MutationObserver → settle (process after the response stops mutating)
 
 ### Selector Resolution Algorithm
 
-The base class `findResponseContainers()` tries remote selectors followed by bundled selectors, skipping duplicates. It excludes explicit user messages, editable roots, and whole-page roots such as `main`. The first selector with usable response containers determines the set for that scan cycle. A stale remote selector that finds no usable replies cannot mask the shipped configuration.
+The base class `findResponseContainers()` tries bundled selectors in order, skipping duplicates. It excludes explicit user messages, editable roots, and whole-page roots such as `main`. The first selector with usable response containers determines the set for that scan cycle.
 
-### Remote Config — Dynamic Selector Updates
+### Bundled Selector Configuration
 
-Each LLM platform's frontend changes frequently, potentially invalidating hardcoded CSS selectors. The extension addresses this through a **Remote Config** mechanism:
+The adapter pattern is retained, but `extension/data/adapters.json` is the sole source of response selectors and law.go.kr original-document selectors. The registry loads this packaged file using `chrome.runtime.getURL()`; the sidebar shares that loader. No remote selector requests, storage overrides, or automatic selector refresh messages are used. Missing configuration does not trigger a whole-page scan or a remote fallback.
 
-1. **Service Worker** periodically fetches `adapters.json` from the server (alongside the case law DB sync) and stores it in `chrome.storage.local`
-2. **`findResponseContainers()`** checks remote config first, falling back to bundled selectors:
-   ```
-   Priority:  Remote Config (server)  →  Bundled adapters.json
-   ```
-3. **Auto-Fetch trigger** — if all selectors fail to match any DOM elements, the content script sends a one-time `FETCH_ADAPTERS` message to the Service Worker (throttled to once per page load to prevent infinite loops)
-4. **Security** — only pure JSON is fetched and parsed via `res.json()`; no `eval()`, `innerHTML`, or remote JS execution (MV3 CSP compliant)
+DOM corrections require compatibility tests and a Web Store update. Installation/update and browser startup remove the legacy `bupgogae_remote_adapters` and `bupgogae_adapter_sync_state` keys. Public case-law DB synchronization, its ETag/integrity checks, and sync alarms continue independently.
 
-Remote configuration can deliver selector corrections without a Store release. Bundled selectors remain available offline. Changes to a service's response structure still require compatibility checks.
+**Legacy compatibility:** Keep the existing R2 `adapters.json` object and its public URL available for older installed extensions during the transition. This client change does not delete or disable that server resource. Do not remove it as part of packaging or deployment; retire it separately after deciding that support for those older versions can end.
 
 ### Input Exclusion Filter
 
@@ -334,7 +324,7 @@ Analyzing user conversations with AI chatbots is inherently privacy-sensitive. A
 
 ### Solution
 
-Prompt/response pattern matching and case-number database lookup occur inside the user's browser. The public database is stored in IndexedDB, and prompt/response text is not sent to the update server. This local matching path is separate from supporting requests for database/manifest/selector updates and user-requested original documents.
+Prompt/response pattern matching and case-number database lookup occur inside the user's browser. The public database is stored in IndexedDB, and prompt/response text is not sent to the update server. This local matching path is separate from supporting requests for database/manifest updates and user-requested original documents.
 
 ### Data Flow: Local Text Matching
 
@@ -366,7 +356,7 @@ User's Browser (prompt/response text stays in this local path)
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 Supporting network path (no prompt/response text attached):
-  api.bup.live  ← db.json.gz / manifest.json / adapters.json
+  api.bup.live  ← db.json.gz / manifest.json
   www.law.go.kr ← selected original document, only after a user request
 ```
 
@@ -442,7 +432,7 @@ The automatic update path downloads static public data and configuration. It doe
 * **Snapshot staging** — each update is written in chunks to an inactive IndexedDB store and count-checked before a short metadata transaction switches the active pointer; the previous snapshot remains active on staging failure
 * **Non-destructive v1 migration** — existing users keep the legacy `cases` store active until the first complete v2 snapshot is ready
 * **Batch lookup** — content scripts read the active pointer and all requested keys in one IndexedDB readonly transaction, so a batch cannot mix old and new snapshots
-* **Adapter Remote Config** — validated `adapters.json` is fetched during sync; packaged/last-known-good selectors remain available on failure
+* **Bundled DOM Adapters** — chatbot and law.go.kr selectors come only from packaged `data/adapters.json`; corrections ship through Web Store updates
 
 ---
 
@@ -542,7 +532,7 @@ pipeline/
 
 ## Adding a New Platform
 
-To add support for a new chatbot in v0.8.0+, you only need to update two files.
+To add support for a new chatbot, update the bundled configuration, registry, and manifest, then ship a Web Store update.
 
 1. Add the CSS response selectors to `extension/data/adapters.json`:
 ```json

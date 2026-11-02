@@ -55,13 +55,13 @@ let _isProcessing = false;
 let _processingPending = false;
 let _processingPaused = false;
 let _adapter = null; // 현재 사이트 어댑터
-let _adapterFetchRequested = false; // Auto-Fetch 쓰로틀링 플래그 (세션당 1회)
 let _hasShownOrangeToast = false; // Orange 배지 토스트 알림을 한 번만 띄우기 위한 플래그
 let _showOrangeToast = true;     // 미확인 사건번호 팝업(토스트) 표시 여부 (팝업 토글)
 let _categoryFilters = {         // 카테고리별 필터 (기본값)
   court: true,
   constitutional: true,
 };
+let _filterGeneration = 0;
 
 /**
  * Content Script 진입점.
@@ -80,7 +80,7 @@ async function init() {
     );
   } catch { /* SW 컨텍스트 무효화 등 — 신선도 검사 실패가 본 기능을 막으면 안 됨 */ }
 
-  // ── 어댑터 자동 감지 (Remote Config 비동기 로드 포함) ──
+  // ── 어댑터 자동 감지 (번들 설정 비동기 로드 포함) ──
   if (window.bupgogaeAdapters && window.bupgogaeAdapters.initAdapters) {
     _adapter = await window.bupgogaeAdapters.initAdapters();
   } else if (window.bupgogaeAdapters && window.bupgogaeAdapters.getAdapter) {
@@ -142,6 +142,9 @@ async function init() {
   try {
     if (chrome.storage && chrome.storage.onChanged) {
       chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && (changes.bupgogae_filter_court || changes.bupgogae_filter_constitutional)) {
+          applyCategoryFilterChanges(changes);
+        }
         if (area === 'local' && changes.bupgogae_show_orange_toast) {
           _showOrangeToast = changes.bupgogae_show_orange_toast.newValue !== false;
         }
@@ -168,6 +171,29 @@ async function init() {
   scheduleProcessing();
 
   console.log(`[bupgogae] Content Script 초기화 완료 — ${_adapter.displayName} ✅`);
+}
+
+function applyCategoryFilterChanges(changes) {
+  if (changes.bupgogae_filter_court) {
+    _categoryFilters.court = changes.bupgogae_filter_court.newValue !== false;
+  }
+  if (changes.bupgogae_filter_constitutional) {
+    _categoryFilters.constitutional = changes.bupgogae_filter_constitutional.newValue !== false;
+  }
+  _filterGeneration += 1;
+  // Preserve draft input, streaming and scroll: replace only our own badges.
+  const parents = new Set();
+  for (const badge of document.querySelectorAll('.bgae-badge')) {
+    parents.add(badge.parentElement);
+    window.bupgogae.revertPrecedentBadge(badge, badge.getAttribute('data-bgae-case') || badge.textContent);
+  }
+  for (const parent of parents) parent?.normalize();
+  window.bupgogae.clearDetachedTooltip?.();
+  if (_orangeToastTimer) clearTimeout(_orangeToastTimer);
+  _orangeToastTimer = null;
+  document.querySelector('.bgae-orange-toast')?.remove();
+  _hasShownOrangeToast = false;
+  scheduleProcessing();
 }
 
 
@@ -467,28 +493,6 @@ function findResponseContainers() {
   if (_adapter) {
     const containers = _adapter.findResponseContainers();
     if (containers.length > 0) return containers;
-
-    // ── Auto-Fetch 트리거: 어댑터 셀렉터 매치 실패 시 원격 설정 재동기화 요청 ──
-    // 세션(페이지 로드)당 1회만 실행하여 무한 루프 방지
-    if (!_adapterFetchRequested) {
-      _adapterFetchRequested = true;
-      console.log(`[bupgogae] ${_adapter.displayName} 셀렉터 매치 실패 — FETCH_ADAPTERS 트리거`);
-
-      // Background Script에 어댑터 설정 재동기화 요청 (fire-and-forget)
-      chrome.runtime.sendMessage({ type: 'FETCH_ADAPTERS' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.warn('[bupgogae] FETCH_ADAPTERS 요청 실패:', chrome.runtime.lastError.message);
-          return;
-        }
-        if (response && response.success) {
-          console.log('[bupgogae] FETCH_ADAPTERS 완료 — Remote Config 재로드');
-          // 갱신된 설정을 어댑터에 재주입
-          if (window.bupgogaeAdapters && window.bupgogaeAdapters.reloadRemoteConfig) {
-            window.bupgogaeAdapters.reloadRemoteConfig(_adapter);
-          }
-        }
-      });
-    }
   }
 
   // 폴백 제거: 빈 화면(채팅 시작 전)에서 body 전체를 스캔하면
@@ -511,6 +515,7 @@ function findResponseContainers() {
  * @param {Element} container
  */
 async function processContainer(container) {
+  const filterGeneration = _filterGeneration;
   // ── 텍스트노드별 매칭 수집 (같은 노드 매칭을 함께 모아 한 번에 렌더) ──
   // TreeWalker 수집과 탐지를 같은 slice에서 수행한다. 매칭 없는 Text 배열은 보관하지 않는다.
   const walker = createTextWalker(container);
@@ -589,11 +594,11 @@ async function processContainer(container) {
   // ── 배치 조회 + L13 재시도 (타임아웃/에러 키만 재조회) ──
   let keysToLookup = Array.from(keyToEntries.keys());
   for (let attempt = 1; attempt <= LOOKUP_MAX_ATTEMPTS && keysToLookup.length > 0; attempt++) {
-    if (!container.isConnected) {
+    if (!container.isConnected || filterGeneration !== _filterGeneration) {
       return { syncDuration, maxSyncSliceMs, detected: totalDetected, unresolved: keysToLookup.length, cancelled: true };
     }
     const lookup = await batchLookup(keysToLookup, container);
-    if (!container.isConnected) {
+    if (!container.isConnected || filterGeneration !== _filterGeneration) {
       return { syncDuration, maxSyncSliceMs, detected: totalDetected, unresolved: keysToLookup.length, cancelled: true };
     }
     const applyStart = performance.now();
@@ -643,6 +648,9 @@ async function processContainer(container) {
   let anyOrange = false;
   sliceStart = performance.now();
   for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
+    if (filterGeneration !== _filterGeneration) {
+      return { syncDuration, maxSyncSliceMs, detected: totalDetected, unresolved: 0, cancelled: true };
+    }
     const node = nodes[nodeIndex];
     if (!node.textNode.isConnected || !container.contains(node.textNode)) continue;
     // 조회 중 스트리밍/재렌더된 Text에 과거 위치의 매칭을 삽입하지 않는다.
@@ -664,6 +672,9 @@ async function processContainer(container) {
     }
   }
   maxSyncSliceMs = Math.max(maxSyncSliceMs, performance.now() - sliceStart);
+  if (filterGeneration !== _filterGeneration) {
+    return { syncDuration, maxSyncSliceMs, detected: totalDetected, unresolved: 0, cancelled: true };
+  }
   if (anyOrange) showOrangeToast();
   return { syncDuration, maxSyncSliceMs, detected: totalDetected, unresolved: keysToLookup.length };
 }
@@ -934,17 +945,21 @@ function copyOrangeCases() {
   const text = `다음 사건번호의 출처를 확인하세요 : ${cases.join(', ')}`;
 
   const execFallback = () => {
+    let input;
     try {
-      const input = document.createElement('textarea');
+      input = document.createElement('textarea');
       input.value = text;
       document.body.appendChild(input);
       input.select();
-      document.execCommand('copy');
-      document.body.removeChild(input);
-      return { count: cases.length, text };
+      const copied = document.execCommand('copy');
+      return copied
+        ? { count: cases.length, text }
+        : { count: cases.length, text, copyFailed: true };
     } catch (e) {
       console.error('[bupgogae] execCommand 복사 실패:', e);
       return { count: cases.length, text, copyFailed: true };
+    } finally {
+      input?.remove();
     }
   };
 

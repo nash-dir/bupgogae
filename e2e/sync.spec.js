@@ -83,9 +83,6 @@ function buildManifest(payloadText) {
 async function mockBupApi(context, handlers) {
   await context.route('https://api.bup.live/**', async (route) => {
     const url = route.request().url();
-    if (url.includes('/adapters.json')) {
-      return route.fulfill({ contentType: 'application/json', body: '{"adapters":{}}' });
-    }
     if (url.includes('/manifest-v0.9.0.json')) {
       if (handlers.onManifest) return handlers.onManifest(route);
       return route.fulfill({ contentType: 'application/json', body: buildManifest(PAYLOAD_V1) });

@@ -5,8 +5,6 @@
  * (chrome/IndexedDB 의존 없이 직접 require 가능)
  */
 const {
-  isValidCssSelector,
-  sanitizeAdaptersConfig,
   validateVersionDate,
   validateDbIntegrity,
   deriveShortCaseKeys,
@@ -38,94 +36,6 @@ describe('deriveShortCaseKeys', () => {
     const meta = require('../data/bupgogae_meta.json');
     expect(deriveShortCaseKeys(bundled.cases, meta.case_code_map))
       .toEqual(meta.short_case_keys);
-  });
-});
-
-describe('isValidCssSelector', () => {
-  test('정상 셀렉터 통과', () => {
-    expect(isValidCssSelector('div.response > p')).toBe(true);
-    expect(isValidCssSelector('[data-message-author-role="assistant"]')).toBe(true);
-    expect(isValidCssSelector('.markdown, .prose')).toBe(true);
-  });
-
-  test('위험 패턴 차단', () => {
-    expect(isValidCssSelector('div:has(script)')).toBe(false);
-    expect(isValidCssSelector('background:url(x)')).toBe(false);
-    expect(isValidCssSelector('@import "evil"')).toBe(false);
-    expect(isValidCssSelector('a[href=javascript:alert(1)]')).toBe(false);
-  });
-
-  test('빈 값/비문자열/과길이 거부', () => {
-    expect(isValidCssSelector('')).toBe(false);
-    expect(isValidCssSelector(null)).toBe(false);
-    expect(isValidCssSelector(123)).toBe(false);
-    expect(isValidCssSelector('a'.repeat(151))).toBe(false);
-    expect(isValidCssSelector('a'.repeat(10), 5)).toBe(false); // maxLen 파라미터
-  });
-
-  test('허용 문자 외 문자(한글 등) 거부', () => {
-    expect(isValidCssSelector('div.응답')).toBe(false);
-  });
-});
-
-describe('sanitizeAdaptersConfig', () => {
-  test('responseSelectors: 크기 제한 + 무효 셀렉터 제거', () => {
-    const config = {
-      adapters: {
-        chatgpt: {
-          responseSelectors: ['.good', 'div:has(x)', '.also-good'],
-        },
-      },
-    };
-    sanitizeAdaptersConfig(config, { maxPerSite: 10, maxLen: 150 });
-    expect(config.adapters.chatgpt.responseSelectors).toEqual(['.good', '.also-good']);
-  });
-
-  test('responseSelectors 배열 크기 maxPerSite로 제한', () => {
-    const config = {
-      adapters: { x: { responseSelectors: ['.a', '.b', '.c', '.d'] } },
-    };
-    sanitizeAdaptersConfig(config, { maxPerSite: 2 });
-    expect(config.adapters.x.responseSelectors).toEqual(['.a', '.b']);
-  });
-
-  test('비배열 responseSelectors는 제거', () => {
-    const config = { adapters: { x: { responseSelectors: 'not-array' } } };
-    sanitizeAdaptersConfig(config);
-    expect(config.adapters.x.responseSelectors).toBeUndefined();
-  });
-
-  test('무효 streamingIndicator 제거', () => {
-    const config = {
-      adapters: { x: { streamingIndicator: 'div:has(loading)' } },
-    };
-    sanitizeAdaptersConfig(config);
-    expect(config.adapters.x.streamingIndicator).toBeUndefined();
-  });
-
-  test('scraping_adapters 무효 셀렉터 제거', () => {
-    const config = {
-      adapters: {},
-      scraping_adapters: { site: { title: '.t', body: 'url(evil)' } },
-    };
-    sanitizeAdaptersConfig(config);
-    expect(config.scraping_adapters.site).toEqual({ title: '.t' });
-  });
-
-  test('null/array 사이트 설정을 예외 없이 제거하고 사이트 수를 제한', () => {
-    const config = {
-      adapters: {
-        good: { responseSelectors: ['.good'] },
-        nullSite: null,
-        arraySite: [],
-        overflow: { responseSelectors: ['.overflow'] },
-      },
-      scraping_adapters: { bad: null, good: { title: '.title' } },
-    };
-
-    expect(() => sanitizeAdaptersConfig(config, { maxSites: 3 })).not.toThrow();
-    expect(config.adapters).toEqual({ good: { responseSelectors: ['.good'] } });
-    expect(config.scraping_adapters).toEqual({ good: { title: '.title' } });
   });
 });
 

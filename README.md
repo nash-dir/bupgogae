@@ -23,11 +23,13 @@
   * ChatGPT (`chatgpt.com`)
   * Claude (`claude.ai`)
   * Google Gemini (`gemini.google.com`)
-  * Microsoft Copilot (`copilot.microsoft.com`)
-  * Perplexity (`perplexity.ai`)
+  * Microsoft Copilot (`copilot.microsoft.com`, `copilot.com`, `copilot.cloud.microsoft`) — 실험적 지원
+  * Perplexity (`perplexity.ai`, `www.perplexity.ai`)
   * Grok (`grok.com`) — 실험적 지원
 * **📖 사이드바 판례 원문 뷰어**
-  * 초록색(DB에서 찾음) 배지를 클릭하면 사용자의 요청에 따라 `www.law.go.kr` 원문을 우측 뷰어에서 조회합니다. (Shadow DOM 캡슐화로 호스트 UI와 충돌 방지)
+  * 초록색(DB에서 찾음) 배지의 원문 링크를 누르면 `www.law.go.kr` 원문을 우측 뷰어에서 조회합니다. 배지는 Tab·Enter·Space로 조작하고, Escape로 안내창·뷰어를 닫을 수 있습니다.
+* **⚙️ 적용 범위 설정**
+  * 전체·사이트별 적용 여부, 법원·헌법재판소 확인 범위, 미확인 사건번호 안내 배너를 설정할 수 있습니다. 법원·헌재 필터는 새로고침 없이 현재 대화에 반영됩니다.
 * **📋 미확인 판례 일괄 복사**
   * 주황색(DB 미확인) 사건번호가 감지되면 안내 배너의 **'사건번호 복사' 버튼**으로 클립보드에 일괄 복사합니다. 단축키(`Alt+C`)도 지원하지만, 일부 서비스가 단축키를 가로채는 경우 버튼이 안정적으로 동작합니다. 팝업에서 안내 배너 표시 여부를 켜고 끌 수 있습니다.
 * **📦 번들 DOM 어댑터**
@@ -35,7 +37,18 @@
 * **⚡ 초고속 로컬 매칭**
   * 수십만 건의 판례 메타데이터를 압축된 JSON 형태로 로컬 IndexedDB에 동기화하여, 외부 API 통신 지연 없이 즉각적으로 조회합니다.
 * **🔒 로컬 텍스트 판별**
-  * 프롬프트·답변 텍스트의 패턴 탐색과 DB 대조는 브라우저에서 수행하며 그 텍스트를 외부로 전송하지 않습니다. DB·manifest 갱신과 사용자가 요청한 원문 조회에는 보조 네트워크 통신이 있습니다. 자세한 내용은 [개인정보처리방침](PRIVACY.md)을 참고하세요.
+  * 답변 텍스트의 패턴 탐색과 DB 대조는 브라우저에서 수행하며, 프롬프트·답변 텍스트를 외부 분석 서버로 전송하지 않습니다. DB·manifest 갱신과 사용자가 요청한 원문 조회에는 보조 네트워크 통신이 있습니다. 자세한 내용은 [개인정보처리방침](PRIVACY.md)을 참고하세요.
+
+## 0.10.0 변경사항
+
+* 6개 챗봇의 배지 표시와 원문 뷰어 사용성을 개선했습니다.
+* 원문을 빠르게 전환할 때 이전 응답이 최신 판례를 덮던 문제를 수정했습니다.
+* 법원·헌재 필터를 현재 대화에 즉시 반영하고, 업데이트 후에도 전체 OFF 설정을 유지합니다.
+* 키보드와 포커스 복귀, 좁은 화면의 툴팁, 팝업의 대비·스크롤을 보완했습니다.
+* 화면 선택자는 확장에 포함해 배포하며, 이전 원격 선택자 캐시를 제거합니다.
+
+스토어 제출용 상세 설명과 changelog는 [0.10.0 게시 문구](store/release-0.10.0.ko.txt)를 참고하세요.
+확장 버전과 DB 통신 계약은 별개이며, 0.10.0도 기존 `v0.9.0` DB 계약을 사용합니다.
 
 ## 🚀 설치 방법
 
@@ -97,11 +110,13 @@ Coverage is limited to courts and the Constitutional Court. Court judgments on t
   * ChatGPT (`chatgpt.com`)
   * Claude (`claude.ai`)
   * Google Gemini (`gemini.google.com`)
-  * Microsoft Copilot (`copilot.microsoft.com`)
-  * Perplexity (`perplexity.ai`)
+  * Microsoft Copilot (`copilot.microsoft.com`, `copilot.com`, `copilot.cloud.microsoft`) — experimental
+  * Perplexity (`perplexity.ai`, `www.perplexity.ai`)
   * Grok (`grok.com`) — experimental
 * **📖 Built-in Sidebar Viewer**
-  * Click a Green (Found in DB) badge to request the selected document from `www.law.go.kr` in a sliding sidebar. Uses Shadow DOM to prevent CSS conflicts.
+  * Open the source link in a Green (Found in DB) badge to load the selected document from `www.law.go.kr` in the sidebar. Use Tab, Enter and Space for badges; Escape closes the information panel or viewer.
+* **⚙️ Scope Settings**
+  * Enable or disable all sites or an individual site, court and Constitutional Court checks, and the missing-case notification banner. Category filters rescan the current conversation without reloading it.
 * **📋 Extract Cases Not Found in the Local DB**
   * When Orange (Not found in local DB) case numbers are detected, copy them all to your clipboard via the **"Copy case numbers" button** on the notification banner. The `Alt+C` shortcut also works, but the button stays reliable when a site overrides the shortcut. The banner can be toggled on/off from the popup.
 * **📦 Bundled DOM Adapters**
@@ -110,6 +125,16 @@ Coverage is limited to courts and the Constitutional Court. Court judgments on t
   * Case metadata is compressed and synchronized to local IndexedDB, avoiding a per-citation external analysis request.
 * **🔒 Local Text Analysis**
   * Displayed-response pattern matching and database lookup happen in the browser, and that text is not transmitted externally. Supporting network calls update the database/manifest and fetch an original document when requested by the user; see the [Privacy Policy](PRIVACY.md).
+
+## What's New in 0.10.0
+
+* Improved badge compatibility across six chat platforms and original-document navigation.
+* Prevented older source responses from replacing the latest selected decision.
+* Applied category filters to the current conversation and preserved global OFF across updates.
+* Improved keyboard focus, narrow-screen tooltips, popup contrast and scrolling.
+* Bundled all selectors with the extension and removed legacy remote selector caches.
+
+Extension releases and DB contracts are versioned independently: 0.10.0 continues to use the `v0.9.0` DB contract.
 
 ## 🚀 Installation
 
@@ -407,10 +432,10 @@ Case names are stored as raw strings without tokenization. We evaluated two comp
 
 ### Manifest-First Static File Sync
 
-The automatic update path downloads static public data and configuration. It does not attach prompt/response text, telemetry, or analytics payloads:
+The automatic update path downloads the public database and integrity manifest. Selectors are packaged with the extension. Requests do not attach prompt/response text, telemetry, or analytics payloads:
 
 ```
-   Serverless Pipeline (daily 24:00)        Extension
+   Serverless Pipeline (daily 22:00 KST)   Extension
    ┌──────────────────────────┐            ┌──────────────────────────┐
    │ 법제처 API → master.db   │            │ Install: load bundled DB │
    │ (date-modulus scan)      │            │ from extension/data/     │
@@ -455,7 +480,7 @@ A failed page remains in the backlog. The crawler is stopped by an OS-level 75-m
 
 ### CI trust boundary
 
-No marketplace WARP action or manually provisioned WireGuard identity runs in the crawl job. A short checked-in script downloads the official Cloudflare Ubuntu 24.04 package at the reviewed version (`2026.6.880.0`), verifies its pinned SHA-256, creates an anonymous ephemeral consumer registration, selects MASQUE, and fails closed unless `cdn-cgi/trace` reports an active WARP route. `WARP_PRIVATE_KEY` and any replacement Cloudflare credential are therefore unnecessary. An authorized repository owner must first review Cloudflare's Application Terms and set the non-secret repository variable `CLOUDFLARE_WARP_TOS_ACCEPTED=true`; the workflow will not install or register the client otherwise. The PR smoke runs a local-proxy connection on a separate GitHub-hosted runner with no repository secrets, so it does not replace the runner's default route or DNS. The daily crawler uses the same pinned client in full-tunnel mode; its first production run remains the full-route parity check.
+No marketplace WARP action or manually provisioned WireGuard identity runs in the crawl job. A short checked-in script downloads the official Cloudflare Ubuntu 24.04 package at the reviewed version (`2026.6.880.0`), verifies its pinned SHA-256, creates an anonymous ephemeral consumer registration, selects MASQUE, and fails closed unless `cdn-cgi/trace` reports an active WARP route. `WARP_PRIVATE_KEY` and any replacement Cloudflare credential are therefore unnecessary. An authorized repository owner must first review Cloudflare's Application Terms and set the non-secret repository variable `CLOUDFLARE_WARP_TOS_ACCEPTED=true`; the workflow will not install or register the client otherwise. The PR smoke runs a local-proxy connection on a separate GitHub-hosted runner with no repository secrets, so it does not replace the runner's default route or DNS. The daily crawler uses the same pinned client in local-proxy mode. Only law.go.kr requests use the SOCKS5 proxy; GitHub access, R2 publication and notifications retain the normal network route.
 
 The official package starts `warp-svc` as a privileged daemon, which remains alive while the crawler uses WARP. It is therefore an explicit part of the crawl job's trusted computing base and could technically observe the later law.go.kr API-key process; ending the setup step alone is not a process-isolation boundary. Only `BUPGOGAE_API_KEY` is available to the crawler step, and the workflow deletes the ephemeral registration and stops the daemon immediately after crawling. R2 and Telegram credentials remain in separate jobs/steps and are never available on the WARP runner. Production Python dependencies, including transitives, are exact-version and wheel-hash locked, and the Docker base image is digest-pinned.
 
@@ -512,12 +537,12 @@ extension/
 │   │   ├── base-adapter.js     #   SiteAdapter base class
 │   │   └── registry.js         #   Inline adapters & Hostname → adapter mapping
 │   ├── case-regex.js           # Case number extraction & validation
-│   ├── precedent-badge.js      # 3-level inline highlight + tooltip
+│   ├── precedent-badge.js      # Four-state inline badge + tooltip
 │   ├── sidebar.js              # Shadow DOM sidebar for case law documents
 │   └── bupgogae-content.js     # Main controller (adapter-agnostic)
 ├── popup/                      # Extension popup UI (enable/disable toggle)
 ├── icons/                      # Extension icons (16/48/128 px)
-├── data/                       # Bundled case law database (140K+ entries)
+├── data/                       # Bundled case law database and selectors
 └── manifest.json               # Chrome Extension Manifest V3
 
 pipeline/

@@ -94,20 +94,6 @@ async function installCurrentExtensionFixture(extensionPath) {
   await fs.promises.rm(extensionPath, { recursive: true, force: true });
   await fs.promises.cp(CURRENT_EXTENSION_PATH, extensionPath, { recursive: true });
 
-  // 저장소의 release version bump와 독립적으로 실제 0.8.2→0.9.0 update
-  // lifecycle을 재현한다. 제품 소스의 manifest는 수정하지 않고 임시 복사본만
-  // release version으로 고정한다.
-  const manifestPath = path.join(extensionPath, 'manifest.json');
-  const manifest = JSON.parse(
-    await fs.promises.readFile(manifestPath, 'utf8'),
-  );
-  manifest.version = '0.9.0';
-  await fs.promises.writeFile(
-    manifestPath,
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    'utf8',
-  );
-
   // 자동 install/startup sync가 legacy fallback을 A/B snapshot으로 교체하지
   // 못하게 하는 health-invalid 번들이다. 실행 코드는 현재 extension 소스 그대로며,
   // 원격 네트워크도 launch flag와 route로 차단한다.

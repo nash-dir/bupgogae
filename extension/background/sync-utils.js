@@ -6,8 +6,6 @@
  * 가능하며, db-sync.js는 importScripts('sync-utils.js')로 로드한다.
  *
  * 공개 API (globalThis 또는 module.exports):
- *   isValidCssSelector(s, maxLen)            → boolean
- *   sanitizeAdaptersConfig(config, opts)     → config (in-place 정제)
  *   validateVersionDate(version, opts)        → { ok, error? }
  *   validateDbIntegrity(data, opts)          → { ok, error?, keyCount? }
  *   deriveShortCaseKeys(cases, caseCodeMap)  → string[]
@@ -23,9 +21,6 @@
 (function (root) {
   'use strict';
 
-  const DEFAULT_MAX_SELECTOR_LENGTH = 150;
-  const DEFAULT_MAX_SELECTORS_PER_SITE = 10;
-  const DEFAULT_MAX_ADAPTER_SITES = 50;
   const DEFAULT_VERSION_REGEX = /^\d{8}$/; // YYYYMMDD
   const DAY_MS = 24 * 60 * 60 * 1000;
   const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -64,82 +59,6 @@
       return { ok: false, error: `허용 미래 범위(+${futureSkewDays}일) 초과` };
     }
     return { ok: true };
-  }
-
-  /**
-   * CSS 셀렉터 화이트리스트 검증.
-   * 원격 어댑터 설정에서 받은 셀렉터가 querySelectorAll()에 안전한지 검증한다.
-   * 금지 패턴 차단 + 허용 문자 화이트리스트 조합.
-   *
-   * @param {string} s
-   * @param {number} [maxLen]
-   * @returns {boolean}
-   */
-  function isValidCssSelector(s, maxLen = DEFAULT_MAX_SELECTOR_LENGTH) {
-    if (typeof s !== 'string' || s.length === 0 || s.length > maxLen) return false;
-    const DANGEROUS = [':has(', 'url(', '@import', 'expression(', 'javascript:'];
-    const lower = s.toLowerCase();
-    if (DANGEROUS.some(p => lower.includes(p))) return false;
-    return /^[a-zA-Z0-9\-_.*#>+~:=\[\]"\\,\s()]+$/.test(s);
-  }
-
-  /**
-   * 원격 어댑터 설정의 셀렉터를 화이트리스트 기반으로 정제 (in-place).
-   * - responseSelectors: 배열 크기 제한 + 유효 셀렉터만 유지, 비배열이면 제거
-   * - streamingIndicator: 유효하지 않으면 제거
-   * - scraping_adapters: 유효하지 않은 셀렉터 제거
-   *
-   * @param {Object} config - config.adapters를 가진 설정 객체
-   * @param {{maxPerSite?: number, maxLen?: number, maxSites?: number}} [opts]
-   * @returns {Object} 정제된 config (입력과 동일 객체)
-   */
-  function sanitizeAdaptersConfig(config, opts = {}) {
-    const maxPerSite = opts.maxPerSite || DEFAULT_MAX_SELECTORS_PER_SITE;
-    const maxLen = opts.maxLen || DEFAULT_MAX_SELECTOR_LENGTH;
-    const maxSites = opts.maxSites || DEFAULT_MAX_ADAPTER_SITES;
-
-    if (!config || config.adapters == null || typeof config.adapters !== 'object' ||
-        Array.isArray(config.adapters)) return config;
-
-    const adapterEntries = Object.entries(config.adapters);
-    for (const [siteId] of adapterEntries.slice(maxSites)) delete config.adapters[siteId];
-    for (const [siteId, siteConfig] of adapterEntries.slice(0, maxSites)) {
-      if (!siteConfig || typeof siteConfig !== 'object' || Array.isArray(siteConfig)) {
-        delete config.adapters[siteId];
-        continue;
-      }
-      if (siteConfig.responseSelectors) {
-        const selectors = siteConfig.responseSelectors;
-        if (Array.isArray(selectors)) {
-          config.adapters[siteId].responseSelectors = selectors
-            .slice(0, maxPerSite)
-            .filter(s => isValidCssSelector(s, maxLen));
-        } else {
-          delete config.adapters[siteId].responseSelectors;
-        }
-      }
-      if (siteConfig.streamingIndicator &&
-          !isValidCssSelector(siteConfig.streamingIndicator, maxLen)) {
-        delete config.adapters[siteId].streamingIndicator;
-      }
-    }
-
-    if (config.scraping_adapters && typeof config.scraping_adapters === 'object' &&
-        !Array.isArray(config.scraping_adapters)) {
-      const scrapingEntries = Object.entries(config.scraping_adapters);
-      for (const [siteId] of scrapingEntries.slice(maxSites)) delete config.scraping_adapters[siteId];
-      for (const [siteId, selObj] of scrapingEntries.slice(0, maxSites)) {
-        if (!selObj || typeof selObj !== 'object' || Array.isArray(selObj)) {
-          delete config.scraping_adapters[siteId];
-          continue;
-        }
-        for (const [key, val] of Object.entries(selObj)) {
-          if (!isValidCssSelector(val, maxLen)) delete selObj[key];
-        }
-      }
-    }
-
-    return config;
   }
 
   const CORE_CASE_KEY_REGEX = /^\d{2}(?:[A-Za-z][A-Za-z0-9]*|[가-힣]{1,4})\d+$/;
@@ -463,8 +382,6 @@
   }
 
   const api = {
-    isValidCssSelector,
-    sanitizeAdaptersConfig,
     validateVersionDate,
     validateDbIntegrity,
     deriveShortCaseKeys,

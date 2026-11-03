@@ -31,8 +31,7 @@
         "div[data-message-author-role=\"assistant\"] .markdown",
         "div[data-message-author-role=\"assistant\"]",
         ".markdown.prose"
-      ],
-      "streamingIndicator": "[data-message-role=\"assistant\"]:not([data-message-complete]), .result-streaming"
+      ]
     },
     "claude": {
       "responseSelectors": [

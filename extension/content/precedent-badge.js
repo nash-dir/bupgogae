@@ -54,6 +54,10 @@ const BUPGOGAE_CSS = `
 .bgae-badge:hover {
   filter: brightness(0.92);
 }
+.bgae-badge:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
 
 /* --- Green --- */
 .bgae-green {
@@ -112,8 +116,11 @@ const BUPGOGAE_CSS = `
   position: fixed;
   z-index: 2147483647;
 
-  max-width: 400px;
-  min-width: 200px;
+  max-width: min(400px, calc(100vw - 16px));
+  min-width: min(200px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  box-sizing: border-box;
   padding: 10px 14px;
   border-radius: 6px;
   font-size: 12px;
@@ -125,8 +132,8 @@ const BUPGOGAE_CSS = `
   user-select: none;
 
   transition: opacity 0.15s ease, visibility 0.15s ease;
-  transform: translate(-50%, -100%); /* 왼쪽 중앙, 위쪽으로 올림 */
-  margin-top: -8px; /* 배지와의 간격 */
+  transform: none;
+  margin-top: 0;
 }
 
 /* 표시 상태 (JS에서 제어) */
@@ -160,19 +167,6 @@ const BUPGOGAE_CSS = `
   color: #fed7aa;
   border: 1px solid rgba(234, 88, 12, 0.3);
 }
-
-/* 툴팁 화살표 */
-.bgae-global-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-}
-.bgae-global-tooltip.bgae-tooltip-green::after { border-top-color: #14532d; }
-.bgae-global-tooltip.bgae-tooltip-red::after { border-top-color: #7f1d1d; }
-.bgae-global-tooltip.bgae-tooltip-orange::after { border-top-color: #7c2d12; }
 
 /* 닫기 버튼 */
 .bgae-tooltip-close {
@@ -258,7 +252,7 @@ const BUPGOGAE_CSS = `
   background: #e6f4ea;
   border-radius: 3px;
   border-left: 2.5px solid rgba(34, 197, 94, 0.8);
-  color: #1a73e8;
+  color: #174ea6;
   text-decoration: none;
   font-size: 11.5px;
   line-height: 1.5;
@@ -277,7 +271,7 @@ const BUPGOGAE_CSS = `
   width: 26px;
   background: #e6f4ea;
   border-radius: 3px;
-  color: #1a73e8;
+  color: #174ea6;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -577,16 +571,21 @@ function getGlobalTooltip() {
   if (!_globalTooltip) {
     _globalTooltip = document.createElement('div');
     _globalTooltip.className = 'bgae-global-tooltip';
+    _globalTooltip.id = 'bupgogae-case-info';
+    _globalTooltip.setAttribute('role', 'dialog');
+    _globalTooltip.setAttribute('aria-label', '사건번호 확인 정보');
+    _globalTooltip.setAttribute('aria-hidden', 'true');
+    _globalTooltip.setAttribute('inert', '');
     
     // 닫기 버튼
     const closeBtn = document.createElement('button');
     closeBtn.className = 'bgae-tooltip-close';
     closeBtn.textContent = '\u00D7'; // ×
+    closeBtn.setAttribute('aria-label', '사건번호 정보 닫기');
     closeBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      unpinCurrentTooltip();
-      hideTooltip();
+      dismissTooltip();
     });
     
     const contentBox = document.createElement('div');
@@ -630,9 +629,19 @@ function updateTooltipPosition() {
   clearDetachedTooltip();
   if (!_activeBadge || !_globalTooltip) return;
   const rect = _activeBadge.getBoundingClientRect();
-  // 위치: 배지의 가로 중앙, 세로 상단 (transform: translate(-50%, -100%)로 보정됨)
-  _globalTooltip.style.left = (rect.left + rect.width / 2) + 'px';
-  _globalTooltip.style.top = rect.top + 'px';
+  const tooltipRect = _globalTooltip.getBoundingClientRect();
+  const margin = 8;
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const width = Math.min(tooltipRect.width, Math.max(0, viewportWidth - margin * 2));
+  const height = Math.min(tooltipRect.height, Math.max(0, viewportHeight - margin * 2));
+  const clamp = (value, max) => Math.max(margin, Math.min(value, Math.max(margin, max)));
+  const above = rect.top - margin - height;
+  const below = rect.bottom + margin;
+  _globalTooltip.style.left = clamp(rect.left + rect.width / 2 - width / 2,
+    viewportWidth - margin - width) + 'px';
+  _globalTooltip.style.top = clamp(above >= margin ? above : below,
+    viewportHeight - margin - height) + 'px';
 }
 
 /**
@@ -644,6 +653,8 @@ function showTooltip(badge, level, options, precedentString) {
   if (_currentPinnedTooltip && _activeBadge !== badge) return;
   
   const tooltip = getGlobalTooltip();
+  tooltip.removeAttribute('inert');
+  tooltip.setAttribute('aria-hidden', 'false');
   const contentBox = tooltip.querySelector('.bgae-tooltip-content-box');
   contentBox.replaceChildren(); // L-1: replaceChildren()이 의도가 더 명확
   
@@ -680,7 +691,9 @@ function showTooltip(badge, level, options, precedentString) {
   tooltip.className = `bgae-global-tooltip bgae-show bgae-tooltip-${level}`;
   if (_currentPinnedTooltip) tooltip.classList.add('bgae-pinned');
   
+  if (_activeBadge && _activeBadge !== badge) _activeBadge.setAttribute('aria-expanded', 'false');
   _activeBadge = badge;
+  badge.setAttribute('aria-expanded', 'true');
   if (typeof MutationObserver !== 'undefined') {
     if (!_tooltipDetachObserver) {
       _tooltipDetachObserver = new MutationObserver(clearDetachedTooltip);
@@ -705,9 +718,13 @@ function clearDetachedTooltip() {
 function hideTooltip() {
   if (_currentPinnedTooltip) return; // 고정된 상태면 숨기지 않음
   if (_globalTooltip) {
+    if (_globalTooltip.contains(document.activeElement)) document.activeElement.blur();
     _globalTooltip.classList.remove('bgae-show');
     _globalTooltip.classList.remove('bgae-pinned');
+    _globalTooltip.setAttribute('aria-hidden', 'true');
+    _globalTooltip.setAttribute('inert', '');
   }
+  _activeBadge?.setAttribute('aria-expanded', 'false');
   _activeBadge = null;
   _tooltipDetachObserver?.disconnect();
 }
@@ -720,6 +737,13 @@ function unpinCurrentTooltip() {
   if (_globalTooltip) {
     _globalTooltip.classList.remove('bgae-pinned');
   }
+}
+
+function dismissTooltip() {
+  const badge = _activeBadge;
+  unpinCurrentTooltip();
+  if (badge?.isConnected) badge.focus({ preventScroll: true });
+  hideTooltip();
 }
 
 /**
@@ -741,6 +765,13 @@ function togglePinTooltip(badge, level, options, precedentString) {
 
 // 문서 전체 클릭 시 고정 해제 (배지나 툴팁 외 영역 클릭 시)
 if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && _activeBadge) {
+      event.preventDefault();
+      event.stopPropagation();
+      dismissTooltip();
+    }
+  });
   document.addEventListener('click', (e) => {
     if (_currentPinnedTooltip) {
       if (!e.target.closest('.bgae-badge') && !e.target.closest('.bgae-global-tooltip')) {
@@ -773,11 +804,18 @@ if (typeof document !== 'undefined') {
  * @param {Object} [options]
  * @returns {HTMLElement}
  */
-function _createBadge(precedentString, level, options = {}) {
+function _createBadge(precedentString, level, options = {}, keyboardControl = true) {
   const badge = document.createElement('span');
   badge.className = `bgae-badge bgae-${level}`;
   badge.setAttribute('data-bgae-level', level);
   badge.setAttribute('data-bgae-case', precedentString);
+  if (keyboardControl) {
+    badge.setAttribute('role', 'button');
+    badge.tabIndex = 0;
+    badge.setAttribute('aria-haspopup', 'dialog');
+    badge.setAttribute('aria-controls', 'bupgogae-case-info');
+    badge.setAttribute('aria-expanded', 'false');
+  }
   badge.textContent = precedentString;
 
   badge.addEventListener('mouseenter', () => {
@@ -791,6 +829,18 @@ function _createBadge(precedentString, level, options = {}) {
     e.stopPropagation();
     togglePinTooltip(badge, level, options, precedentString);
   });
+  if (keyboardControl) {
+    badge.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      badge.click();
+      if (_currentPinnedTooltip && _activeBadge === badge) {
+        (_globalTooltip.querySelector('a') || _globalTooltip.querySelector('button'))
+          ?.focus({ preventScroll: true });
+      }
+    });
+  }
 
   return badge;
 }
@@ -810,7 +860,10 @@ function renderPrecedentBadge(textNode, precedentString, level, options = {}) {
   const beforeText = text.slice(0, idx);
   const afterText = text.slice(idx + precedentString.length);
 
-  const badge = _createBadge(precedentString, level, options);
+  // A source citation may already be a link. Keep its native keyboard action
+  // instead of creating another interactive control nested inside it.
+  const nativeControl = parent.closest?.('a[href], button, [role="button"], [role="link"]');
+  const badge = _createBadge(precedentString, level, options, !nativeControl);
 
   // ── DOM 교체 ──
   // 분할로 생성하는 텍스트 노드는 _ownTextNodes에 등록해 옵저버가 무시하도록 함.
@@ -860,6 +913,7 @@ function renderPrecedentBadges(textNode, matches) {
   const frag = document.createDocumentFragment();
   const created = [];
   let cursor = 0;
+  const nativeControl = parent.closest?.('a[href], button, [role="button"], [role="link"]');
 
   for (const m of sorted) {
     const idx = text.indexOf(m.precedentString, cursor);
@@ -871,7 +925,7 @@ function renderPrecedentBadges(textNode, matches) {
       frag.appendChild(before);
     }
 
-    const badge = _createBadge(m.precedentString, m.level, m.options || {});
+    const badge = _createBadge(m.precedentString, m.level, m.options || {}, !nativeControl);
     frag.appendChild(badge);
     created.push(badge);
     cursor = idx + m.precedentString.length;

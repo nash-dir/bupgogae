@@ -23,7 +23,6 @@ test('six-site DOM fixtures exclude prompts and survive streaming and reply repl
       document.body.innerHTML = '<main><div data-message-role="user"><div class="prose markdown">89두1 2016도10912 2026헌가1</div></div>' + html + '<textarea>89두1</textarea></main>';
       const instance = new window.bupgogaeAdapters[name]();
       instance.setBundledConfig(adapters.adapters[instance.siteId]);
-      instance.setRemoteConfig({ adapters: { [instance.siteId]: { responseSelectors: ['.stale-selector', 'main'] } } });
       let answer = instance.findResponseContainers()[0];
       answer.textContent = '89두';
       answer.firstChild.data += '1, 2016도10912, 2026헌가1.';

@@ -18,6 +18,20 @@ describe('DOM 처리 예산과 circuit breaker', () => {
     content.__setCategoryFiltersForTest({ court: true, constitutional: true });
   });
 
+  test('missing response containers do not request remote selectors or scan prompt text', async () => {
+    content.__resetSchedulerForTest();
+    document.body.innerHTML = '<main><textarea>89두1</textarea></main>';
+    content.__setAdapterForTest({ findResponseContainers: () => [] });
+    try {
+      await content.processAllResponses();
+      await content.processAllResponses();
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+      expect(document.querySelectorAll('.bgae-badge')).toHaveLength(0);
+    } finally {
+      content.__setAdapterForTest(null);
+    }
+  });
+
   test('live scan diagnostics contain numeric timings without conversation text', async () => {
     const root = document.createElement('div');
     root.textContent = '비공개 문장 표본: 2026다0';

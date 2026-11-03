@@ -187,9 +187,6 @@ async function launchHermeticContext(userDataDir, { headless, channel }) {
     await context.route('https://api.bup.live/**', (route) => {
       const url = route.request().url();
       if (url.includes('/db-v0.9.0.json.gz')) return route.fulfill({ status: 404, body: 'not found' });
-      if (url.includes('/adapters.json')) {
-        return route.fulfill({ contentType: 'application/json', body: '{"adapters":{}}' });
-      }
       return route.fulfill({ status: 404, body: 'not found' });
     });
     // 2) 법제처 요청은 기본 모의 응답 (테스트에서 재등록하여 오버라이드 가능)

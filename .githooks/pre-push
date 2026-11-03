@@ -57,7 +57,7 @@ if ! "$PYTHON" -m unittest discover -s pipeline -p "test_*.py" -v; then
   FAILED=1
 fi
 
-echo "📦 [5/5] 0.9.0 release bundle 검증"
+echo "📦 [5/5] release bundle 검증"
 if ! "$PYTHON" scripts/package.py; then
   FAILED=1
 fi

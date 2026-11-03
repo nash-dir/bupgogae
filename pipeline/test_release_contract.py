@@ -46,6 +46,9 @@ class ReleaseContractTests(unittest.TestCase):
                         validate_payload(body, min_keys=1)
 
     def test_packager_rejects_bad_records_versions_and_keys(self):
+        release_version = json.loads(
+            (Path(packager.ROOT) / "package.json").read_text(encoding="utf-8")
+        )["version"]
         for sample in CORPUS["samples"]:
             if sample.get("omitKeys"):
                 continue  # Release bundles require keys, older network payloads may omit it.
@@ -62,5 +65,5 @@ class ReleaseContractTests(unittest.TestCase):
                 (data / "db.json").write_bytes(body)
                 (data / "bupgogae_meta.json").write_text(json.dumps(meta), encoding="utf-8")
                 with mock.patch.object(packager, "SRC", directory), mock.patch.object(packager, "MIN_BUNDLE_CASES", 1):
-                    errors, _ = packager.validate_release_sources("0.9.0")
+                    errors, _ = packager.validate_release_sources(release_version)
                 self.assertEqual(not errors, sample["valid"], errors)

@@ -6,6 +6,12 @@ go/no-go 기준을 정의한다. 코드 merge, R2 파이프라인 전환, Chrome
 
 ## 선정한 splash zone
 
+2026-11-02 현재: backend 복구 변경은 main에 반영됐으며 운영 수집·게시 및
+readback 검증을 마쳤다. 프론트엔드는 사용자 수동 조작으로 6개 서비스의 배지·원문·필터·키보드
+smoke를 확인했다. 현재 검증 범위는 [품질 평가](quality-evaluation.md), 실제 사이트의
+입력·조작 방식은 [수동 QA 프로토콜](standard-tester.md)을 따른다.
+아래 초기 RC 해시와 backend 전환 계획은 당시 기록이며 최종 제출 ZIP의 증적으로 사용하지 않는다.
+
 ### 1. 백엔드: 새 게시 프로토콜을 먼저 적용
 
 첫 splash zone은 **0.8.2 Store 확장을 그대로 둔 상태에서 새 pipeline만
@@ -40,10 +46,10 @@ migration의 대체물이 될 수 없다.
 
 ### 3. 실제 사이트 smoke
 
-실제 사이트의 첫 대상은 selector 범위가 명확한 **읽기 전용 ChatGPT shared
-conversation**으로 한다. 사용자 prompt를 제출하거나 개인 대화·개인 프로필을
-사용하지 않는다. 그 다음 Gemini, 이후 Claude·Copilot·Perplexity·Grok
-순으로 확대한다.
+실제 사이트에서는 사용자가 새 테스트 대화에 표준 프롬프트를 직접 입력·전송하고
+결과를 확인한다. ChatGPT, Gemini, Claude, Copilot, Perplexity, Grok 순서로
+진행하며 에이전트는 실제 AI 사이트를 자동 조작·조회하지 않는다.
+반복 자동 검증은 계정이 없는 격리 모의 페이지에서 수행한다.
 
 ## M0 — Release candidate 고정
 

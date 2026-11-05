@@ -28,7 +28,7 @@ class DiagnosticTests(unittest.TestCase):
             db.close()
             before = path.read_bytes()
             report = diagnose(path)
-            self.assertEqual(report["exportError"], "reference_record_removed_or_changed")
+            self.assertIsNone(report["exportError"])
             self.assertEqual(report["differenceCount"], 1)
             self.assertEqual(report["referenceSha256"], digest)
             self.assertEqual(report["reviewedMetadataRaw"], {})

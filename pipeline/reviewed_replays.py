@@ -11,6 +11,7 @@ import requests
 from known_errors import CorrectionError, LIST_FIELDS, _unique_object, validate_record
 from law_normalization import expand_merged_case_numbers, is_merged_case_number, normalize_decision_date
 from log_setup import get_logger
+from validate import MAX_CASE_NUMBER_LEN
 
 log = get_logger(__name__)
 
@@ -92,7 +93,10 @@ def verify_existing_identity(fields, archived, corrected, *, fetch=fetch_detail)
         courts.update({branch[1], branch[1] + branch[2] + "재판부"})
     if (fields.get("사건명") != corrected["case_name"]
             or normalize_decision_date(fields.get("선고일자", "")) != corrected["date"]
-            or fields.get("사건번호") not in numbers or fields.get("법원명") not in courts):
+            or (fields.get("사건번호") not in numbers
+                and not _same_complete_number(fields.get("사건번호"), number))
+            or fields.get("법원명", "").replace(" ", "") not in
+            {candidate.replace(" ", "") for candidate in courts}):
         return False
     detail = fetch(sid)
     expected = {"사건명": corrected["case_name"], "사건번호": number,
@@ -102,12 +106,46 @@ def verify_existing_identity(fields, archived, corrected, *, fetch=fetch_detail)
     alternatives = [expected]
     if branch:
         alternatives.append(dict(expected, 사건번호=f"({branch[2]}){number}", 법원명=branch[1]))
-    if (detail.get("metadata") not in alternatives
+    metadata = detail.get("metadata")
+    matches_detail = isinstance(metadata, dict) and any(
+        _same_complete_number(metadata.get("사건번호"), expected["사건번호"])
+        and dict(metadata, 사건번호=expected["사건번호"]) == expected
+        for expected in alternatives)
+    if (not matches_detail
             or not isinstance(detail.get("body"), str) or not detail["body"].strip()):
         raise CorrectionError("known_error_source_changed")
     log.info("  reviewed detail replay serial=%s body_sha256=%s", sid,
              hashlib.sha256(detail["body"].encode()).hexdigest())
     return True
+
+
+def _same_complete_number(observed, reviewed):
+    """Match complete members only against an existing reviewed identity.
+
+    A marked short member inherits the most recent explicitly written year/code,
+    even when another fully written prefix appears later. This interpretation is
+    confined to read-only identity replay; ordinary parsing/admission is unchanged.
+    Main/counterclaim roles retain exact comparison rather than losing labels.
+    """
+    if observed == reviewed:
+        return True
+    if (not isinstance(observed, str) or len(observed) > MAX_CASE_NUMBER_LEN
+            or not is_merged_case_number(reviewed)
+            or any(role in observed or role in reviewed for role in ("본소", "반소"))):
+        return False
+    members, prefix = [], None
+    for token in observed.split(","):
+        token = token.strip()
+        full = re.fullmatch(r"([0-9]{2,4}[가-힣]{1,4})([0-9]+)(?: *\(병합\))?", token)
+        if full:
+            prefix = full[1]
+            members.append(prefix + full[2])
+            continue
+        short = re.fullmatch(r"([0-9]+) *\(병합\)", token)
+        if short is None or prefix is None:
+            return False
+        members.append(prefix + short[1])
+    return tuple(members) == expand_merged_case_numbers(reviewed)
 
 
 def resolve(fields, *, fetch=None):

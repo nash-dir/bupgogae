@@ -34,7 +34,7 @@ any failed range still blocks public publication.
 | `metadata_migration_inventory_mismatch` | Metadata registry and exception dictionary disagree | Repair the reviewed configuration; do not reduce the integrity gate |
 | `reference_metadata_migration_required` | Normal collection attempted a protected metadata correction | Use the explicit reviewed migration on healthy trusted input |
 | `merged_case_members_removed` | New input would remove an existing member | Verify the full original and preserve every reviewed member |
-| `reference_record_removed_or_changed` | Full export differs from a protected reference record | Diagnose the state and review the exact difference; publishing remains blocked |
+| `reference_record_removed_or_changed` | A published case-number/serial member is missing, including merged members | Diagnose the missing identity; ordinary title, date and court updates do not trigger this gate |
 
 Unknown exception text is reduced to a generic safe classification. Known safe
 metadata errors retain their exact enum in crawler and trusted-upload logs.

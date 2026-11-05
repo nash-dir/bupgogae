@@ -10,7 +10,7 @@ import time
 
 import requests
 
-from api import HEADERS, WARP_LAW_PROXY
+from api import HEADERS, WARP_LAW_PROXY, WARP_LAW_REMOTE_DNS_PROXY
 from network_errors import network_error_detail
 
 
@@ -20,8 +20,8 @@ def probe(route, endpoint):
         "https_api": "https://www.law.go.kr/DRF/lawSearch.do?target=prec&type=XML&display=1",
         "http_root": "http://www.law.go.kr/",
     }
-    proxies = {"direct": None, "warp_remote_dns": WARP_LAW_PROXY,
-               "warp_local_dns": WARP_LAW_PROXY.replace("socks5h:", "socks5:")}
+    proxies = {"direct": None, "warp_remote_dns": WARP_LAW_REMOTE_DNS_PROXY,
+               "warp_local_dns": WARP_LAW_PROXY}
     result = {"route": route, "endpoint": endpoint}
     started = time.monotonic()
     with requests.Session() as session:
@@ -41,7 +41,7 @@ def probe(route, endpoint):
 
 
 def main(full=False):
-    routes = ("direct", "warp_remote_dns", "warp_local_dns") if full else ("warp_remote_dns",)
+    routes = ("direct", "warp_remote_dns", "warp_local_dns") if full else ("warp_local_dns",)
     endpoints = ("https_root", "https_api", "http_root") if full else ("https_api",)
     for route in routes:
         for endpoint in endpoints:

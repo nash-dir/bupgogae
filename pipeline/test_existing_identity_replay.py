@@ -14,6 +14,81 @@ import reviewed_replays as replay
 
 
 class ExistingIdentityReplayTests(unittest.TestCase):
+    def mixed_prefix_identity(self):
+        # Official list/detail metadata for 614467, checked on 2026-11-05.
+        title = ('특정경제범죄가중처벌등에관한법률위반(사기)·사기·의료법위반·국민건강보험법위반'
+                 '·사기방조·의료법위반방조·국민건강보험법위반방조·위헌심판제청')
+        record = dict(serial='614467', case_name=title,
+                      case_number='2018고합5,2018고합21(병합),2018고합66(병합),2019초기65',
+                      court='대전지방법원 서산지원', date='20190501')
+        fields = dict(판례일련번호='614467', 데이터출처명='대법원', 사건명=title,
+                      사건번호='2018고합5', 선고일자='2019.05.01', 법원명='대전지방법원서산지원',
+                      사건종류코드='400102')
+        detail = dict(metadata=dict(사건명=title, 사건번호='2018고합5, 21(병합), 66(병합), 2019초기65',
+                                    선고일자='20190501', 법원명='대전지방법원 서산지원'),
+                      body='【주 문】 피고인 1을 징역 2년 6월에 처한다.')
+        return fields, record, detail
+
+    def test_existing_mixed_prefix_identity_accepts_complete_marked_detail_without_writes(self):
+        fields, record, detail = self.mixed_prefix_identity()
+        self.assertNotIn(record['serial'], replay.entries())
+        with tempfile.TemporaryDirectory() as folder:
+            db = MasterDB(str(Path(folder) / 'master.db'))
+            try:
+                db.upsert_raw([record])
+                db.conn.execute('INSERT INTO reviewed_recovery_provenance VALUES(?,?,?,?,?)',
+                                (record['serial'], 'a' * 64, 'b' * 64, json.dumps(record), json.dumps(record)))
+                db.conn.commit()
+                exported = db.export_core()
+                before = list(db.conn.iterdump())
+                verify = replay.verify
+                with mock.patch.object(replay, 'verify', side_effect=lambda f, a, c:
+                                       verify(f, a, c, fetch=lambda _: detail)):
+                    for _ in range(2):
+                        item = ET.Element('prec')
+                        for key, value in fields.items():
+                            ET.SubElement(item, key).text = value
+                        row = runner._precedent_case(item, '20190501', 1, db.raw_replay_checker())
+                        self.assertEqual(db.upsert_raw([row]), (0, 0, 1))
+                self.assertEqual(db.export_core(), exported)
+                self.assertEqual(list(db.conn.iterdump()), before)
+                self.assertTrue(replay.verify(dict(fields, 사건번호=detail['metadata']['사건번호']),
+                                              record, record, fetch=lambda _: detail))
+                fetch = mock.Mock()
+                self.assertIsNone(replay.resolve(fields, fetch=fetch))
+                fetch.assert_not_called()
+            finally:
+                db.close()
+
+    def test_mixed_prefix_replay_rejects_incomplete_ambiguous_or_changed_members(self):
+        fields, record, detail = self.mixed_prefix_identity()
+        for number in ('2018고합5', '2018고합5,21(병합),2019초기65',
+                       '2018고합5,21,66(병합),2019초기65',
+                       '2018고합5,21(병합),67(병합),2019초기65',
+                       '2018고합5,2019초기65,21(병합),66(병합)',
+                       '2018고합5,21(병합),21(병합),2019초기65'):
+            changed = copy.deepcopy(detail)
+            changed['metadata']['사건번호'] = number
+            with self.subTest(number=number), self.assertRaisesRegex(CorrectionError, 'source_changed'):
+                replay.verify(fields, record, record, fetch=lambda _: changed)
+            if number != '2018고합5':
+                fetch = mock.Mock()
+                self.assertFalse(replay.verify(dict(fields, 사건번호=number), record, record, fetch=fetch))
+                fetch.assert_not_called()
+        self.assertTrue(replay._same_complete_number(
+            '2018고합5,21(병합),2019초기65,66(병합)',
+            '2018고합5,2018고합21(병합),2019초기65,2019초기66(병합)'))
+        self.assertFalse(replay._same_complete_number(
+            '2018고합5(반소),2018고합21(본소)', '2018고합5(본소),2018고합21(반소)'))
+        for court in ('대전지방법원서산지원', '대전지방법원 홍성지원'):
+            changed = copy.deepcopy(detail)
+            changed['metadata']['법원명'] = court
+            with self.assertRaisesRegex(CorrectionError, 'source_changed'):
+                replay.verify(fields, record, record, fetch=lambda _: changed)
+        fetch = mock.Mock()
+        self.assertFalse(replay.verify(dict(fields, 법원명='대전지방법원홍성지원'), record, record, fetch=fetch))
+        fetch.assert_not_called()
+
     def fixtures(self):
         for path in sorted((Path(__file__).parent / 'fixtures' / 'reviewed-replays').glob('*-existing.json.gz')):
             yield json.loads(gzip.decompress(path.read_bytes()))

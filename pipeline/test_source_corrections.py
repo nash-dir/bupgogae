@@ -228,8 +228,12 @@ class SourceCorrectionTests(unittest.TestCase):
                 # list update already changed the parent code to branch code.
                 db.conn.execute("UPDATE cases SET court='부산고등법원창원재판부'")
                 db.conn.commit()
-                with self.assertRaisesRegex(ValueError, "reference_record_removed_or_changed"):
-                    db.export_core()
+                ordinary, _ = db.export_core()
+                self.assertEqual(set(ordinary), set(previous))
+                self.assertEqual([r[0] for r in ordinary["14Na21277"]],
+                                 [r[0] for r in previous["14Na21277"]])
+                self.assertEqual(ordinary["14Na21277"][0][1],
+                                 db.court_resolver.code_map["부산고등법원창원재판부"])
                 db.upsert_raw([row])
                 cases, _ = db.export_core()
                 self.assertEqual(set(cases), {"14Na21277", "14Na21284", "14Na21291", "14Na21307", "14Na21314"})

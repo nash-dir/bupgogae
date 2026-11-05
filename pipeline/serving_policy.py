@@ -1,9 +1,10 @@
 """Explicit boundary between immutable legacy raw and verified serving data.
 
 A quarantine is a pinned review of OLD rows, never a catch-all for new errors.
-The reference snapshot protects every existing key, record and court code.
+The reference snapshot protects every existing case-number/serial member and court code.
+Ordinary source metadata may change without freezing publication.
 """
-from collections import Counter
+from collections import defaultdict, deque
 import hashlib
 import json
 
@@ -59,14 +60,6 @@ class ServingPolicy:
                 or quarantine_digest(rows) != self.review.get("quarantineSha256")):
             raise ValueError("quarantine_inventory_changed")
         self.quarantine = {r[0]: (r[1], r[2], r[3]) for r in rows}
-        self.reference_titles = {}
-        for records in self.reference["cases"].values():
-            for record in records:
-                sid, title = str(record[0]), record[3]
-                if sid in self.reference_titles and self.reference_titles[sid] != title:
-                    self.reference_titles[sid] = None
-                else:
-                    self.reference_titles[sid] = title
         reference_ids = {str(record[0]) for records in self.reference["cases"].values() for record in records}
         for sid in reference_ids & self.quarantine.keys():
             # A later full reference can include an ALREADY verified historical
@@ -103,21 +96,21 @@ class ServingPolicy:
             raise ValueError("reference_court_codes_changed")
         for key, expected in self.reference["cases"].items():
             actual = cases.get(key, [])
-            remaining = Counter(tuple(record) for record in actual)
+            positions = defaultdict(deque)
+            for index, record in enumerate(actual):
+                positions[record[0]].append(index)
+            used, preserved = set(), []
             for record in expected:
-                value = tuple(record)
-                if remaining[value] < 1:
+                # Public serial + case-number key identify the publication.
+                # Court, decision date and title are updateable source metadata.
+                matches = positions[record[0]]
+                if not matches:
                     raise ValueError("reference_record_removed_or_changed")
-                remaining[value] -= 1
-            # Preserve the entire reference array as an ordered prefix. New
-            # verified publications may follow; no reference member is dropped.
-            additions = []
-            for record in actual:
-                value = tuple(record)
-                if remaining[value]:
-                    additions.append(record)
-                    remaining[value] -= 1
-            cases[key] = list(expected) + additions
+                index = matches.popleft()
+                used.add(index)
+                preserved.append(actual[index])
+            # Keep established member order using the CURRENT records.
+            cases[key] = preserved + [record for index, record in enumerate(actual) if index not in used]
         return cases
 
 

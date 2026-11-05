@@ -10,7 +10,7 @@ from unittest import mock
 from baseline_health import core_coverage, require_coverage
 from master_db import MasterDB
 from compress import CourtCodeResolver
-from serving_policy import quarantine_digest, row_hash
+from serving_policy import ServingPolicy, quarantine_digest, row_hash
 from api import clean_case_number
 import crawler_runner as runner
 import xml.etree.ElementTree as ET
@@ -171,51 +171,74 @@ class ServingPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unreviewed_unexportable_case"):
             self.db.export_core()
 
-    def test_reference_member_and_metadata_removal_are_rejected(self):
+    def test_reference_deletion_serial_and_case_number_changes_are_rejected(self):
         self.install()
-        for statement in ("DELETE FROM cases WHERE serial='1'", "UPDATE cases SET case_name='changed' WHERE serial='1'"):
-            self.db.conn.execute("SAVEPOINT mutation")
-            self.db.conn.execute(statement)
-            with self.assertRaisesRegex(ValueError, "reference_record_removed_or_changed"):
-                self.db.export_core()
-            self.db.conn.execute("ROLLBACK TO mutation")
-            self.db.conn.execute("RELEASE mutation")
+        for statement in (
+            "DELETE FROM cases WHERE serial='1'",
+            "UPDATE cases SET serial='101' WHERE serial='1'",
+            "UPDATE cases SET case_number='1950두999',case_number_clean='1950두999' WHERE serial='1'",
+        ):
+            with self.subTest(statement=statement):
+                self.db.conn.execute("SAVEPOINT mutation")
+                self.db.conn.execute(statement)
+                with self.assertRaisesRegex(ValueError, "reference_record_removed_or_changed"):
+                    self.db.export_core()
+                self.db.conn.execute("ROLLBACK TO mutation")
+                self.db.conn.execute("RELEASE mutation")
 
-    def test_list_title_update_keeps_reviewed_title_and_binds_exact_new_raw(self):
+    def test_ordinary_metadata_updates_export_current_title_date_and_court(self):
         self.install()
-        row = dict(serial="1", case_name="목록의 짧은 제목", case_number="1950두1",
-                   date="1950.01.01", court="대법원")
-        self.db.upsert_raw([row])
-        cases, _ = self.db.export_core()
-        self.assertEqual(cases["50Du1"][0][3], "세금")
-        self.assertEqual(self.db.conn.execute("SELECT case_name FROM cases WHERE serial='1'").fetchone()[0],
-                         "목록의 짧은 제목")
-        self.assertEqual(self.db.export_core()[0], json.loads(self.payload)["cases"])
-        for sql in ("UPDATE cases SET case_name='tampered' WHERE serial='1'",
-                    "UPDATE reference_title_provenance SET title='tampered' WHERE serial='1'",
-                    "UPDATE reference_title_provenance SET reference_sha256='tampered' WHERE serial='1'",
-                    "UPDATE cases SET date='19500102' WHERE serial='1'"):
-            self.db.conn.execute("SAVEPOINT mutation")
-            self.db.conn.execute(sql)
-            with self.subTest(sql=sql), self.assertRaisesRegex(ValueError, "reference_title_receipt_mismatch"):
-                self.db.export_core()
-            self.db.conn.execute("ROLLBACK TO mutation")
-            self.db.conn.execute("RELEASE mutation")
-        self.db.upsert_raw([dict(row, case_name="세금")])
+        self.db.upsert_raw([dict(serial="1", case_name="목록의 현재 제목", case_number="1950두1",
+                                 date="19500102", court="서울고등법원")])
+        self.assertEqual(self.db.export_core()[0]["50Du1"], [[1, 10, 500102, "목록의 현재 제목"]])
         self.assertEqual(self.db.conn.execute("SELECT count(*) FROM reference_title_provenance").fetchone()[0], 0)
-        self.assertEqual(self.db.export_core()[0], json.loads(self.payload)["cases"])
 
-    def test_reference_title_binding_does_not_allow_identity_or_court_changes(self):
+    def test_legacy_title_cache_is_ignored_in_favor_of_current_metadata(self):
         self.install()
-        for field, value in (("case_number", "1950두999"), ("court", "서울고등법원"), ("date", "19500102")):
-            row = dict(serial="1", case_name="목록 제목", case_number="1950두1",
-                       date="1950.01.01", court="대법원")
-            self.db.upsert_raw([dict(row, **{field: value})])
-            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "reference_record_removed_or_changed"):
-                self.db.export_core()
-            # upsert commits its own transaction; restore the exact baseline for the next case.
-            self.db.upsert_raw([dict(serial="1", case_name="세금", case_number="1950두1",
-                                    date="1950.01.01", court="대법원")])
+        self.db.conn.execute("INSERT INTO reference_title_provenance VALUES(?,?,?,?)",
+                             ("1", "obsolete hash", "obsolete raw record", "과거 캐시 제목"))
+        self.db.upsert_raw([dict(serial="1", case_name="현재 제목", case_number="1950두1",
+                                 date="19500102", court="대법원")])
+        self.assertEqual(self.db.export_core()[0]["50Du1"], [[1, 1, 500102, "현재 제목"]])
+        self.assertEqual(self.db.conn.execute("SELECT title FROM reference_title_provenance").fetchone()[0],
+                         "과거 캐시 제목")
+
+    def test_official_branch_court_updates_preserve_existing_case_identity(self):
+        # Same law-site publication/member, more specific official court header.
+        rows = [
+            dict(serial="197717", case_name="부인권행사", case_number="2014나1084",
+                 date="20150910", court="광주고등법원"),
+            dict(serial="208459", case_name="공사금지가처분", case_number="2019라508",
+                 date="20190624", court="광주고등법원"),
+        ]
+        self.db.upsert_raw(rows)
+        cases, _ = self.db.export_core()
+        court_map = dict(self.db.court_resolver.code_map,
+                         **{"광주고등법원전주재판부": 158, "광주고등법원제주재판부": 163})
+        self.payload = json.dumps(dict(version="20260102", total=len(cases), cases=cases,
+                                       court_code_map=court_map)).encode()
+        self.install()
+        for row, court, code, key in zip(rows, ("광주고등법원전주재판부", "광주고등법원제주재판부"),
+                                         (158, 163), ("14Na1084", "19Ra508")):
+            with self.subTest(serial=row["serial"]):
+                self.db.upsert_raw([dict(row, court=court)])
+                self.assertEqual(cases[key][0][1], 13)
+                self.assertEqual(self.db.export_core()[0][key][0],
+                                 [int(row["serial"]), code, int(row["date"][2:]), row["case_name"]])
+
+    def test_reference_membership_keeps_multiplicity_order_and_stable_court_codes(self):
+        policy = ServingPolicy.__new__(ServingPolicy)
+        policy.reference = dict(court_code_map={"대법원": 1}, cases={
+            "20Da1": [[1, 1, 200101, "old"], [2, 1, 200101, "old"], [1, 1, 200101, "old"]]})
+        first, second, duplicate, added = ([1, 10, 200102, "new first"], [2, 1, 200103, "new second"],
+                                           [1, 10, 200104, "new duplicate"], [3, 1, 200105, "added"])
+        current = {"20Da1": [second, first, added, duplicate]}
+        self.assertEqual(policy.preserve_reference(current, {"대법원": 1})["20Da1"],
+                         [first, second, duplicate, added])
+        with self.assertRaisesRegex(ValueError, "reference_record_removed_or_changed"):
+            policy.preserve_reference({"20Da1": [first, second]}, {"대법원": 1})
+        with self.assertRaisesRegex(ValueError, "reference_court_codes_changed"):
+            policy.preserve_reference(current, {"대법원": 10})
 
     def test_administrative_serials_are_rejected_without_partial_upsert(self):
         for serial in ("T1", "KP1"):

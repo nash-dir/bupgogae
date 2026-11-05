@@ -18,7 +18,7 @@ class NetworkDiagnosticsTests(unittest.TestCase):
         with mock.patch.object(diagnostic, "probe", return_value={}) as probe, \
                 mock.patch("builtins.print"):
             diagnostic.main()
-            probe.assert_called_once_with("warp_remote_dns", "https_api")
+            probe.assert_called_once_with("warp_local_dns", "https_api")
             probe.reset_mock()
             diagnostic.main(full=True)
             self.assertEqual(probe.call_count, 9)
@@ -60,9 +60,20 @@ class NetworkDiagnosticsTests(unittest.TestCase):
         self.assertFalse(kwargs["allow_redirects"])
         self.assertTrue(kwargs["stream"])
         self.assertEqual(kwargs["timeout"], (8, 12))
-        self.assertEqual(session.proxies["https"], diagnostic.WARP_LAW_PROXY)
+        self.assertEqual(session.proxies["https"], "socks5h://127.0.0.1:40000")
         response.iter_content.assert_not_called()
         self.assertEqual(result["status"], 302)
+
+    def test_route_labels_use_distinct_dns_modes(self):
+        for route, expected in (("warp_local_dns", "socks5://127.0.0.1:40000"),
+                                ("warp_remote_dns", "socks5h://127.0.0.1:40000")):
+            with self.subTest(route=route):
+                session = mock.MagicMock()
+                session.__enter__.return_value = session
+                with mock.patch.object(diagnostic.requests, "Session", return_value=session):
+                    result = diagnostic.probe(route, "https_api")
+                self.assertEqual(result["route"], route)
+                self.assertEqual(session.proxies, {"http": expected, "https": expected})
 
     def test_probe_failure_contains_no_request_or_exception_text(self):
         session = mock.MagicMock()

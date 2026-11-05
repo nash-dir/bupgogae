@@ -1017,9 +1017,9 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertIn("inputs.recover_reviewed_historical == true", recovery_step)
         self.assertIn("github.event_name == 'workflow_dispatch'", recovery_step)
         self.assertEqual(set(re.findall(r"secrets\.([A-Z0-9_]+)", recovery_step)), {"BUPGOGAE_API_KEY"})
-        self.assertIn("BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000", recovery_step)
+        self.assertIn("BUPGOGAE_LAW_PROXY: socks5://127.0.0.1:40000", recovery_step)
         self.assertEqual(crawl_section.count(
-            "BUPGOGAE_LAW_PROXY: socks5h://127.0.0.1:40000"
+            "BUPGOGAE_LAW_PROXY: socks5://127.0.0.1:40000"
         ), 4)
         metadata_step = crawl_section.split("- name: 원문 대조한 메타데이터만", 1)[1].split("\n      - name:", 1)[0]
         self.assertIn("inputs.correct_reviewed_metadata == true", metadata_step)

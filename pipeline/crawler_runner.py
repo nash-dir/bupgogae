@@ -32,6 +32,7 @@ import json
 import math
 import os
 import random
+import re
 import sqlite3
 import sys
 import requests as _requests
@@ -1560,6 +1561,19 @@ def include_reviewed_failure_ranges(ranges):
     return list(dict.fromkeys([*REVIEWED_FAILURE_RANGES, *ranges]))
 
 
+def parse_refresh_dates(value: str, today: date) -> list[tuple[str, str]]:
+    """수동 선고일 재조회 입력만 해석하며 사건별 예외는 만들지 않는다."""
+    if not value:
+        return []
+    dates = value.split(",")
+    if len(dates) > 32 or any(
+        not re.fullmatch(r"[0-9]{8}", day) or normalize_decision_date(day) != day
+        or not "19480815" <= day <= today.strftime("%Y%m%d") for day in dates
+    ):
+        raise ValueError("invalid_refresh_dates")
+    return [(day, day) for day in dict.fromkeys(dates)]
+
+
 def main():
     default_data_dir = os.environ.get("DATA_DIR", "/app/data")
 
@@ -1573,17 +1587,29 @@ def main():
     )
     parser.add_argument("--verify-reviewed-ranges", action="store_true",
                         help="정상 전체 계획에 이번 무결성 실패의 세 범위를 추가 검증")
+    parser.add_argument("--refresh-dates", default=os.environ.get("BUPGOGAE_REFRESH_DATES", ""),
+                        help="건강한 증분 DB에서 쉼표로 구분한 YYYYMMDD 선고일과 backlog만 재조회")
     parser.add_argument("--data-dir", default=default_data_dir,
                         help=f"Data directory (default: {default_data_dir})")
     args = parser.parse_args()
+    today = date.today()
+    try:
+        refresh_ranges = parse_refresh_dates(args.refresh_dates, today)
+    except ValueError:
+        parser.error("invalid_refresh_dates")
+    if refresh_ranges and (args.full_bootstrap or args.verify_reviewed_ranges):
+        parser.error("targeted refresh requires an incremental baseline without incident mode")
     if args.verify_reviewed_ranges and args.full_bootstrap:
         parser.error("reviewed incident verification requires an incremental baseline")
 
     data_dir = args.data_dir
     master_db_path = os.path.join(data_dir, "master.db")
-    today = date.today()
 
-    if args.full_bootstrap:
+    if refresh_ranges:
+        recent_dates = set()
+        scan_ranges = refresh_ranges
+        detc_pages = []
+    elif args.full_bootstrap:
         recent_dates = set()
         scan_ranges = get_full_bootstrap_ranges(today)
         detc_pages = list(range(1, DETC_MAX_PAGES + 1))
@@ -1596,7 +1622,7 @@ def main():
     summary = scan_plan_summary(scan_ranges, today, recent_count=len(recent_dates))
 
     log.info("=" * 55)
-    mode = "Full Bootstrap" if args.full_bootstrap else "Range-Modulus"
+    mode = "Targeted Refresh" if refresh_ranges else "Full Bootstrap" if args.full_bootstrap else "Range-Modulus"
     log.info(f"  🚀 Crawler Runner ({mode})")
     log.info(f"     날짜: {today}")
     log.info(f"     Serial: {date_serial(today)}")
@@ -1629,7 +1655,7 @@ def main():
 
     if not args.full_bootstrap:
         try:
-            require_healthy_baseline(master_db_path, today)
+            require_healthy_baseline(master_db_path, today, require_detc=bool(refresh_ranges))
         except BaselineStateError as exc:
             log.error(f"❌ 증분 수집 기준 DB 차단: {exc}")
             write_pipeline_report(
@@ -1654,9 +1680,15 @@ def main():
         )
         sys.exit(1)
     backlog_mode = persisted_backlog_mode or BACKLOG_MODE_INCREMENTAL
+    if refresh_ranges and backlog_mode != BACKLOG_MODE_INCREMENTAL:
+        parser.error("targeted refresh cannot replace a full bootstrap backlog")
 
     # 최신 선고 목록 실패는 최근 2년 일 단위 Tier 3가 보완한다.
-    if not args.full_bootstrap:
+    if refresh_ranges:
+        scan_ranges = merge_scan_ranges(refresh_ranges, prior_backlog)
+        detc_pages = merge_detc_pages([], prior_backlog)
+        summary = scan_plan_summary(scan_ranges, today)
+    elif not args.full_bootstrap:
         log.info("🔍 최신선고판결 날짜 추출 중...")
         try:
             recent_dates = fetch_recent_ruling_dates()

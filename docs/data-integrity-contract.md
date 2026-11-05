@@ -98,7 +98,7 @@
   삭제된 컨테이너에는 추가 chunk/retry/렌더를 하지 않는다. 이미 발송한 runtime
   message는 취소할 수 없어 현재 timeout까지 남을 수 있다.
 - backlog JSON은 compact separators로 기록한다. checkpoint 횟수, 선행 journal,
-  임시 파일 작성 후 atomic replace, 부분 게시 차단은 유지한다.
+  임시 파일 작성 후 atomic replace, 범위 내 부분 결과의 upsert 차단은 유지한다.
 
 이 계약은 구조와 배포 일관성을 보장한다. 사건번호 존재, 공개 원천의 완전성,
 인용문 의미와 법률적 결론의 정확성은 각각 별도 검증 대상이다.

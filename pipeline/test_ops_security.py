@@ -946,6 +946,21 @@ class PublishOutputTests(unittest.TestCase):
 class DeploymentSecurityTests(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
 
+    def test_targeted_refresh_input_is_data_not_shell_and_cannot_mix_modes(self):
+        workflow = (self.REPO_ROOT / ".github/workflows/daily-pipeline.yml").read_text(encoding="utf-8")
+        validation = workflow.split("- name: 수동 선고일 갱신 입력 확인", 1)[1].split("\n      - name:", 1)[0]
+        run = validation.split("run: |", 1)[1]
+        self.assertNotIn("${{", run)
+        self.assertNotRegex(validation, r"secrets\.")
+        self.assertIn("parse_refresh_dates(os.environ['BUPGOGAE_REFRESH_DATES'], date.today())", run)
+        for flag in ("FULL_BOOTSTRAP", "VERIFY_STATE_ONLY", "VERIFY_HANDOFF_ONLY", "CORRECT_METADATA", "RECOVER_HISTORICAL"):
+            self.assertIn(f'"${flag}" != \'true\'', run)
+        self.assertLess(workflow.index("수동 선고일 갱신 입력 확인"), workflow.index("기존 generation state R2에서 다운로드"))
+        crawl = workflow.split("- name: 크롤러 실행 (API key 외 credential 없음)", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("BUPGOGAE_REFRESH_DATES: ${{ inputs.refresh_dates }}", crawl)
+        command = next(line for line in crawl.splitlines() if "run:" in line)
+        self.assertNotIn("inputs.refresh_dates", command)
+
     def test_private_handoffs_upload_only_ciphertext_and_bind_exact_artifact_ids(self):
         workflow = (self.REPO_ROOT / ".github/workflows/daily-pipeline.yml").read_text(encoding="utf-8")
         for name, filename in [("crawl 입력 state 전달", "input.aead"),

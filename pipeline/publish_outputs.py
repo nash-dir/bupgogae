@@ -1,4 +1,4 @@
-"""완전 성공한 crawl artifact를 검증해 public R2 객체로 게시한다.
+"""게시 가능한 crawl artifact를 검증해 public R2 객체로 게시한다.
 
 이 스크립트는 WARP/crawl job과 분리된 trusted finalize job에서만 실행한다.
 R2 및 Telegram credential은 이 프로세스의 해당 호출에만 주입한다.

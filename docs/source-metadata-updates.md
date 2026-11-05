@@ -85,3 +85,16 @@ API 외 R2·GitHub·알림 경로와 TLS 검증은 바꾸지 않는다.
 report는 `complete` 대신 `incremental_backlog`와 실제 미해결 건수를 기록한다.
 초기 전체 구축, 미시도·파싱·식별자 오류, baseline 실패 및 circuit breaker는
 계속 게시를 차단한다. export의 구성원 보존·근거·전체 payload 검사는 그대로 유지한다.
+
+## 순환 수집 범위 밖 자료의 즉시 갱신
+
+정규 실행은 모든 과거 선고일을 하루에 다시 읽지 않는다. 원문에서 확인한 변경을
+즉시 반영하려면 `Daily Crawler Pipeline` 수동 입력 `refresh_dates`에 쉼표로 구분한
+선고일을 지정한다(예: `20150910,20190624`). 지정 선고일과 기존 backlog만 기존 API
+파서·범위별 원자 upsert로 수집하며 전체 master를 보존한다. 법원·사건명 등 값을
+수동으로 주입하거나 특정 일련번호 예외를 만들지 않는다.
+
+최대 32개 실제 달력 날짜를 받고 중복은 제거한다. 건강한 증분 baseline이 필수이며
+full bootstrap·기존 복구 모드와 함께 사용할 수 없다. bootstrap backlog도 대체하지
+않는다. 날짜를 비워 두면 정규 순환 수집을 그대로 수행한다. 네트워크 경로 선택,
+state 전달·보존, export·게시 검사와 공개 계약은 정규 실행과 동일하다.

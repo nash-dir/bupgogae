@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from datetime import date
@@ -775,6 +776,174 @@ class PublicationGateTests(unittest.TestCase):
                     full_bootstrap=False,
                 )
         fake_db.close.assert_called_once_with()
+
+
+class TargetedRefreshTests(unittest.TestCase):
+    def test_refresh_dates_are_strict_bounded_and_preserve_first_occurrence(self):
+        today = date(2026, 7, 20)
+        self.assertEqual(crawler_runner.parse_refresh_dates("", today), [])
+        self.assertEqual(crawler_runner.parse_refresh_dates("20150910,20190624,20150910,19480815,20260720", today),
+                         [(v, v) for v in ("20150910", "20190624", "19480815", "20260720")])
+        maximum = [f"202601{day:02d}" for day in range(1, 32)] + ["20260201"]
+        self.assertEqual(crawler_runner.parse_refresh_dates(",".join(maximum), today), [(v, v) for v in maximum])
+        messages = set()
+        for value in ("2015-09-10", "2015091", "201509100", "20150910,", ",20150910", "20150910,,20190624",
+                      " 20150910", "20150910, 20190624", "20260230", "19480814", "20260721", "abcdefgh", "２０１５０９１０", ",".join(["20150910"] * 33),
+                      ",".join(f"202601{day:02d}" for day in range(1, 32)) + ",20260201,20260202"):
+            with self.subTest(value=value), self.assertRaises(ValueError) as caught:
+                crawler_runner.parse_refresh_dates(value, today)
+            messages.add(str(caught.exception))
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages, {"invalid_refresh_dates"})
+
+    def test_refresh_plan_selects_only_requested_dates_without_network_or_storage(self):
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch.object(sys, "argv", ["crawler_runner.py", "--plan", "--refresh-dates", "20150910,20190624",
+                                            "--data-dir", folder]),
+            mock.patch.object(crawler_runner, "get_today_scan_ranges") as regular,
+            mock.patch.object(crawler_runner, "get_detc_pages_for_today") as detc,
+            mock.patch.object(crawler_runner, "fetch_recent_ruling_dates") as recent,
+            mock.patch.object(crawler_runner, "execute_local_crawl") as execute,
+            mock.patch.object(crawler_runner, "scan_plan_summary", wraps=crawler_runner.scan_plan_summary) as summary,
+        ):
+            crawler_runner.main()
+            self.assertEqual(summary.call_args.args[0], [("20150910", "20150910"), ("20190624", "20190624")])
+            regular.assert_not_called()
+            detc.assert_not_called()
+            recent.assert_not_called()
+            execute.assert_not_called()
+            self.assertEqual(os.listdir(folder), [])
+
+    def test_refresh_conflicts_are_rejected_before_fetch_or_execution(self):
+        for option in ("--full-bootstrap", "--verify-reviewed-ranges"):
+            with (
+                self.subTest(option=option),
+                mock.patch.object(sys, "argv", ["crawler_runner.py", "--plan", "--refresh-dates", "20150910", option]),
+                mock.patch.object(crawler_runner, "execute_local_crawl") as execute,
+                mock.patch.object(crawler_runner, "fetch_recent_ruling_dates") as recent,
+                mock.patch.object(sys, "stderr"),
+                self.assertRaises(SystemExit) as caught,
+            ):
+                crawler_runner.main()
+            self.assertEqual(caught.exception.code, 2)
+            execute.assert_not_called()
+            recent.assert_not_called()
+
+    def test_refresh_rejects_persisted_full_bootstrap_work(self):
+        with tempfile.TemporaryDirectory() as folder:
+            crawler_runner.save_failed_dates(folder, [], mode=crawler_runner.BACKLOG_MODE_FULL_BOOTSTRAP, retain_empty=True)
+            with (
+                mock.patch.object(sys, "argv", ["crawler_runner.py", "--refresh-dates", "20150910", "--data-dir", folder]),
+                mock.patch.dict(os.environ, {"BUPGOGAE_API_KEY": "test-only-key"}, clear=True),
+                mock.patch.object(crawler_runner, "require_healthy_baseline"),
+                mock.patch.object(crawler_runner, "fetch_recent_ruling_dates") as recent,
+                mock.patch.object(crawler_runner, "execute_local_crawl") as execute,
+                mock.patch.object(sys, "stderr"),
+                self.assertRaises(SystemExit),
+            ):
+                crawler_runner.main()
+            recent.assert_not_called()
+            execute.assert_not_called()
+            self.assertEqual(crawler_runner.load_failed_dates_state(folder),
+                             ([], crawler_runner.BACKLOG_MODE_FULL_BOOTSTRAP))
+
+    def test_targeted_startup_rejects_baseline_without_constitutional_records(self):
+        class FixedDate(date):
+            @classmethod
+            def today(cls):
+                return date(2026, 11, 5)
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "master.db")
+            db = crawler_runner.MasterDB(path)
+            db.upsert_raw([
+                dict(serial="1", case_name="historical", case_number="1950다1", date="19500101", court="대법원"),
+                dict(serial="2", case_name="recent", case_number="2026다2", date="20261101", court="대법원"),
+            ])
+            db.close()
+            with (
+                mock.patch.object(sys, "argv", ["crawler_runner.py", "--refresh-dates", "20150910", "--data-dir", folder]),
+                mock.patch.dict(os.environ, {"BUPGOGAE_API_KEY": "test-only-key"}, clear=True),
+                mock.patch.object(crawler_runner, "date", FixedDate),
+                mock.patch.object(crawler_runner, "BASELINE_MIN_PRECEDENTS", 2),
+                mock.patch.object(crawler_runner, "fetch_cases_for_range") as fetch,
+                mock.patch.object(crawler_runner, "fetch_recent_ruling_dates") as recent,
+                mock.patch.object(crawler_runner, "execute_local_crawl") as execute,
+                mock.patch.object(crawler_runner, "send_pipeline_alert"),
+            ):
+                # The precedent baseline itself is healthy; only DETC is missing.
+                crawler_runner.require_healthy_baseline(path, date(2026, 11, 5))
+                with self.assertRaises(SystemExit) as caught:
+                    crawler_runner.main()
+                self.assertEqual(caught.exception.code, 1)
+                fetch.assert_not_called()
+                recent.assert_not_called()
+                execute.assert_not_called()
+            self.assertFalse(os.path.exists(os.path.join(folder, "db.json")))
+
+    def test_targeted_cli_updates_real_export_and_retries_only_prior_work_without_r2(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "master.db")
+            db = crawler_runner.MasterDB(path)
+            db.upsert_raw([
+                dict(serial="1", case_name="historical", case_number="1950다1", date="19500101", court="대법원"),
+                dict(serial="2", case_name="recent", case_number="2026다2", date="20260719", court="대법원"),
+                dict(serial="D1", case_name="constitutional", case_number="2026헌마1", date="20260719", court="헌법재판소"),
+                dict(serial="10", case_name="old title", case_number="2015나10", date="20150910", court="광주고등법원"),
+            ])
+            db.close()
+            crawler_runner.save_failed_dates(folder, [{"start": "20260102", "end": "20260102", "attempts": 1,
+                                                       "failed_pages": [1], "last_error": "request_failed"},
+                                                      {"kind": "detc", "page": 7, "attempts": 1,
+                                                       "last_error": "request_failed"}])
+
+            def fetch_range(value, replay=None):
+                if value == "20150910":
+                    return [dict(serial="10", case_name="current title", case_number="2015나10",
+                                 date="20150910", court="광주고등법원(전주)")]
+                return []
+
+            write_manifest = crawler_runner.write_local_manifest
+            save_checkpoint = crawler_runner.save_failed_dates
+
+            class FixedDate(date):
+                @classmethod
+                def today(cls):
+                    return date(2026, 7, 20)
+
+            with (
+                mock.patch.object(sys, "argv", ["crawler_runner.py", "--refresh-dates", "20150910,20190624", "--data-dir", folder]),
+                mock.patch.dict(os.environ, {"BUPGOGAE_API_KEY": "test-only-key"}, clear=True),
+                mock.patch.object(crawler_runner, "date", FixedDate),
+                mock.patch.object(crawler_runner, "save_failed_dates") as checkpoints,
+                mock.patch.object(crawler_runner, "BASELINE_MIN_PRECEDENTS", 3),
+                mock.patch.object(crawler_runner, "MIN_PUBLIC_CORE_KEYS", 1),
+                mock.patch.object(crawler_runner, "get_today_scan_ranges") as regular,
+                mock.patch.object(crawler_runner, "get_detc_pages_for_today") as scheduled_detc,
+                mock.patch.object(crawler_runner, "fetch_recent_ruling_dates") as recent,
+                mock.patch.object(crawler_runner, "fetch_cases_for_range", side_effect=fetch_range) as fetch,
+                mock.patch.object(crawler_runner, "_fetch_detc_page", return_value=[]) as fetch_detc,
+                mock.patch.object(crawler_runner.time, "sleep"),
+                mock.patch.object(crawler_runner, "send_telegram_report"),
+                mock.patch.object(crawler_runner, "write_local_manifest",
+                                  side_effect=lambda data_dir: write_manifest(data_dir, min_core_keys=1)),
+            ):
+                crawler_runner.main()
+                self.assertEqual({call.args[0] for call in fetch.call_args_list}, {"20150910", "20190624", "20260102"})
+                self.assertEqual(fetch.call_count, 3)
+                regular.assert_not_called()
+                scheduled_detc.assert_not_called()
+                recent.assert_not_called()
+                self.assertEqual([call.args[0] for call in fetch_detc.call_args_list], [7])
+            final_checkpoint = checkpoints.call_args
+            save_checkpoint(*final_checkpoint.args, **final_checkpoint.kwargs)
+            with open(os.path.join(folder, "db.json"), encoding="utf-8") as stream:
+                payload = json.load(stream)
+            self.assertEqual(payload["cases"]["15Na10"],
+                             [[10, payload["court_code_map"]["광주고등법원(전주)"], 150910, "current title"]])
+            self.assertTrue(os.path.exists(os.path.join(folder, "manifest.json")))
+            self.assertEqual(crawler_runner.load_failed_dates(folder), [])
 
 
 class ReviewedIncidentScheduleTests(unittest.TestCase):

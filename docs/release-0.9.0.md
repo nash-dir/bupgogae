@@ -92,13 +92,14 @@ WARP consumer 등록에는 private key나 대체 Cloudflare credential이 필요
 않다. 단, `CLOUDFLARE_WARP_TOS_ACCEPTED`는 법적 승인을 대신하는 자동값이
 아니므로 권한 있는 저장소 관리자가 약관을 검토한 뒤 직접 설정해야 한다.
 
-2026-10-11 운영 보완: WARP는 CI와 daily crawl 모두 local proxy 모드로만
-사용한다. `BUPGOGAE_LAW_PROXY=socks5h://127.0.0.1:40000`은 crawler step에만
-주입하며 법제처 HTTPS 요청만 이 경로를 사용한다. runner의 GitHub 연결,
-R2 게시와 알림은 WARP를 사용하지 않는다. proxy 장애 시 직접 연결로
-fallback하지 않고 기존 bounded retry·부분 게시 차단을 유지한다.
-약관 변수 누락은 prepare-state에서 R2 접근 전에 실패하며, WARP 설치·연결
-step은 15분으로 제한한다. CI 실패를 숨기기 위해 WARP smoke를 skip하지 않는다.
+2026-11-05 운영 보완: daily는 credential 없는 법제처 HTTPS API 요청으로 직접
+경로를 먼저 확인한다. 실패할 때만 WARP local proxy를 준비하고 로컬 DNS·원격 DNS
+중 성공한 경로를 선택한다. 선택값은 네 수집·복구 step에 동일하게 전달하며,
+수집 중에는 경로를 바꾸지 않는다. 자세한 근거와 규칙은
+[원천 메타데이터 갱신과 게시 검사](source-metadata-updates.md)를 따른다.
+runner의 GitHub 연결, R2 게시와 알림은 WARP를 사용하지 않는다.
+기존 bounded retry·부분 게시 차단은 유지한다. 약관 변수는 실제 WARP 설치 전에
+확인하며 WARP 설치·연결 step은 15분으로 제한한다. CI의 독립 WARP smoke는 유지한다.
 
 ## M1 — Branch, CI, merge
 
@@ -243,8 +244,8 @@ state를 복구한다. 코드 revert만으로 이미 전환된 R2 pointer는 복
 - `Law Network Diagnostic` 수동 workflow는 credential을 받지 않고 같은 Ubuntu
   runner에서 직접/WARP 원격 DNS/WARP 로컬 DNS 경로를 비교한다. HTTP는 키 없는
   대조 요청에만 쓰며 실제 수집은 HTTPS·인증서 검증·리다이렉트 금지를 유지한다.
-- 정기 수집은 같은 crawl runner에서 WARP 경로의 키 없는 HTTPS 요청 한 번만
-  기록한다. 키 없는 HTTP 200은 인증된 API 응답의 유효성을 증명하지 않는다.
+- 정기 수집은 같은 crawl runner에서 직접 경로를 먼저 확인하고, 필요할 때만
+  WARP 후보를 확인한다. 키 없는 HTTP 200은 인증된 API 응답의 유효성을 증명하지 않는다.
   진단은 DB/state를 변경하지 않으며 실제 수집·게시 검사를 대체하지 않는다.
 - 네트워크 오류 로그는 제한된 예외 연결을 순회해 DNS/TLS/프록시/소켓 오류
   분류와 SOCKS5 응답 byte만 기록한다. 예외 문자열, request, URL, 응답 본문,

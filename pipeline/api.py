@@ -72,7 +72,8 @@ def reset_network_stats():
 
 # ── 커넥션 풀 세션 (TCP/TLS 핸드셰이크 재사용) ──
 _session = None
-WARP_LAW_PROXY = "socks5h://127.0.0.1:40000"
+WARP_LAW_PROXY = "socks5://127.0.0.1:40000"
+WARP_LAW_REMOTE_DNS_PROXY = "socks5h://127.0.0.1:40000"
 
 
 def _get_session() -> requests.Session:
@@ -80,7 +81,7 @@ def _get_session() -> requests.Session:
     global _session
     if _session is None:
         proxy = os.getenv("BUPGOGAE_LAW_PROXY", "")
-        if proxy and proxy != WARP_LAW_PROXY:
+        if proxy and proxy not in (WARP_LAW_PROXY, WARP_LAW_REMOTE_DNS_PROXY):
             raise ValueError("BUPGOGAE_LAW_PROXY must use the approved local WARP proxy")
         _session = requests.Session()
         if proxy:

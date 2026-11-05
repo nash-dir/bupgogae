@@ -166,7 +166,7 @@ class MetadataCorrectionTests(unittest.TestCase):
             db.close()
 
 
-    def test_missing_receipts_and_unrelated_changes_still_block_export(self):
+    def test_missing_receipts_block_export_but_ordinary_metadata_can_update(self):
         self.run_migration(apply=True)
         db = MasterDB(str(self.path))
         try:
@@ -177,6 +177,8 @@ class MetadataCorrectionTests(unittest.TestCase):
             db.conn.execute("ROLLBACK TO tamper")
             db.conn.execute("RELEASE tamper")
             db.conn.execute("UPDATE cases SET date='20200102' WHERE serial='123'")
+            self.assertEqual(db.export_core()[0]['20Da123'][0][2], 200102)
+            db.conn.execute("DELETE FROM cases WHERE serial='123'")
             with self.assertRaisesRegex(ValueError, 'reference_record_removed_or_changed'):
                 db.export_core()
         finally:
@@ -198,6 +200,8 @@ class MetadataCorrectionTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(saved).hexdigest(), sha)
             self.assertIn('26Da456', json.loads(saved)['cases'])
             db.conn.execute("UPDATE cases SET date='20260102' WHERE serial='456'")
+            self.assertEqual(db.export_core()[0]['26Da456'][0][2], 260102)
+            db.conn.execute("UPDATE cases SET case_number='2026다457',case_number_clean='2026다457' WHERE serial='456'")
             with self.assertRaisesRegex(ValueError, 'reference_record_removed_or_changed'):
                 db.export_core()
         finally:

@@ -34,6 +34,11 @@ on:
         required: false
         default: false
         type: boolean
+      refresh_dates:
+        description: '건강한 기존 DB에서 지정 선고일과 backlog만 갱신 (YYYYMMDD,YYYYMMDD; 비우면 정규 수집)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -77,6 +82,25 @@ jobs:
 
       - name: 해시 고정 wheel 의존성 설치
         run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements-crawler.lock'
+
+      - name: 수동 선고일 갱신 입력 확인
+        if: ${{ inputs.refresh_dates != '' }}
+        env:
+          BUPGOGAE_REFRESH_DATES: ${{ inputs.refresh_dates }}
+          FULL_BOOTSTRAP: ${{ inputs.full_bootstrap }}
+          VERIFY_STATE_ONLY: ${{ inputs.verify_state_only }}
+          VERIFY_HANDOFF_ONLY: ${{ inputs.verify_handoff_only }}
+          CORRECT_METADATA: ${{ inputs.correct_reviewed_metadata }}
+          RECOVER_HISTORICAL: ${{ inputs.recover_reviewed_historical }}
+        run: |
+          [[ "$FULL_BOOTSTRAP" != 'true' && "$VERIFY_STATE_ONLY" != 'true' && "$VERIFY_HANDOFF_ONLY" != 'true' && "$CORRECT_METADATA" != 'true' && "$RECOVER_HISTORICAL" != 'true' ]]
+          python - <<'PY'
+          import os, sys
+          from datetime import date
+          sys.path.insert(0, 'pipeline')
+          from crawler_runner import parse_refresh_dates
+          parse_refresh_dates(os.environ['BUPGOGAE_REFRESH_DATES'], date.today())
+          PY
 
       - name: 기존 generation state R2에서 다운로드
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true }}
@@ -204,6 +228,7 @@ jobs:
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
           BUPGOGAE_LAW_PROXY: ${{ steps.warp-route.outputs.proxy || steps.direct-route.outputs.proxy }}
+          BUPGOGAE_REFRESH_DATES: ${{ inputs.refresh_dates }}
 
       - name: 명시적 full historical bootstrap 실행
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true && inputs.verify_handoff_only != true }}

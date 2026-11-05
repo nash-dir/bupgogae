@@ -98,7 +98,9 @@ WARP consumer 등록에는 private key나 대체 Cloudflare credential이 필요
 수집 중에는 경로를 바꾸지 않는다. 자세한 근거와 규칙은
 [원천 메타데이터 갱신과 게시 검사](source-metadata-updates.md)를 따른다.
 runner의 GitHub 연결, R2 게시와 알림은 WARP를 사용하지 않는다.
-기존 bounded retry·부분 게시 차단은 유지한다. 약관 변수는 실제 WARP 설치 전에
+기존 bounded retry는 유지한다. 건강한 증분 DB의 조회 실패 backlog만 완료 범위와
+분리해 처리하며, 파싱·식별자 오류와 초기 구축의 부분 게시는 계속 차단한다.
+약관 변수는 실제 WARP 설치 전에
 확인하며 WARP 설치·연결 step은 15분으로 제한한다. CI의 독립 WARP smoke는 유지한다.
 
 ## M1 — Branch, CI, merge

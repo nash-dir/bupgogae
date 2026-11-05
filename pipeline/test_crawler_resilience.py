@@ -510,6 +510,104 @@ class DetcBacklogTests(unittest.TestCase):
 
 
 class PublicationGateTests(unittest.TestCase):
+    def test_only_incremental_retrieval_failures_can_publish_without_breaker(self):
+        failed = [{"last_error": "request_failed"}, {"kind": "detc", "last_error": "request_failed"}]
+        self.assertFalse(crawler_runner.publication_allowed(failed))
+        self.assertTrue(crawler_runner.publication_allowed(failed, incremental=True))
+        self.assertFalse(crawler_runner.publication_allowed(failed, incremental=True, circuit_broken=True))
+        for reason in ("missing_case_number", "unexpected_xml_root", "missing_total_count",
+                       "known_error_review_required", "merged_case_members_removed",
+                       "reference_record_removed_or_changed", "scheduled_not_attempted",
+                       "circuit_breaker_not_attempted", "initial_detc_scan_not_attempted", "legacy_state"):
+            with self.subTest(reason=reason):
+                self.assertFalse(crawler_runner.publication_allowed(
+                    [*failed, {"last_error": reason}], incremental=True))
+
+    def _run_partial_crawl(self, *, blocked=False, reason="request_failed", full_bootstrap=False,
+                           mode=crawler_runner.BACKLOG_MODE_INCREMENTAL, circuit=False, invalid_baseline=False):
+        with tempfile.TemporaryDirectory() as data_dir:
+            path = os.path.join(data_dir, "master.db")
+            db = crawler_runner.MasterDB(path)
+            db.upsert_raw([
+                dict(serial="1", case_name="historical", case_number="1950다1", date="19500101", court="대법원"),
+                dict(serial="2", case_name="retained failed range", case_number="2026다2", date="20260102", court="대법원"),
+                dict(serial="3", case_name="recent", case_number="2026다3", date="20260719", court="대법원"),
+                dict(serial="D1", case_name="retained failed page", case_number="2026헌마1", date="20260719", court="헌법재판소"),
+            ])
+            held = db.conn.execute("SELECT * FROM cases WHERE serial IN ('2','D1') ORDER BY serial").fetchall()
+            db.close()
+
+            def fetch_range(value, replay=None):
+                if value == "20260102":
+                    raise crawler_runner.RangeFetchError(value, 1, reason)
+                return one_case("4")
+
+            def fetch_detc(page, replay=None):
+                raise crawler_runner.RangeFetchError("detc", page, "request_failed")
+
+            baseline = crawler_runner.require_healthy_baseline
+            with (
+                mock.patch.object(crawler_runner, "BASELINE_MIN_PRECEDENTS", 3),
+                mock.patch.object(crawler_runner, "MIN_PUBLIC_CORE_KEYS", 1),
+                mock.patch.object(crawler_runner, "CIRCUIT_BREAKER_THRESHOLD", 1 if circuit else 5),
+                mock.patch.object(crawler_runner, "fetch_cases_for_range", side_effect=fetch_range),
+                mock.patch.object(crawler_runner, "_fetch_detc_page", side_effect=fetch_detc),
+                mock.patch.object(crawler_runner.time, "sleep"),
+                mock.patch.object(crawler_runner, "send_pipeline_alert"),
+                # Atomic checkpoint replacement has dedicated lifecycle tests.
+                # Capture each checkpoint here and roundtrip its final state once.
+                mock.patch.object(crawler_runner, "save_failed_dates") as checkpoints,
+                mock.patch.object(crawler_runner, "require_healthy_baseline", wraps=baseline,
+                                  **({"side_effect": crawler_runner.BaselineStateError("insufficient_precedent_count")}
+                                     if invalid_baseline else {})),
+            ):
+                args = dict(master_db_path=path, data_dir=data_dir, today=date(2026, 7, 20),
+                            scan_ranges=[("20260101", "20260101"), ("20260102", "20260102")],
+                            detc_pages=[1], prior_backlog=[], full_bootstrap=full_bootstrap, backlog_mode=mode)
+                if blocked:
+                    with self.assertRaises(SystemExit) as caught:
+                        crawler_runner.execute_local_crawl(**args)
+                    self.assertEqual(caught.exception.code, 1)
+                    self.assertFalse(os.path.exists(os.path.join(data_dir, "db.json")))
+                else:
+                    result = crawler_runner.execute_local_crawl(**args)
+                    self.assertEqual((result["precedent_failed"], result["detc_failed"], result["failed_count"]), (1, 1, 2))
+                    self.assertEqual(result["total_ins"], 1)
+                    self.assertEqual(result["errors"], 2)
+                    self.assertFalse(result["circuit_broken"])
+                    with open(os.path.join(data_dir, "db.json"), encoding="utf-8") as stream:
+                        cases = json.load(stream)["cases"]
+                    self.assertIn("26Da4", cases)
+                    self.assertEqual(cases["26Da2"][0][3], "retained failed range")
+                    self.assertEqual(cases["26HM1"][0][3], "retained failed page")
+            final_checkpoint = checkpoints.call_args
+            crawler_runner.save_failed_dates(*final_checkpoint.args, **final_checkpoint.kwargs)
+            backlog, saved_mode = crawler_runner.load_failed_dates_state(data_dir)
+            self.assertEqual(saved_mode, mode)
+            self.assertEqual(len(backlog), 2)
+            self.assertEqual({item["last_error"] for item in backlog}, {reason, "request_failed"})
+            self.assertTrue(all(item["attempts"] == 1 for item in backlog))
+            db = crawler_runner.MasterDB(path)
+            try:
+                self.assertEqual(db.conn.execute("SELECT * FROM cases WHERE serial IN ('2','D1') ORDER BY serial").fetchall(), held)
+            finally:
+                db.close()
+
+    def test_healthy_incremental_exports_successful_ranges_and_retains_failed_work(self):
+        self._run_partial_crawl()
+
+    def test_partial_bootstrap_integrity_breaker_and_invalid_baseline_still_block(self):
+        for options in (
+                {"full_bootstrap": True},
+                {"mode": crawler_runner.BACKLOG_MODE_FULL_BOOTSTRAP},
+                {"reason": "missing_case_number"},
+                {"reason": "unexpected_xml_root"},
+                {"reason": "merged_case_members_removed"},
+                {"circuit": True},
+                {"invalid_baseline": True}):
+            with self.subTest(options=options):
+                self._run_partial_crawl(blocked=True, **options)
+
     def test_integrity_reasons_remain_classified_without_exposing_unknown_text(self):
         for reason in ("quarantined_raw_changed_requires_review", "merged_case_members_removed",
                        "known_error_unreviewed_metadata", "metadata_migration_inventory_mismatch",
@@ -578,8 +676,8 @@ class PublicationGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as data_dir:
             path = crawler_runner.write_pipeline_report(
                 data_dir,
-                status="blocked",
-                reason="partial_crawl",
+                status="success",
+                reason="incremental_backlog",
                 db_total=123,
                 precedent_failed=2,
                 detc_failed=1,
@@ -589,7 +687,9 @@ class PublicationGateTests(unittest.TestCase):
                 payload = json.load(stream)
 
         self.assertEqual(payload["schema"], 1)
-        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["reason"], "incremental_backlog")
+        self.assertEqual((payload["precedent_failed"], payload["detc_failed"]), (2, 1))
         self.assertEqual(set(payload), {
             "schema",
             "generated_at",

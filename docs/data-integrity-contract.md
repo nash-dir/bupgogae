@@ -15,6 +15,7 @@
 | manifest `built_at` | 해당 manifest 바이트를 생성한 시각 | 원천자료의 완전성·법률적 정확성 |
 | manifest hash/total | 내려받은 payload의 동일성·키 수 | 누락 없는 원천 수집 또는 판결 내용 정확성 |
 | pipeline report `success/complete` | 계획된 범위와 durable backlog가 모두 해소되어 게시 가능 | 공개 원천 자체가 완전하다는 뜻 |
+| pipeline report `success/incremental_backlog` | 건강한 기존 DB에 완료 범위를 반영해 게시, 조회 실패 범위는 기존 값과 backlog 보존 | 모든 계획 범위의 갱신 완료 |
 | client sync success | 검증된 게시 snapshot을 로컬에 활성화 | 이번 원천 수집이 클라이언트에서 수행됐다는 뜻 |
 
 ## 게시 정책
@@ -29,8 +30,12 @@
   구분한다.
 - 실패 범위/페이지는 `failed_dates.json` backlog에 원자적으로 남기고 다음 실행에서
   신규 계획보다 먼저 재시도한다.
-- backlog가 남거나 baseline health gate가 실패하면 사용자용 DB와 manifest를
-  게시하지 않는다. 기존 last-known-good 공개본을 유지한다.
+- 건강한 기존 DB의 증분 갱신은 `request_failed` 조회 실패만 남고 circuit breaker가
+  발동하지 않았다면 완료 범위를 게시한다. 범위의 모든 페이지를 받은 뒤 upsert하므로
+  실패한 범위에는 부분 결과를 쓰지 않는다. 기존 데이터와 backlog를 유지하고,
+  report는 `incremental_backlog`와 실제 남은 범위·페이지 수를 기록한다.
+- full bootstrap, 미시도·파싱·스키마·식별자 오류 backlog, circuit breaker 또는
+  baseline health 실패는 계속 전체 게시를 차단한다. 기존 공개본을 유지한다.
 - 정상 0건은 예상 root와 명시적인 `totalCnt=0`이 모두 확인된 경우에만 인정한다.
 - 공개 payload는 게시 전 전수 구조 검증을 통과해야 한다.
 

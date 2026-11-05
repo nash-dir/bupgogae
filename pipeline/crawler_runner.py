@@ -90,6 +90,7 @@ PIPELINE_REPORT_SCHEMA = 1
 PIPELINE_REPORT_REASONS = {
     "artifact_validation_failed",
     "complete",
+    "incremental_backlog",
     "direct_publish_failed",
     "incomplete_direct_publish_config",
     "initial_network_failure",
@@ -1228,7 +1229,7 @@ def crawl_scan_ranges(
     """날짜 범위를 처리하고 성공/실패를 날짜 단위로 확정한다.
 
     fetcher가 모든 페이지를 반환한 뒤에만 upsert하므로 한 날짜의 부분 결과는
-    master DB에도 적용되지 않는다. 반환된 failed가 비어야 public publication이 가능하다.
+    master DB에도 적용되지 않는다. 게시 정책은 완료 후 baseline과 backlog 사유를 검사한다.
     """
     prior_by_key = {_backlog_key(item): item for item in (prior_backlog or [])}
     pending_by_key = dict(prior_by_key)
@@ -1335,9 +1336,13 @@ def crawl_scan_ranges(
     }
 
 
-def publication_allowed(failed: list[dict]) -> bool:
-    """사용자용 DB/manifest는 모든 날짜/헌재 페이지가 완료된 경우만 게시한다."""
-    return len(failed) == 0
+def publication_allowed(failed: list[dict], *, incremental=False, circuit_broken=False) -> bool:
+    """건강한 증분 DB는 조회 실패 범위를 보존하며 완료 범위를 게시할 수 있다."""
+    if circuit_broken:
+        return False
+    return not failed or (incremental and all(
+        item.get("last_error") == "request_failed" for item in failed
+    ))
 
 
 def backlog_counts(backlog: list[dict]) -> tuple[int, int, int]:
@@ -1467,10 +1472,12 @@ def execute_local_crawl(
             from diagnose_state import safe_error
             log.error(f"❌ 완료 DB 검증 실패 (reason={safe_error(exc)})")
 
-        if not publication_allowed(current_backlog) or baseline_error is not None:
-            precedent_failed, failed_pages, detc_failed = backlog_counts(
-                current_backlog
-            )
+        precedent_failed, failed_pages, detc_failed = backlog_counts(current_backlog)
+        if not publication_allowed(
+            current_backlog,
+            incremental=not full_bootstrap and backlog_mode == BACKLOG_MODE_INCREMENTAL,
+            circuit_broken=circuit_broken,
+        ) or baseline_error is not None:
             reason = (
                 "invalid_completed_baseline" if baseline_error
                 else "partial_crawl"
@@ -1496,6 +1503,11 @@ def execute_local_crawl(
             )
             sys.exit(1)
 
+        if current_backlog:
+            log.warning(
+                "⚠️ 증분 게시: 완료 범위 반영, 조회 실패 범위는 기존 데이터와 backlog 유지. "
+                f"precedent={precedent_failed}, failed_pages={failed_pages}, detc_pages={detc_failed}"
+            )
         log.info("\n📦 DB 덤프 (Core)")
         try:
             core_mb = export_split_db(db, data_dir)
@@ -1523,6 +1535,9 @@ def execute_local_crawl(
             "detc_cases_count": detc_cases_count,
             "detc_ins": detc_ins,
             "circuit_broken": circuit_broken,
+            "precedent_failed": precedent_failed,
+            "detc_failed": detc_failed,
+            "failed_count": len(current_backlog),
         }
     finally:
         db.close()
@@ -1718,6 +1733,9 @@ def main():
     detc_cases_count = local_result["detc_cases_count"]
     detc_ins = local_result["detc_ins"]
     circuit_broken = local_result["circuit_broken"]
+    precedent_failed = local_result.get("precedent_failed", 0)
+    detc_failed = local_result.get("detc_failed", 0)
+    failed_count = local_result.get("failed_count", 0)
 
     # 분리 publish job에서도 사용할 수 있도록 manifest는 항상 로컬 생성한다.
     try:
@@ -1784,9 +1802,11 @@ def main():
     write_pipeline_report(
         data_dir,
         status="success",
-        reason="complete",
+        reason="incremental_backlog" if failed_count else "complete",
         db_total=after,
-        circuit_broken=False,
+        precedent_failed=precedent_failed,
+        detc_failed=detc_failed,
+        circuit_broken=circuit_broken,
     )
 
     if backlog_mode == BACKLOG_MODE_FULL_BOOTSTRAP:
@@ -1816,7 +1836,7 @@ def main():
         detc_total=detc_cases_count,
         detc_ins=detc_ins,
         net_stats=net_stats,
-        failed_count=0,
+        failed_count=failed_count,
         circuit_broken=circuit_broken,
     )
 
@@ -1879,7 +1899,7 @@ def send_telegram_report(**kwargs):
             f"  요청: {net_stats.get('requests', 0):,}"
             f" | 재시도: {net_retries}"
             f" | 실패: {net_failures}\n"
-            f"  📋 누락 항목: {failed_count}건"
+            f"  📋 재시도 대기: {failed_count}건"
         )
         if failed_count > 0:
             net_warning += " → 다음 실행 재시도 예약"

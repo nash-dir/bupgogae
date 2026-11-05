@@ -6,12 +6,16 @@ printed. HTTP is a keyless control only; the collector always uses HTTPS.
 
 import argparse
 import json
+from pathlib import Path
 import time
 
 import requests
 
 from api import HEADERS, WARP_LAW_PROXY, WARP_LAW_REMOTE_DNS_PROXY
 from network_errors import network_error_detail
+
+ROUTE_PROXIES = {"direct": "", "warp_local_dns": WARP_LAW_PROXY,
+                 "warp_remote_dns": WARP_LAW_REMOTE_DNS_PROXY}
 
 
 def probe(route, endpoint):
@@ -48,7 +52,41 @@ def main(full=False):
             print(json.dumps(probe(route, endpoint), sort_keys=True), flush=True)
 
 
+def select_route(routes):
+    """Choose a reachable HTTPS API route before injecting any credential."""
+    for route in routes:
+        result = probe(route, "https_api")
+        print(json.dumps(result, sort_keys=True), flush=True)
+        if result.get("status") == 200:
+            return route
+    return None
+
+
+def configure_route(group, output_file):
+    routes = ("direct",) if group == "direct" else ("warp_local_dns", "warp_remote_dns")
+    route = select_route(routes)
+    if route is None and group == "warp":
+        raise RuntimeError("No reachable law HTTPS route")
+    values = {"needs_warp": "true" if route is None else "false"}
+    if route is not None:
+        values.update(route=route, proxy=ROUTE_PROXIES[route])
+    with Path(output_file).open("a", encoding="utf-8") as output:
+        for key, value in values.items():
+            output.write(f"{key}={value}\n")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--full", action="store_true", help="Run all nine keyless route controls")
-    main(parser.parse_args().full)
+    parser.add_argument("--select", choices=("direct", "warp"))
+    parser.add_argument("--output-file", type=Path)
+    args = parser.parse_args()
+    if args.select:
+        if args.full or args.output_file is None:
+            parser.error("--select requires --output-file and cannot use --full")
+        try:
+            configure_route(args.select, args.output_file)
+        except RuntimeError:
+            parser.exit(1, "No reachable law HTTPS route\n")
+    else:
+        main(args.full)

@@ -44,8 +44,20 @@ export는 기준 구성원의 순서를 유지하면서 현재 메타데이터�
 원격 DNS의 `socks5h` API 요청은 connect timeout, 로컬 DNS의 `socks5` API 요청은
 HTTP 200이었다. 두 경로 모두 WARP 프록시를 사용한다.
 
-daily 수집은 `socks5://127.0.0.1:40000`을 명시해 runner에서 이름을 해석하고
-WARP로 HTTPS 요청을 보낸다. 프록시 장애 시 직접 연결로 자동 전환하지 않는다.
+하지만 [후속 운영 실행](https://github.com/nash-dir/bupgogae/actions/runs/41948621966)에서는
+로컬 DNS 경로도 `socks_04`로 첫 요청부터 실패했다. Cloudflare trace의 WARP 연결 확인은
+법제처 API 도달성까지 보장하지 않는다. 한 번의 성공을 근거로 특정 WARP 경로를
+항상 강제하는 것은 갱신 경로를 불필요하게 막는다.
+
+daily는 API key 없이 직접 HTTPS API 도달성을 먼저 확인한다. HTTP 200이면 직접 수집하며
+WARP 설치·등록은 생략한다. 직접 경로가 실패할 때만 기존 해시 고정 WARP를 준비하고,
+로컬 DNS·원격 DNS 순서로 법제처 HTTPS API를 확인해 성공한 경로를 선택한다.
+모두 실패하면 수집을 시작하지 않고 재개 state를 보존한다. 약관 확인은 WARP 설치 전에
+유지하며 직접 수집이나 state 다운로드에는 WARP 설정을 요구하지 않는다.
+
+선택은 credential 주입 전에 한 번만 하며 수집 중 경로를 바꾸지 않는다.
+수집 세션도 환경 proxy·netrc를 무시해 진단과 같은 경로를 사용한다.
+무키 HTTP 200은 연결성 확인일 뿐이며 실제 XML·인증·건수·날짜 검사는 수집기가 담당한다.
 API 외 R2·GitHub·알림 경로와 TLS 검증은 바꾸지 않는다.
 
 ## 기존 병합 판례의 표시 형식

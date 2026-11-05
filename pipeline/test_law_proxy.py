@@ -53,10 +53,15 @@ class LawProxyTests(unittest.TestCase):
         self.env.stop()
         api.reset_network_stats()
 
-    def test_default_session_preserves_local_developer_behavior(self):
+    def test_direct_session_ignores_ambient_proxy_and_credentials(self):
+        os.environ.update({"HTTPS_PROXY": "http://unapproved.invalid:9999", "NO_PROXY": "*"})
         session = api._get_session()
-        self.assertTrue(session.trust_env)
+        self.assertFalse(session.trust_env)
         self.assertEqual(session.proxies, {})
+        settings = session.merge_environment_settings(
+            "https://www.law.go.kr/DRF/lawSearch.do", {}, None, None, None,
+        )
+        self.assertEqual(settings["proxies"], {})
 
     def test_proxy_is_law_only_and_ambient_env_cannot_bypass_it(self):
         os.environ.update({

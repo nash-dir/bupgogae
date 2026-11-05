@@ -51,15 +51,6 @@ jobs:
     outputs:
       input_artifact_id: ${{ steps.input-artifact.outputs.artifact-id }}
     steps:
-      - name: WARP 약관 승인 설정 사전 확인
-        env:
-          CLOUDFLARE_WARP_TOS_ACCEPTED: ${{ vars.CLOUDFLARE_WARP_TOS_ACCEPTED }}
-        run: |
-          if [[ "${CLOUDFLARE_WARP_TOS_ACCEPTED}" != "true" ]]; then
-            echo '::error title=WARP configuration missing::Repository owner must review https://www.cloudflare.com/application/terms/ and set CLOUDFLARE_WARP_TOS_ACCEPTED=true. See docs/release-0.9.0.md.'
-            exit 2
-          fi
-
       - name: 다운로드 전용 검증 입력 확인
         if: ${{ github.event_name == 'workflow_dispatch' && (inputs.verify_state_only == true || inputs.verify_handoff_only == true) }}
         env:
@@ -172,48 +163,54 @@ jobs:
         env:
           STATE_ARTIFACT_KEY: ${{ secrets.STATE_ARTIFACT_KEY }}
 
-      # Marketplace action이나 수동 WireGuard key를 쓰지 않는다. 저장소에서
-      # 검토한 스크립트가 SHA-256으로 고정한 공식 Cloudflare client를 설치하고
-      # WARP route를 검증한다. 다음 step에서만 법제처 API key를 주입한다.
-      - name: 공식 Cloudflare WARP Client 연결 (IP 차단 우회)
+      # 먼저 API key 없이 직접 HTTPS 도달성을 확인한다. 직접 경로가 실패할
+      # 때만 WARP를 설치하고 실제 법제처 API 경로를 선택한다. 수집 도중에는
+      # 경로를 바꾸지 않으며 첫 실제 응답의 XML/인증 검사는 수집기가 담당한다.
+      - name: 법제처 직접 연결 확인 (API key 없음)
+        id: direct-route
         if: ${{ inputs.verify_handoff_only != true }}
+        run: python pipeline/network_diagnostics.py --select direct --output-file "$GITHUB_OUTPUT"
+
+      - name: 공식 Cloudflare WARP Client 연결 (IP 차단 우회)
+        if: ${{ inputs.verify_handoff_only != true && steps.direct-route.outputs.needs_warp == 'true' }}
         timeout-minutes: 15
         run: bash .github/scripts/connect-warp.sh
         env:
           CLOUDFLARE_WARP_TOS_ACCEPTED: ${{ vars.CLOUDFLARE_WARP_TOS_ACCEPTED }}
           WARP_ROUTE_MODE: proxy
 
-      - name: 같은 runner의 법제처 연결 진단 (API key 없음)
-        if: ${{ inputs.verify_handoff_only != true }}
-        run: timeout --signal=TERM --kill-after=5s 240s python pipeline/network_diagnostics.py
+      - name: 법제처 WARP 경로 선택 (API key 없음)
+        id: warp-route
+        if: ${{ inputs.verify_handoff_only != true && steps.direct-route.outputs.needs_warp == 'true' }}
+        run: python pipeline/network_diagnostics.py --select warp --output-file "$GITHUB_OUTPUT"
 
       - name: 원문 대조한 과거 보류만 복구 (명시적 수동 실행)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.recover_reviewed_historical == true && inputs.verify_handoff_only != true }}
         run: timeout --signal=TERM --kill-after=10s 10m python pipeline/apply_historical_recovery.py --data-dir ./pipeline/data --apply
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
-          BUPGOGAE_LAW_PROXY: socks5://127.0.0.1:40000
+          BUPGOGAE_LAW_PROXY: ${{ steps.warp-route.outputs.proxy || steps.direct-route.outputs.proxy }}
 
       - name: 원문 대조한 메타데이터만 명시적 정정 (전체 수집·게시 gate 유지)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.correct_reviewed_metadata == true && inputs.verify_handoff_only != true && inputs.full_bootstrap != true }}
         run: timeout --signal=TERM --kill-after=10s 10m python pipeline/apply_metadata_corrections.py --data-dir ./pipeline/data --apply
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
-          BUPGOGAE_LAW_PROXY: socks5://127.0.0.1:40000
+          BUPGOGAE_LAW_PROXY: ${{ steps.warp-route.outputs.proxy || steps.direct-route.outputs.proxy }}
 
       - name: 크롤러 실행 (API key 외 credential 없음)
         if: ${{ (github.event_name != 'workflow_dispatch' || inputs.full_bootstrap != true) && inputs.verify_handoff_only != true }}
         run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data ${{ inputs.correct_reviewed_metadata == true && '--verify-reviewed-ranges' || '' }}
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
-          BUPGOGAE_LAW_PROXY: socks5://127.0.0.1:40000
+          BUPGOGAE_LAW_PROXY: ${{ steps.warp-route.outputs.proxy || steps.direct-route.outputs.proxy }}
 
       - name: 명시적 full historical bootstrap 실행
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_bootstrap == true && inputs.verify_handoff_only != true }}
         run: timeout --signal=TERM --kill-after=30s 75m python pipeline/crawler_runner.py --data-dir ./pipeline/data --full-bootstrap
         env:
           BUPGOGAE_API_KEY: ${{ secrets.BUPGOGAE_API_KEY }}
-          BUPGOGAE_LAW_PROXY: socks5://127.0.0.1:40000
+          BUPGOGAE_LAW_PROXY: ${{ steps.warp-route.outputs.proxy || steps.direct-route.outputs.proxy }}
 
       # 공식 warp-svc는 root daemon으로 crawler와 같은 runner에 남으므로,
       # crawl 직후 registration을 지우고 service를 정지한다. 이 cleanup 실패가

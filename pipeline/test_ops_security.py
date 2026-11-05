@@ -1017,10 +1017,17 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertIn("inputs.recover_reviewed_historical == true", recovery_step)
         self.assertIn("github.event_name == 'workflow_dispatch'", recovery_step)
         self.assertEqual(set(re.findall(r"secrets\.([A-Z0-9_]+)", recovery_step)), {"BUPGOGAE_API_KEY"})
-        self.assertIn("BUPGOGAE_LAW_PROXY: socks5://127.0.0.1:40000", recovery_step)
+        selected_proxy = "BUPGOGAE_LAW_PROXY: ${{ steps.warp-route.outputs.proxy || steps.direct-route.outputs.proxy }}"
+        self.assertIn(selected_proxy, recovery_step)
         self.assertEqual(crawl_section.count(
-            "BUPGOGAE_LAW_PROXY: socks5://127.0.0.1:40000"
+            selected_proxy
         ), 4)
+        self.assertIn("steps.direct-route.outputs.needs_warp == 'true'", warp_step)
+        for name, group in (("법제처 직접 연결 확인", "direct"), ("법제처 WARP 경로 선택", "warp")):
+            step = crawl_section.split(f"- name: {name}", 1)[1].split("\n      - name:", 1)[0]
+            self.assertNotRegex(step, r"\${{\s*secrets\.")
+            self.assertIn('inputs.verify_handoff_only != true', step)
+            self.assertIn(f'--select {group} --output-file "$GITHUB_OUTPUT"', step)
         metadata_step = crawl_section.split("- name: 원문 대조한 메타데이터만", 1)[1].split("\n      - name:", 1)[0]
         self.assertIn("inputs.correct_reviewed_metadata == true", metadata_step)
         self.assertIn("inputs.full_bootstrap != true", metadata_step)
@@ -1054,8 +1061,9 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertIn('WARP_ROUTE_MODE:-proxy', warp_script)
         self.assertNotIn("mode warp+doh", warp_script)
         self.assertIn("::error title=WARP configuration missing", warp_script)
-        self.assertLess(workflow.index("WARP 약관 승인 설정 사전 확인"),
-                        workflow.index("기존 generation state R2에서 다운로드"))
+        self.assertNotIn("WARP 약관 승인 설정 사전 확인", workflow)
+        self.assertLess(warp_script.index('CLOUDFLARE_WARP_TOS_ACCEPTED:-'),
+                        warp_script.index('sudo apt-get update'))
         self.assertIn(
             'WARP_PACKAGE_VERSION="2026.6.880.0"',
             warp_script,

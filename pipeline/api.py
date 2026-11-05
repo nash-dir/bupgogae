@@ -84,10 +84,12 @@ def _get_session() -> requests.Session:
         if proxy and proxy not in (WARP_LAW_PROXY, WARP_LAW_REMOTE_DNS_PROXY):
             raise ValueError("BUPGOGAE_LAW_PROXY must use the approved local WARP proxy")
         _session = requests.Session()
+        # The preflight and collector must use the same explicit route, including
+        # direct mode. Ambient proxy/netrc settings must not silently change it.
+        _session.trust_env = False
         if proxy:
             # Only the law API uses WARP. Ignore ambient HTTP_PROXY/NO_PROXY
             # so a failed proxy cannot silently fall back to the runner route.
-            _session.trust_env = False
             _session.proxies["https://www.law.go.kr"] = proxy
         adapter = HTTPAdapter(
             # 재시도는 fetch_xml_safe 한 곳에서만 수행한다. urllib3의 숨은

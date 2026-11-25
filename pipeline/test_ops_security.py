@@ -834,6 +834,20 @@ class PublishOutputTests(unittest.TestCase):
         notify.assert_called_once_with("success", "artifact-dir")
         publish.assert_not_called()
 
+    def test_notification_distinguishes_deferred_crawl_and_finalize_outcomes(self):
+        with mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_CHAT_ID": "1"}), \
+                mock.patch.object(publish_outputs.requests, "post") as post, \
+                mock.patch.object(publish_outputs, "_load_pipeline_report", return_value={
+                    "reason": "incremental_backlog", "db_total": 100, "precedent_failed": 1, "detc_failed": 0,
+                }):
+            post.return_value.status_code = 200
+            for status, expected in (("success", "검증된 증분 게시 완료"),
+                                     ("crawl_failure", "기존 공개 DB 유지"),
+                                     ("failure", "공개 DB 게시 단계 실패")):
+                with self.subTest(status=status):
+                    publish_outputs.send_notification(status, "artifact-dir")
+                    self.assertIn(expected, post.call_args.kwargs["json"]["text"])
+
     def test_success_commits_immutable_then_manifest_then_fixed_mirror(self):
         with tempfile.TemporaryDirectory() as data_dir:
             result = self._publish_with_store(data_dir)
@@ -990,7 +1004,7 @@ class DeploymentSecurityTests(unittest.TestCase):
         for name in ["공식 Cloudflare WARP Client 연결", "크롤러 실행 (API key 외 credential 없음)",
                      "명시적 full historical bootstrap 실행", "검증된 증분 snapshot generation 및 pointer 게시",
                      "명시적 full bootstrap 재개 snapshot generation 및 pointer 게시",
-                     "DB 검증 후 immutable 객체→manifest→legacy mirror 게시", "완전 성공한 public 출력 전달"]:
+                     "DB 검증 후 immutable 객체→manifest→legacy mirror 게시", "검증된 public 출력 전달"]:
             section = workflow.split(f"- name: {name}", 1)[1].split("\n      - name:", 1)[0]
             self.assertIn("inputs.verify_handoff_only != true", section)
         self.assertIn("암호화 전달 후 비공개 state 전수 검증 (게시 없음)", workflow)

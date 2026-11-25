@@ -595,13 +595,17 @@ class PublicationGateTests(unittest.TestCase):
                 db.close()
 
     def test_healthy_incremental_exports_successful_ranges_and_retains_failed_work(self):
-        self._run_partial_crawl()
+        for reason in ("request_failed", "missing_tax_case_court", "known_error_source_unavailable",
+                       "source_case_number_changed"):
+            with self.subTest(reason=reason):
+                self._run_partial_crawl(reason=reason)
 
     def test_partial_bootstrap_integrity_breaker_and_invalid_baseline_still_block(self):
         for options in (
                 {"full_bootstrap": True},
                 {"mode": crawler_runner.BACKLOG_MODE_FULL_BOOTSTRAP},
                 {"reason": "missing_case_number"},
+                {"reason": "missing_case_court"},
                 {"reason": "unexpected_xml_root"},
                 {"reason": "merged_case_members_removed"},
                 {"circuit": True},

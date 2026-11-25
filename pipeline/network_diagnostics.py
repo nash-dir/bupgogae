@@ -54,11 +54,19 @@ def main(full=False):
 
 def select_route(routes):
     """Choose a reachable HTTPS API route before injecting any credential."""
-    for route in routes:
-        result = probe(route, "https_api")
-        print(json.dumps(result, sort_keys=True), flush=True)
-        if result.get("status") == 200:
-            return route
+    for attempt in range(3):
+        retry = False
+        for route in routes:
+            result = probe(route, "https_api")
+            print(json.dumps(result, sort_keys=True), flush=True)
+            status = result.get("status", 0)
+            if status == 200:
+                return route
+            retry |= "error" in result or status in {302, 408, 429} or status >= 500
+        if not retry:
+            break
+        if attempt < 2:
+            time.sleep(2 ** attempt)
     return None
 
 

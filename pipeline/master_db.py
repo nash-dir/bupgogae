@@ -86,6 +86,17 @@ def _source_normalizes_to_case(raw, case):
                 date=normalize_decision_date(source["date"])) == case
 
 
+def _publication_keys(raw_number, clean_number):
+    if is_merged_case_number(raw_number) or is_merged_case_number(clean_number):
+        if clean_number != clean_case_number(raw_number):
+            raise ValueError("inconsistent_merged_case_number")
+        return [compress_case_number(number) for number in expand_merged_case_numbers(raw_number)]
+    key = compress_case_number(clean_number)
+    if not key:
+        raise ValueError("unreviewed_unexportable_case")
+    return [key]
+
+
 class MasterDB:
     """영속 SQLite master DB."""
 
@@ -179,6 +190,8 @@ class MasterDB:
         skipped = 0
 
         try:
+            if not self.conn.in_transaction:
+                cur.execute("BEGIN IMMEDIATE")
             policy = load_policy(self.conn)
             for raw in raw_cases:
                 # 입력 검증/정제 (길이 상한·None 안전). serial 없으면 스킵.
@@ -323,6 +336,16 @@ class MasterDB:
                                         else {case_number_clean})
                         if not previous_members.issubset(next_members):
                             raise ValueError("merged_case_members_removed")
+                    if policy and case_number_clean and (
+                        serving_receipt or (case["case_number"], case_number_clean) != existing[1:3]
+                    ):
+                        previous_keys = _publication_keys(previous_number, existing[2] or "")
+                        serving_number = (serving_receipt["record"]["case_number"]
+                                          if serving_receipt else case["case_number"])
+                        new_keys = _publication_keys(serving_number, clean_case_number(serving_number))
+                        if not set(previous_keys).issubset(new_keys):
+                            log.error("  공개 사건번호 변경 보류 serial=%s", serial)
+                            raise ValueError("source_case_number_changed")
                     cur.execute("""
                         UPDATE cases SET
                             case_name = COALESCE(NULLIF(?, ''), case_name),
@@ -549,16 +572,7 @@ class MasterDB:
                     raise CorrectionError("known_error_receipt_mismatch")
             raw_number = row["case_number"] or row["case_number_clean"] or ""
             clean_number = row["case_number_clean"] or ""
-            if is_merged_case_number(raw_number) or is_merged_case_number(clean_number):
-                if clean_number != clean_case_number(raw_number):
-                    raise ValueError("inconsistent_merged_case_number")
-                keys = [compress_case_number(number)
-                        for number in expand_merged_case_numbers(raw_number)]
-            else:
-                key = compress_case_number(clean_number)
-                if not key:
-                    raise ValueError("unreviewed_unexportable_case")
-                keys = [key]
+            keys = _publication_keys(raw_number, clean_number)
 
             # 법원 일련번호는 int, 헌재 D prefix는 string 유지.
             raw_serial = row["serial"] or "0"

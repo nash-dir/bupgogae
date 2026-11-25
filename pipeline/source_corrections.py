@@ -222,7 +222,7 @@ def resolve(fields, fetch=fetch_judgment):
         parser.feed(body.decode("utf-8"))
         header = re.sub(r"\s+", "", "".join(parser.parts)).split("사건", 1)[0]
         court = re.sub(r"\s+", "", entry.get("verifiedCourt", entry["record"]["court"]))
-        if not re.fullmatch(re.escape(court) + r"(?:제[0-9]+민사부판결)?", header):
+        if not re.fullmatch(re.escape(court) + r"(?:(?:제[0-9]+민사부)?판결)?", header):
             raise CorrectionError("known_error_source_changed")
     return {"profile": entry["profile"], "entrySha256": digest(entry), "expectedList": dict(fields),
             "record": dict(entry["record"]), "judgmentSha256": entry["judgmentSha256"]}

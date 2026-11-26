@@ -193,6 +193,16 @@ class ServingPolicyTests(unittest.TestCase):
         self.assertEqual(self.db.export_core()[0]["50Du1"], [[1, 10, 500102, "목록의 현재 제목"]])
         self.assertEqual(self.db.conn.execute("SELECT count(*) FROM reference_title_provenance").fetchone()[0], 0)
 
+    def test_number_change_rolls_back_whole_ingestion_batch_before_export(self):
+        self.install()
+        before = list(self.db.conn.iterdump())
+        update = dict(serial="1", case_name="새 목록 제목", case_number="1950두999",
+                      date="19500102", court="서울고등법원")
+        with self.assertRaisesRegex(ValueError, "source_case_number_changed"):
+            self.db.upsert_raw([dict(update, serial="100"), update])
+        self.assertEqual(list(self.db.conn.iterdump()), before)
+        self.assertEqual(self.db.export_core()[0], json.loads(self.payload)["cases"])
+
     def test_legacy_title_cache_is_ignored_in_favor_of_current_metadata(self):
         self.install()
         self.db.conn.execute("INSERT INTO reference_title_provenance VALUES(?,?,?,?)",

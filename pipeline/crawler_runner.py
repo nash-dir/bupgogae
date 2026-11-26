@@ -133,6 +133,7 @@ BACKLOG_FAILURE_REASONS = {
     "invalid_total_count",
     "legacy_state",
     "missing_case_court",
+    "missing_tax_case_court",
     "missing_case_date",
     "missing_case_number",
     "missing_case_serial",
@@ -142,6 +143,7 @@ BACKLOG_FAILURE_REASONS = {
     "request_failed",
     "result_count_mismatch",
     "scheduled_not_attempted",
+    "source_case_number_changed",
     "total_count_changed",
     "out_of_range_case_date",
     "unexpected_items_after_last_page",
@@ -818,6 +820,7 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
         page=page,
         max_length=32,
     )
+    source_name = get_text(item, "데이터출처명")
     source_raw = {
         "serial": serial, "case_name": get_text(item, "사건명"),
         "case_number": get_text(item, "사건번호"), "date": get_text(item, "선고일자"),
@@ -825,7 +828,7 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
     }
     if replay is not None:
         try:
-            held = replay(source_raw, get_text(item, "데이터출처명"),
+            held = replay(source_raw, source_name,
                           {k: get_text(item, k) for k in LIST_FIELDS})
         except CorrectionError as exc:
             # Only validated public IDs and safe enums; never exception URLs.
@@ -859,7 +862,7 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
     try:
         number, court = normalize_precedent_identity(
             get_text(item, "사건번호"), get_text(item, "법원명"),
-            get_text(item, "데이터출처명"),
+            source_name,
         )
     except ValueError as exc:
         raise RangeFetchError(date_range, page, "conflicting_case_court") from exc
@@ -879,14 +882,17 @@ def _precedent_case(item, date_range: str, page: int, replay=None) -> dict:
     if not start_date <= case_date <= end_date:
         raise RangeFetchError(date_range, page, "out_of_range_case_date")
     if not court and serving_correction is None:
-        raise RangeFetchError(date_range, page, "missing_case_court")
+        reason = ("missing_tax_case_court" if source_name == "국세법령정보시스템"
+                  else "missing_case_court")
+        log.warning("  법원명 누락 serial=%s range=%s page=%s reason=%s", serial, date_range, page, reason)
+        raise RangeFetchError(date_range, page, reason)
     record = {
         "serial": serial,
         "case_name": get_text(item, "사건명"),
         "case_number": case_number,
         "date": case_date,
         "court": court,
-        "_source_name": get_text(item, "데이터출처명"),
+        "_source_name": source_name,
         # Original five fields, before deterministic normalization. No detail
         # links (which contain OC), URLs or response bodies enter this receipt.
         "_source_raw": source_raw,
@@ -1338,11 +1344,15 @@ def crawl_scan_ranges(
 
 
 def publication_allowed(failed: list[dict], *, incremental=False, circuit_broken=False) -> bool:
-    """건강한 증분 DB는 조회 실패 범위를 보존하며 완료 범위를 게시할 수 있다."""
+    """미반영 범위를 재시도하며 검증된 증분만 내보낸다."""
     if circuit_broken:
         return False
     return not failed or (incremental and all(
-        item.get("last_error") == "request_failed" for item in failed
+        item.get("last_error") in {"request_failed", "source_case_number_changed"}
+        or (item.get("kind") != "detc" and item.get("last_error") in {
+            "known_error_source_unavailable", "missing_tax_case_court",
+        })
+        for item in failed
     ))
 
 
@@ -1506,7 +1516,7 @@ def execute_local_crawl(
 
         if current_backlog:
             log.warning(
-                "⚠️ 증분 게시: 완료 범위 반영, 조회 실패 범위는 기존 데이터와 backlog 유지. "
+                "⚠️ 증분 게시: 완료 범위 반영, 보류 범위는 기존 데이터와 backlog 유지. "
                 f"precedent={precedent_failed}, failed_pages={failed_pages}, detc_pages={detc_failed}"
             )
         log.info("\n📦 DB 덤프 (Core)")

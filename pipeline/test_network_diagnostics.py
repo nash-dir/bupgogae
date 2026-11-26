@@ -43,8 +43,15 @@ class NetworkDiagnosticsTests(unittest.TestCase):
         for result in ({"status": 301}, {"status": 302}, {"status": 403}, {"status": 503},
                        {"error": {"layers": ["socks5_reply"], "codes": ["socks_04"]}}):
             with self.subTest(result=result), mock.patch.object(diagnostic, "probe", return_value=result), \
-                    mock.patch("builtins.print"):
+                    mock.patch("builtins.print"), mock.patch.object(diagnostic.time, "sleep"):
                 self.assertIsNone(diagnostic.select_route(("direct",)))
+
+    def test_transient_redirect_is_retried_without_following_it(self):
+        with mock.patch.object(diagnostic, "probe", side_effect=[{"status": 302}, {"status": 200}]) as probe, \
+                mock.patch.object(diagnostic.time, "sleep") as sleep, mock.patch("builtins.print"):
+            self.assertEqual(diagnostic.select_route(("direct",)), "direct")
+        self.assertEqual(probe.call_args_list, [mock.call("direct", "https_api")] * 2)
+        sleep.assert_called_once_with(1)
 
     def test_direct_success_outputs_empty_proxy_and_preserves_existing_output(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -85,11 +92,11 @@ class NetworkDiagnosticsTests(unittest.TestCase):
             output = Path(folder) / "github-output"
             with mock.patch.object(diagnostic, "probe", return_value={"error": {}}) as probe, \
                     mock.patch("os.getenv", side_effect=AssertionError("Must not read credentials")), \
-                    mock.patch("builtins.print"), \
+                    mock.patch("builtins.print"), mock.patch.object(diagnostic.time, "sleep"), \
                     self.assertRaisesRegex(RuntimeError, "^No reachable law HTTPS route$"):
                 diagnostic.configure_route("warp", output)
             self.assertEqual(probe.call_args_list,
-                             [mock.call("warp_local_dns", "https_api"), mock.call("warp_remote_dns", "https_api")])
+                             [mock.call("warp_local_dns", "https_api"), mock.call("warp_remote_dns", "https_api")] * 3)
             self.assertTrue(not output.exists() or output.read_text() == "")
 
     def test_cli_direct_failure_exits_normally_but_unreachable_warp_exits_one(self):
@@ -103,7 +110,8 @@ class NetworkDiagnosticsTests(unittest.TestCase):
                 with mock.patch.object(sys, "argv", ["network_diagnostics.py", "--select", group,
                                                       "--output-file", str(output)]), \
                         mock.patch.object(diagnostic.requests, "Session", return_value=session), \
-                        mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr):
+                        mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr), \
+                        mock.patch.object(diagnostic.time, "sleep"):
                     if group == "warp":
                         with self.assertRaises(SystemExit) as caught:
                             runpy.run_path(str(Path(diagnostic.__file__)), run_name="__main__")

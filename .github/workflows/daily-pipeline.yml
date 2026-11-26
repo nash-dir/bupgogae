@@ -274,7 +274,7 @@ jobs:
         if: ${{ success() && inputs.verify_handoff_only != true }}
         run: python pipeline/publish_outputs.py --prepare-only --dir ./pipeline/data
 
-      - name: 완전 성공한 public 출력 전달
+      - name: 검증된 public 출력 전달
         if: ${{ success() && inputs.verify_handoff_only != true }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -353,7 +353,7 @@ jobs:
           R2_STATE_BUCKET: ${{ secrets.R2_STATE_BUCKET }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
-      - name: 완전 성공한 public 출력 다운로드
+      - name: 검증된 public 출력 다운로드
         if: ${{ needs.crawl.result == 'success' && inputs.verify_handoff_only != true }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -377,14 +377,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: crawl 실패 알림 (public DB 유지)
-        if: ${{ always() && needs.crawl.result == 'failure' }}
-        run: python pipeline/publish_outputs.py --notify-failure --dir ./pipeline/data
+        if: ${{ always() && job.status == 'success' && needs.crawl.result == 'failure' }}
+        run: python pipeline/publish_outputs.py --notify-crawl-failure --dir ./pipeline/data
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: trusted finalize 실패 알림 (게시 상태 확인 필요)
-        if: ${{ failure() && needs.crawl.result == 'success' }}
+        if: ${{ always() && job.status == 'failure' }}
         run: python pipeline/publish_outputs.py --notify-failure --dir ./pipeline/data
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

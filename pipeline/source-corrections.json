@@ -1,6 +1,38 @@
 {
   "schema": 1,
   "entries": {
+    "국세법령정보시스템:625807": {
+      "profile": "nts_judgment_html_sha256_v1",
+      "expectedList": {
+        "판례일련번호": "625807",
+        "데이터출처명": "국세법령정보시스템",
+        "사건명": "이 사건 부동산에 대한 압류의 적법성",
+        "사건번호": "2026가단60238",
+        "선고일자": "2026.10.01",
+        "법원명": "",
+        "사건종류코드": "400101"
+      },
+      "originalUrl": "https://taxlaw.nts.go.kr/qt/USEQTA002P.do?ntstDcmId=200000000000024385",
+      "expectedOriginalMetadata": {
+        "ntstDcmId": "200000000000024385",
+        "ntstDcmDscmCntn": "2026가단60238",
+        "ntstDcmTtl": "이 사건 부동산에 대한 압류의 적법성",
+        "ntstDcmRgtDt": "20261001"
+      },
+      "judgmentSha256": "150c92f629556894d18fb25178b2162c359c07e676013d9464a63732378ab14b",
+      "courtEvidence": "judgment_header",
+      "record": {
+        "serial": "625807",
+        "case_name": "이 사건 부동산에 대한 압류의 적법성",
+        "case_number": "2026가단60238",
+        "date": "20261001",
+        "court": "수원지방법원 안산지원"
+      },
+      "evidence": {
+        "rule": "The official judgment header identifies 수원지방법원 안산지원 and 2026가단60238. The list omits the court.",
+        "reviewedAt": "2026-11-25"
+      }
+    },
     "국세법령정보시스템:613735": {
       "profile": "nts_judgment_html_sha256_v1",
       "expectedList": {

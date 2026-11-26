@@ -138,15 +138,15 @@ def send_notification(status: str, data_dir: str | None = None):
     run_id = os.environ.get("GITHUB_RUN_ID", "")
     if server and repository and run_id:
         run_url = f"\n{server}/{repository}/actions/runs/{run_id}"
-    text = (
-        "✅ 법고개 공개 DB/state 게시 완료"
-        if status == "success"
-        else (
-            "❌ 법고개 pipeline 실패 — 게시 단계 확인 필요; "
-            "클라이언트는 검증된 generation/LKG만 사용"
-        )
-    )
     report = _load_pipeline_report(data_dir)
+    if status == "success":
+        text = ("⚠️ 법고개 검증된 증분 게시 완료 — 보류 범위 재시도 예정"
+                if report and report["reason"] == "incremental_backlog"
+                else "✅ 법고개 공개 DB/state 게시 완료")
+    elif status == "crawl_failure":
+        text = "❌ 법고개 수집 단계 실패 — 기존 공개 DB 유지, 재개 상태 저장 완료"
+    else:
+        text = "❌ 법고개 상태 저장 또는 공개 DB 게시 단계 실패 — 실행 로그 확인 필요"
     if report is not None:
         text += (
             f"\nreason={report['reason']} db={report['db_total']:,}"
@@ -251,17 +251,19 @@ def main():
         action="store_true",
         help="게시 없이 pipeline failure 알림만 전송",
     )
+    notify_group.add_argument("--notify-crawl-failure", action="store_true")
     args = parser.parse_args()
 
     if args.prepare_only:
-        if not args.dir or args.notify_success or args.notify_failure:
+        if not args.dir or args.notify_success or args.notify_failure or args.notify_crawl_failure:
             parser.error("--prepare-only requires --dir and cannot notify")
         prepare_contract_outputs(args.dir)
         return
 
-    if args.notify_success or args.notify_failure:
+    if args.notify_success or args.notify_failure or args.notify_crawl_failure:
         send_notification(
-            "success" if args.notify_success else "failure", args.dir
+            "success" if args.notify_success else "crawl_failure" if args.notify_crawl_failure else "failure",
+            args.dir,
         )
         return
     if not args.dir:

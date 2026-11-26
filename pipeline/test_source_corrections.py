@@ -48,7 +48,7 @@ class SourceCorrectionTests(unittest.TestCase):
                     db.close()
 
     def setUp(self):
-        self.entry = copy.deepcopy(next(iter(corrections.entries().values())))
+        self.entry = copy.deepcopy(corrections.entries()["국세법령정보시스템:613735"])
         self.fields = dict(self.entry["expectedList"])
         self.html = gzip.decompress((FIXTURES / "613735-judgment.html.gz").read_bytes())
 
@@ -147,7 +147,7 @@ class SourceCorrectionTests(unittest.TestCase):
 
     def test_missing_courts_require_exact_reviewed_original_not_registration_office(self):
         reviewed = [e for e in corrections.entries().values() if "courtEvidence" in e]
-        self.assertEqual(len(reviewed), 9)
+        self.assertEqual(len(reviewed), 10)
         self.assertEqual(sum(e["courtEvidence"] == "unknown" for e in reviewed), 9)
         original_resolve = corrections.resolve
         def resolve(fields):
@@ -168,8 +168,10 @@ class SourceCorrectionTests(unittest.TestCase):
                     self.assertEqual(list(db.conn.iterdump()), before)
                 cases, _ = db.export_core()
                 records = [row for rows in cases.values() for row in rows]
-                self.assertEqual(len(records), 9)
+                self.assertEqual(len(records), 10)
                 self.assertEqual(sum(row[1] == 0 for row in records), 9)
+                court_code = db.court_resolver.code_map["수원지방법원 안산지원"]
+                self.assertEqual(cases["26Gad60238"][0][:2], [625807, court_code])
                 self.assertEqual({e.get("verifiedCourt") for e in reviewed if e.get("verifiedCourt")},
                                  {"대전지방법원 천안지원", "춘천지방법원 원주지원"})
             finally:
@@ -177,7 +179,7 @@ class SourceCorrectionTests(unittest.TestCase):
         fields = dict(reviewed[0]["expectedList"], 판례일련번호="999999998")
         with self.assertRaises(runner.RangeFetchError) as caught:
             runner._precedent_case(self.item(fields), reviewed[0]["record"]["date"], 1)
-        self.assertEqual(caught.exception.reason, "missing_case_court")
+        self.assertEqual(caught.exception.reason, "missing_tax_case_court")
 
     def test_all_original_metadata_and_body_are_bound_without_global_title_trimming(self):
         for entry in corrections.entries().values():

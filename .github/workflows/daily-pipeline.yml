@@ -49,6 +49,51 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  notify-prepare-failure:
+    name: Trusted state 준비 실패 알림
+    needs: prepare-state
+    if: ${{ failure() && needs.prepare-state.result == 'failure' }}
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      # 준비 작업이 checkout 또는 의존성 설치에서 실패한 경우에도 실행한다.
+      - name: Telegram 알림 전송
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 - <<'PY'
+          import http.client
+          import json
+          import os
+
+          token = os.environ.get('TELEGRAM_BOT_TOKEN')
+          chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+          if not token or not chat_id:
+              print('::warning::Telegram 알림 설정이 없습니다.')
+              raise SystemExit(0)
+
+          server = os.environ['GITHUB_SERVER_URL']
+          repository = os.environ['GITHUB_REPOSITORY']
+          run_id = os.environ['GITHUB_RUN_ID']
+          text = ('❌ 법고개 상태 준비 단계 실패 — 기존 공개 DB 유지\n'
+                  f'{server}/{repository}/actions/runs/{run_id}')
+          body = json.dumps({'chat_id': chat_id, 'text': text})
+          connection = http.client.HTTPSConnection('api.telegram.org', timeout=10)
+          try:
+              connection.request('POST', f'/bot{token}/sendMessage', body,
+                                 {'Content-Type': 'application/json'})
+              status = connection.getresponse().status
+          except (OSError, http.client.HTTPException):
+              status = None
+          finally:
+              connection.close()
+          if status != 200:
+              print('::error::상태 준비 실패 Telegram 알림을 전송하지 못했습니다.')
+              raise SystemExit(1)
+          PY
+
   prepare-state:
     name: Trusted state 준비
     runs-on: ubuntu-24.04

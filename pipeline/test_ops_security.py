@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sqlite3
 import tempfile
+from textwrap import dedent
 import unittest
 from unittest import mock
 
@@ -1161,7 +1162,41 @@ class DeploymentSecurityTests(unittest.TestCase):
         self.assertEqual(workflow.count("--require-hashes"), 3)
         self.assertEqual(workflow.count("--only-binary=:all:"), 3)
         self.assertNotIn("runs-on: ubuntu-latest", workflow)
-        self.assertEqual(workflow.count("runs-on: ubuntu-24.04"), 3)
+        self.assertEqual(workflow.count("runs-on: ubuntu-24.04"), 4)
+
+    def test_prepare_failure_notifies_without_using_failed_jobs_dependencies(self):
+        workflow = (self.REPO_ROOT / ".github/workflows/daily-pipeline.yml").read_text(encoding="utf-8")
+        alert = workflow.split("\n  notify-prepare-failure:\n", 1)[1].split("\n  prepare-state:\n", 1)[0]
+        self.assertIn("\n    needs: prepare-state\n", alert)
+        self.assertIn("if: ${{ failure() && needs.prepare-state.result == 'failure' }}", alert)
+        self.assertIn("permissions: {}", alert)
+        self.assertNotIn("uses:", alert)
+        self.assertEqual(set(re.findall(r"secrets\.([A-Z_]+)", alert)), {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"})
+
+        source = dedent(alert.split("python3 - <<'PY'\n", 1)[1].rsplit("\n          PY", 1)[0])
+        env = {"TELEGRAM_BOT_TOKEN": "fake-test-token", "TELEGRAM_CHAT_ID": "123",
+               "GITHUB_SERVER_URL": "https://github.com", "GITHUB_REPOSITORY": "owner/repo", "GITHUB_RUN_ID": "42"}
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch("http.client.HTTPSConnection") as https, mock.patch("builtins.print") as log:
+            connection = https.return_value
+            connection.getresponse.return_value.status = 200
+            exec(source, {})
+            https.assert_called_once_with("api.telegram.org", timeout=10)
+            method, path, data, headers = connection.request.call_args.args
+            self.assertEqual((method, path, headers), ("POST", "/botfake-test-token/sendMessage",
+                                                      {"Content-Type": "application/json"}))
+            payload = json.loads(data)
+            self.assertEqual(payload["chat_id"], "123")
+            self.assertIn("상태 준비 단계 실패", payload["text"])
+            self.assertTrue(payload["text"].endswith("https://github.com/owner/repo/actions/runs/42"))
+            connection.close.assert_called_once()
+            log.assert_not_called()
+
+            connection.request.side_effect = OSError("fake-test-token")
+            with self.assertRaises(SystemExit) as caught:
+                exec(source, {})
+            self.assertEqual(caught.exception.code, 1)
+            self.assertNotIn("fake-test-token", str(log.call_args))
 
         dockerfile = (self.REPO_ROOT / "Dockerfile.crawler").read_text(
             encoding="utf-8"
